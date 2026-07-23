@@ -21,6 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Ruta de Prueba ---
+@app.get("/api")
+def read_root():
+    return {"status": "Kapital Routing API is running!"}
+
 # --- Modelos de Datos Pydantic ---
 class UsuarioRegistro(BaseModel):
     email: EmailStr
