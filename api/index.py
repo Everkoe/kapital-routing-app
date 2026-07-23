@@ -38,7 +38,7 @@ class EmergencyRequest(BaseModel):
     horario: str
 
 # --- Endpoints de Autenticación ---
-@app.post("/auth/register")
+@app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado.")
@@ -51,7 +51,7 @@ async def register_user(usuario: UsuarioRegistro):
     }
     return {"message": "Usuario registrado exitosamente."}
 
-@app.post("/auth/login")
+@app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
     user_in_db = usuarios_db.get(usuario.email)
     if not user_in_db or user_in_db["password"] != usuario.password:
@@ -77,7 +77,7 @@ def get_micro_zona(direccion: str) -> str:
     if "san miguel" in direccion: return "San Miguel Centro"
     return "Zona General"
 
-@app.post("/assign-routes/")
+@app.post("/api/assign-routes/")
 async def assign_routes(file: UploadFile = File(...)):
     global rutas_estado_actual
     try:
@@ -111,7 +111,7 @@ async def assign_routes(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en el procesamiento del backend: {str(e)}")
 
-@app.post("/emergency-reassign/")
+@app.post("/api/emergency-reassign/")
 async def emergency_reassign(request: EmergencyRequest):
     global rutas_estado_actual
     if request.horario == "Todos los turnos" or request.tipo_emergencia == "Baja Total (Siniestro)":
