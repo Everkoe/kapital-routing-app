@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Backend Database
+database.json
+
+# Node
+node_modules/
+dist/
+
+# Venv
+venv/

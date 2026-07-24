@@ -3,11 +3,35 @@ import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-# --- Estado Global en Memoria ---
-rutas_estado_actual: List[Dict[str, Any]] = []
-usuarios_db: Dict[str, Dict[str, Any]] = {}
+import json
+import os
+
+DB_FILE = os.path.join(os.path.dirname(__file__), "database.json")
+
+def load_db():
+    if not os.path.exists(DB_FILE):
+        return {"usuarios_db": {}, "rutas_estado_actual": []}
+    try:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"usuarios_db": {}, "rutas_estado_actual": []}
+
+def save_db(data):
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving DB: {e}")
+
+db_state = load_db()
+rutas_estado_actual: List[Dict[str, Any]] = db_state.get("rutas_estado_actual", [])
+usuarios_db: Dict[str, Dict[str, Any]] = db_state.get("usuarios_db", {})
+
+def persist():
+    save_db({"usuarios_db": usuarios_db, "rutas_estado_actual": rutas_estado_actual})
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
@@ -42,6 +66,13 @@ class EmergencyRequest(BaseModel):
     tipo_emergencia: str
     horario: str
 
+class UsuarioUpdate(BaseModel):
+    email: EmailStr
+    nombre: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+    avatar: Optional[str] = None
+
 # --- Endpoints de Autenticación ---
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
@@ -54,6 +85,7 @@ async def register_user(usuario: UsuarioRegistro):
         "nombre": usuario.nombre,
         "rol": usuario.rol
     }
+    persist()
     return {"message": "Usuario registrado exitosamente."}
 
 @app.post("/api/auth/login")
@@ -65,7 +97,33 @@ async def login_user(usuario: UsuarioLogin):
     return {
         "email": user_in_db["email"],
         "nombre": user_in_db["nombre"],
-        "rol": user_in_db["rol"]
+        "rol": user_in_db["rol"],
+        "avatar": user_in_db.get("avatar")
+    }
+
+@app.put("/api/user/profile")
+async def update_profile(update_data: UsuarioUpdate):
+    user_in_db = usuarios_db.get(update_data.email)
+    if not user_in_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    
+    if update_data.new_password:
+        if user_in_db.get("password") != update_data.current_password:
+            raise HTTPException(status_code=401, detail="Contraseña actual incorrecta.")
+        user_in_db["password"] = update_data.new_password
+        
+    if update_data.nombre:
+        user_in_db["nombre"] = update_data.nombre
+        
+    if update_data.avatar:
+        user_in_db["avatar"] = update_data.avatar
+        
+    persist()
+    return {
+        "email": user_in_db["email"],
+        "nombre": user_in_db["nombre"],
+        "rol": user_in_db["rol"],
+        "avatar": user_in_db.get("avatar")
     }
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
@@ -112,6 +170,7 @@ async def assign_routes(file: UploadFile = File(...)):
                     rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": [{"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"]} for ag in agentes_grupo]})
                     break
         rutas_estado_actual = rutas_generadas
+        persist()
         return rutas_estado_actual
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en el procesamiento del backend: {str(e)}")
@@ -129,6 +188,7 @@ async def emergency_reassign(request: EmergencyRequest):
                 rescatista["agentes"].extend(ruta["agentes"])
                 rescatista_id = rescatista["conductor"]
         rutas_estado_actual = [r for r in rutas_estado_actual if r["conductor"] != request.conductor_id]
+        persist()
         return {"message": f"Baja Total procesada. Todas las rutas de {request.conductor_id} han sido reasignadas.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista_id or "N/A"}
     else:
         ruta_afectada_idx, ruta_afectada = next(((i, r) for i, r in enumerate(rutas_estado_actual) if r["conductor"] == request.conductor_id and r["horario"] == request.horario), (None, None))
@@ -137,4 +197,5 @@ async def emergency_reassign(request: EmergencyRequest):
         if rescatista is None: raise HTTPException(status_code=400, detail=f"No se encontró un rescatista en la zona '{ruta_afectada['micro_zona']}' para el horario de las {request.horario}.")
         rescatista["agentes"].extend(ruta_afectada["agentes"])
         del rutas_estado_actual[ruta_afectada_idx]
+        persist()
         return {"message": f"Falla Temporal procesada. La ruta de las {request.horario} de {request.conductor_id} ha sido reasignada a {rescatista['conductor']}.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista["conductor"]}

@@ -134,25 +134,25 @@ body, #root {
   gap: 24px;
 }
 
-/* --- Estilos de Vistas --- */
-.profile-container {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-.profile-avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background-color: var(--kapital-blue-deep);
-  color: white;
-  display: grid;
-  place-items: center;
-  font-size: 2.5rem;
-  font-weight: bold;
-}
-.profile-info h3 { margin: 0; font-size: 1.5rem; color: var(--kapital-text-primary); }
-.profile-info p { margin: 5px 0 0; }
+/* --- Estilos de Vistas Perfil Nuevo --- */
+.profile-wrapper { padding: 0 !important; overflow: hidden; }
+.profile-tabs { display: flex; border-bottom: 1px solid var(--kapital-border); background: #f8fafc; }
+.profile-tabs button { flex: 1; padding: 15px; border: none; background: transparent; cursor: pointer; font-weight: 600; color: var(--kapital-text-secondary); transition: 0.3s; font-size: 1rem; }
+.profile-tabs button:hover { background: #f1f5f9; }
+.profile-tabs button.active { background: white; color: var(--kapital-blue-deep); border-bottom: 2px solid var(--kapital-blue-deep); }
+
+.profile-content { padding: 30px; }
+.avatar-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 30px; }
+.dropzone { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: 0.3s; background: #f8fafc; width: 100%; max-width: 300px; display: flex; flex-direction: column; align-items: center; }
+.dropzone.active, .dropzone:hover { border-color: var(--kapital-blue-deep); background: #f1f5f9; }
+.profile-avatar-img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; margin-bottom: 15px; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+.profile-avatar { width: 100px; height: 100px; border-radius: 50%; background-color: var(--kapital-blue-deep); color: white; display: grid; place-items: center; font-size: 3rem; font-weight: bold; margin-bottom: 15px; }
+
+.disabled-input { background-color: #f1f5f9 !important; color: #64748b !important; cursor: not-allowed; }
+.profile-save-btn { margin-top: 20px; width: 100%; padding: 12px !important; font-size: 1rem; }
+.profile-alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: 500; text-align: center; }
+.profile-alert.success { background-color: #dcfce7; color: #166534; }
+.profile-alert.error { background-color: #fee2e2; color: #991b1b; }
 
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th, .data-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--kapital-border); }
@@ -205,3 +205,47 @@ body, #root {
 .btn-whatsapp { background-color: #25D366; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; text-decoration: none; display: inline-block; margin-top: 8px; }
 .btn-manual-assign { background-color: #3B82F6; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; text-decoration: none; display: inline-block; margin-top: 8px; }
 button:disabled { background-color: #D1D5DB !important; color: #6B7280 !important; cursor: not-allowed; }
+
+/* Ocultar hamburguesa en escritorio */
+.hamburger-menu { display: none; }
+
+/* --- Media Queries Responsivas --- */
+@media (max-width: 768px) {
+  /* Auth */
+  .auth-container { flex-direction: column; }
+  .auth-branding { padding: 30px; text-align: center; }
+  .auth-branding h1 { font-size: 2rem; }
+  .auth-form-wrapper { padding: 20px; }
+
+  /* Layout y Controles */
+  .controls-container { flex-direction: column; align-items: stretch; }
+  .emergency-form { flex-direction: column; align-items: stretch; }
+  .app-container { padding: 15px; }
+
+  /* Navbar Hamburguesa */
+  .navbar { position: relative; padding: 15px 20px; }
+  .hamburger-menu {
+    display: block !important;
+    font-size: 1.8rem;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: white;
+    padding: 0;
+  }
+  .nav-links {
+    display: none;
+    flex-direction: column;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    background-color: #0A2540;
+    padding: 10px 0;
+    z-index: 1001;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+  }
+  .nav-links.open { display: flex; }
+  .nav-links a { margin: 10px 0; padding: 10px 20px; text-align: center; width: 100%; box-sizing: border-box; }
+  .nav-separator { display: none; }
+}

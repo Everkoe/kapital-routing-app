@@ -1,5 +1,6 @@
 // App.jsx
 import React, { useState, useMemo, useEffect } from 'react';
+import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import './App.css';
 
@@ -72,40 +73,144 @@ const PantallaAuth = ({ onLogin }) => {
 
 
 // --- Componentes de Vistas ---
-const Navbar = ({ vistaActual, setVistaActual, onLogout }) => (
-  <nav className="navbar">
-    <h1 className="navbar-title">Kapital Routing</h1>
-    <div className="nav-links">
-      <a onClick={() => setVistaActual('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard</a>
-      <a onClick={() => setVistaActual('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
-      <a onClick={() => setVistaActual('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
-      <a onClick={() => setVistaActual('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
-      <span className="nav-separator">|</span>
-      <a onClick={() => setVistaActual('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>👤 Mi Perfil</a>
-      <a onClick={onLogout} className="nav-link">Cerrar Sesión</a>
-    </div>
-  </nav>
-);
+const Navbar = ({ vistaActual, setVistaActual, onLogout }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const handleNav = (vista) => {
+    setVistaActual(vista);
+    setIsOpen(false);
+  };
 
-const VistaPerfil = ({ usuario }) => (
-  <div className="card">
-    <div className="card-header"><h2>Perfil de Usuario</h2></div>
-    <div className="profile-container">
-      <div className="profile-avatar">{usuario.nombre.charAt(0)}</div>
-      <div className="profile-info">
-        <h3>{usuario.nombre}</h3>
-        <p>{usuario.rol}</p>
-        <p>{usuario.email}</p>
+  return (
+    <nav className="navbar">
+      <h1 className="navbar-title">Kapital Routing</h1>
+      <button className="hamburger-menu" onClick={() => setIsOpen(!isOpen)}>
+        {isOpen ? '✕' : '☰'}
+      </button>
+      <div className={`nav-links ${isOpen ? 'open' : ''}`}>
+        <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard</a>
+        <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
+        <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
+        <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+        <span className="nav-separator">|</span>
+        <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>👤 Mi Perfil</a>
+        <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link">Cerrar Sesión</a>
+      </div>
+    </nav>
+  );
+};
+
+const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
+  const [activeTab, setActiveTab] = useState('personal');
+  const [formData, setFormData] = useState({ nombre: usuario.nombre, current_password: '', new_password: '' });
+  const [avatar, setAvatar] = useState(usuario.avatar || null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+
+  const onDrop = (acceptedFiles) => {
+    const file = acceptedFiles[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setAvatar(e.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: {'image/*': []}, maxFiles: 1 });
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+    
+    try {
+      const payload = {
+        email: usuario.email,
+        nombre: formData.nombre !== usuario.nombre ? formData.nombre : undefined,
+        current_password: formData.current_password || undefined,
+        new_password: formData.new_password || undefined,
+        avatar: avatar !== usuario.avatar ? avatar : undefined
+      };
+      
+      const res = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 404) {
+          alert('Sesión expirada o usuario no encontrado. Por favor, inicia sesión nuevamente.');
+          onLogout();
+          return;
+        }
+        throw new Error(data.detail || 'Error al actualizar perfil');
+      }
+      
+      setUsuarioActual(data);
+      localStorage.setItem('kapital_user', JSON.stringify(data));
+      setMessage({ type: 'success', text: 'Perfil actualizado correctamente.' });
+      setFormData(prev => ({ ...prev, current_password: '', new_password: '' }));
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card profile-wrapper">
+      <div className="profile-tabs">
+        <button className={activeTab === 'personal' ? 'active' : ''} onClick={() => setActiveTab('personal')}>Información Personal</button>
+        <button className={activeTab === 'security' ? 'active' : ''} onClick={() => setActiveTab('security')}>Seguridad</button>
+      </div>
+      
+      <div className="profile-content">
+        {message.text && <div className={`profile-alert ${message.type}`}>{message.text}</div>}
+        
+        {activeTab === 'personal' && (
+          <form className="config-form" onSubmit={handleSave}>
+            <div className="avatar-section">
+              <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''}`}>
+                <input {...getInputProps()} />
+                {avatar ? (
+                  <img src={avatar} alt="Avatar" className="profile-avatar-img" />
+                ) : (
+                  <div className="profile-avatar">{usuario.nombre.charAt(0)}</div>
+                )}
+                <p>{isDragActive ? 'Suelta la imagen aquí...' : 'Arrastra una nueva foto de perfil o haz clic'}</p>
+              </div>
+            </div>
+            <label>Nombre Completo</label>
+            <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} className="form-input" required />
+            <label>Correo Electrónico</label>
+            <input type="email" value={usuario.email} className="form-input disabled-input" disabled />
+            <label>Rol de Usuario</label>
+            <input type="text" value={usuario.rol} className="form-input disabled-input" disabled />
+            
+            <button type="submit" className="btn-primary profile-save-btn" disabled={loading}>
+              {loading ? 'Guardando...' : 'Guardar Cambios'}
+            </button>
+          </form>
+        )}
+
+        {activeTab === 'security' && (
+          <form className="config-form" onSubmit={handleSave}>
+            <label>Contraseña Actual</label>
+            <input type="password" name="current_password" value={formData.current_password} onChange={handleChange} className="form-input" required />
+            <label>Nueva Contraseña</label>
+            <input type="password" name="new_password" value={formData.new_password} onChange={handleChange} className="form-input" required />
+            
+            <button type="submit" className="btn-primary profile-save-btn" disabled={loading || !formData.new_password}>
+              {loading ? 'Actualizando...' : 'Actualizar Contraseña'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
-    <div className="config-form" style={{marginTop: '30px'}}>
-        <label>Cambiar Contraseña</label>
-        <input type="password" placeholder="Nueva Contraseña" className="form-input" disabled />
-        <input type="password" placeholder="Confirmar Contraseña" className="form-input" disabled />
-        <button className="btn-primary" disabled>Actualizar Contraseña</button>
-    </div>
-  </div>
-);
+  );
+};
 
 // ... (El resto de los componentes de Vistas y Dashboard permanecen sin cambios)
 const VistaFlota = () => ( <div className="card"><div className="card-header"><h2>Gestión de Flota</h2></div></div> );
@@ -153,7 +258,7 @@ function App() {
       case 'flota': return <VistaFlota />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
-      case 'perfil': return <VistaPerfil usuario={usuarioActual} />;
+      case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} />;
