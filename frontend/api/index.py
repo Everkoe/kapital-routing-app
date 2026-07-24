@@ -5,33 +5,46 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Dict, Any, List, Optional
 
+import httpx
 import json
-import os
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "database.json")
+SUPABASE_URL = "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1"
+SUPABASE_KEY = "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o"
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
+
+# --- Estado Global en Memoria ---
+rutas_estado_actual: List[Dict[str, Any]] = []
+usuarios_db: Dict[str, Dict[str, Any]] = {}
 
 def load_db():
-    if not os.path.exists(DB_FILE):
-        return {"usuarios_db": {}, "rutas_estado_actual": []}
+    global rutas_estado_actual, usuarios_db
     try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"usuarios_db": {}, "rutas_estado_actual": []}
-
-def save_db(data):
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        with httpx.Client() as client:
+            res = client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
+            if res.status_code == 200 and len(res.json()) > 0:
+                data = res.json()[0]
+                usuarios_db = data.get("usuarios", {})
+                rutas_estado_actual = data.get("rutas", [])
     except Exception as e:
-        print(f"Error saving DB: {e}")
+        print(f"Error loading from Supabase: {e}")
 
-db_state = load_db()
-rutas_estado_actual: List[Dict[str, Any]] = db_state.get("rutas_estado_actual", [])
-usuarios_db: Dict[str, Dict[str, Any]] = db_state.get("usuarios_db", {})
+load_db()
 
-def persist():
-    save_db({"usuarios_db": usuarios_db, "rutas_estado_actual": rutas_estado_actual})
+async def persist():
+    try:
+        payload = {
+            "id": 1,
+            "usuarios": usuarios_db,
+            "rutas": rutas_estado_actual
+        }
+        async with httpx.AsyncClient() as client:
+            await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
+    except Exception as e:
+        print(f"Error saving to Supabase: {e}")
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
@@ -85,7 +98,7 @@ async def register_user(usuario: UsuarioRegistro):
         "nombre": usuario.nombre,
         "rol": usuario.rol
     }
-    persist()
+    await persist()
     return {"message": "Usuario registrado exitosamente."}
 
 @app.post("/api/auth/login")
@@ -118,7 +131,7 @@ async def update_profile(update_data: UsuarioUpdate):
     if update_data.avatar:
         user_in_db["avatar"] = update_data.avatar
         
-    persist()
+    await persist()
     return {
         "email": user_in_db["email"],
         "nombre": user_in_db["nombre"],
@@ -170,7 +183,7 @@ async def assign_routes(file: UploadFile = File(...)):
                     rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": [{"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"]} for ag in agentes_grupo]})
                     break
         rutas_estado_actual = rutas_generadas
-        persist()
+        await persist()
         return rutas_estado_actual
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en el procesamiento del backend: {str(e)}")
@@ -188,7 +201,7 @@ async def emergency_reassign(request: EmergencyRequest):
                 rescatista["agentes"].extend(ruta["agentes"])
                 rescatista_id = rescatista["conductor"]
         rutas_estado_actual = [r for r in rutas_estado_actual if r["conductor"] != request.conductor_id]
-        persist()
+        await persist()
         return {"message": f"Baja Total procesada. Todas las rutas de {request.conductor_id} han sido reasignadas.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista_id or "N/A"}
     else:
         ruta_afectada_idx, ruta_afectada = next(((i, r) for i, r in enumerate(rutas_estado_actual) if r["conductor"] == request.conductor_id and r["horario"] == request.horario), (None, None))
@@ -197,5 +210,5 @@ async def emergency_reassign(request: EmergencyRequest):
         if rescatista is None: raise HTTPException(status_code=400, detail=f"No se encontró un rescatista en la zona '{ruta_afectada['micro_zona']}' para el horario de las {request.horario}.")
         rescatista["agentes"].extend(ruta_afectada["agentes"])
         del rutas_estado_actual[ruta_afectada_idx]
-        persist()
+        await persist()
         return {"message": f"Falla Temporal procesada. La ruta de las {request.horario} de {request.conductor_id} ha sido reasignada a {rescatista['conductor']}.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista["conductor"]}
