@@ -5,12 +5,13 @@ import * as XLSX from 'xlsx';
 import './App.css';
 import LiveMap from './LiveMap';
 import FlotaView from './FlotaView';
+import DriverPortal from './DriverPortal';
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
-  const [formData, setFormData] = useState({ email: '', password: '', nombre: '', rol: 'Administrador' });
+  const [formData, setFormData] = useState({ email: '', password: '', nombre: '', rol: 'Administrador', unidad_id: '' });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -70,10 +71,15 @@ const PantallaAuth = ({ onLogin }) => {
             <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
             
             {!isLogin && (
-              <select className="auth-input" name="rol" onChange={handleInputChange}>
-                <option>Administrador</option>
-                <option>Coordinador</option>
-              </select>
+              <>
+                <select className="auth-input" name="rol" onChange={handleInputChange}>
+                  <option>Administrador</option>
+                  <option>Conductor</option>
+                </select>
+                {formData.rol === 'Conductor' && (
+                  <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
+                )}
+              </>
             )}
             
             <button type="submit" className="auth-button">
@@ -299,6 +305,10 @@ function App() {
 
   if (!usuarioActual) {
     return <PantallaAuth onLogin={handleLogin} />;
+  }
+
+  if (usuarioActual.rol === 'Conductor') {
+    return <DriverPortal usuario={usuarioActual} onLogout={handleLogout} />;
   }
 
   return (

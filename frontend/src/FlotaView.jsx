@@ -6,19 +6,21 @@ const FlotaView = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const fetchFlota = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/flota');
+      if (!response.ok) throw new Error('Error fetching fleet data');
+      const data = await response.json();
+      setFlota(data.flota);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchFlota = async () => {
-      try {
-        const response = await fetch('/api/flota');
-        if (!response.ok) throw new Error('Error fetching fleet data');
-        const data = await response.json();
-        setFlota(data.flota);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setIsLoading(false);
-      }
-    };
     fetchFlota();
   }, []);
 
@@ -58,7 +60,7 @@ const FlotaView = () => {
     <div className="card flota-view-card" style={{ maxWidth: '100%', overflowX: 'auto' }}>
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>Control de Conformidad Legal (Compliance)</h2>
-        <button className="btn-primary" onClick={() => window.location.reload()}>Actualizar</button>
+        <button className="btn-primary" onClick={fetchFlota}>Actualizar</button>
       </div>
       
       <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>

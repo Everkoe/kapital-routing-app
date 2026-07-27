@@ -70,6 +70,7 @@ class UsuarioRegistro(BaseModel):
     password: str
     nombre: str
     rol: str
+    unidad_id: Optional[str] = None
 
 class UsuarioLogin(BaseModel):
     email: EmailStr
@@ -97,7 +98,8 @@ async def register_user(usuario: UsuarioRegistro):
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": usuario.rol
+        "rol": usuario.rol,
+        "unidad_id": usuario.unidad_id
     }
     await persist()
     return {"message": "Usuario registrado exitosamente."}
@@ -112,6 +114,7 @@ async def login_user(usuario: UsuarioLogin):
         "email": user_in_db["email"],
         "nombre": user_in_db["nombre"],
         "rol": user_in_db["rol"],
+        "unidad_id": user_in_db.get("unidad_id"),
         "avatar": user_in_db.get("avatar")
     }
 
@@ -256,3 +259,25 @@ async def emergency_reassign(request: EmergencyRequest):
         del rutas_estado_actual[ruta_afectada_idx]
         await persist()
         return {"message": f"Falla Temporal procesada. La ruta de las {request.horario} de {request.conductor_id} ha sido reasignada a {rescatista['conductor']}.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista["conductor"]}
+
+class EstadoPasajeroUpdate(BaseModel):
+    conductor_id: str
+    horario: str
+    agente_id: str
+    estado: str # "Recogido" u otro
+
+@app.get("/api/mis-rutas/{conductor_id}")
+async def mis_rutas(conductor_id: str):
+    mis_rutas_asignadas = [r for r in rutas_estado_actual if r["conductor"] == conductor_id]
+    return mis_rutas_asignadas
+
+@app.post("/api/actualizar-pasajero")
+async def actualizar_pasajero(data: EstadoPasajeroUpdate):
+    ruta = next((r for r in rutas_estado_actual if r["conductor"] == data.conductor_id and r["horario"] == data.horario), None)
+    if ruta:
+        agente = next((a for a in ruta["agentes"] if a["id"] == data.agente_id), None)
+        if agente:
+            agente["estado"] = data.estado
+            await persist()
+            return {"message": "Estado actualizado"}
+    raise HTTPException(status_code=404, detail="Ruta o agente no encontrado")
