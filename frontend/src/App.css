@@ -44,14 +44,14 @@ body, #root {
   overflow: hidden; 
 }
 .auth-branding-content { position: relative; z-index: 2; padding: 60px; max-width: 600px; }
-.auth-branding-content h1 { font-size: 4rem; font-weight: 800; background: linear-gradient(to right, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 20px;}
+.auth-branding-content h1 { font-size: 4rem; font-weight: 800; background: linear-gradient(to right, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 20px; line-height: 1.2; padding-bottom: 10px; }
 .auth-branding-content p { font-size: 1.2rem; color: #94a3b8; line-height: 1.6; }
 .auth-decorative-circle { position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(56,189,248,0.1) 0%, transparent 70%); top: -200px; left: -200px; border-radius: 50%; z-index: 1;}
 
 .auth-form-wrapper { flex: 1; background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px; position: relative; }
 .auth-form-card { width: 100%; max-width: 400px; padding: 40px; background: white; }
 .auth-logo-container { display: flex; justify-content: center; margin-bottom: 2rem; }
-.auth-logo { height: 60px; object-fit: contain; }
+.auth-logo { height: 95px; object-fit: contain; }
 
 .auth-form h2 { font-size: 2rem; color: #0f172a; margin: 0 0 8px 0; font-weight: 700; }
 .auth-subtitle { color: #64748b; margin-bottom: 30px; font-size: 0.95rem; }
