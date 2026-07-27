@@ -45,27 +45,44 @@ const PantallaAuth = ({ onLogin }) => {
   return (
     <div className="auth-container">
       <div className="auth-branding">
-        <h1>Kapital Routing</h1>
-        <p>Revolucionando la logística corporativa.</p>
+        <div className="auth-branding-content">
+          <h1>Kapital Routing</h1>
+          <p>Revolucionando la logística corporativa y la asignación inteligente con tecnología de vanguardia.</p>
+          <div className="auth-decorative-circle"></div>
+        </div>
       </div>
       <div className="auth-form-wrapper">
-        <form onSubmit={handleSubmit} className="auth-form">
-          <h2>{isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}</h2>
-          {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
-          {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
-          <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
-          <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
-          {!isLogin && (
-            <select className="auth-input" name="rol" onChange={handleInputChange}>
-              <option>Administrador</option>
-              <option>Coordinador</option>
-            </select>
-          )}
-          <button type="submit" className="auth-button">{isLogin ? 'Ingresar' : 'Registrarse'}</button>
-          <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
-            {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
-          </p>
-        </form>
+        <div className="auth-form-card">
+          <div className="auth-logo-container">
+            <img src="/logo.png" alt="Kapital Routing Logo" className="auth-logo" onError={(e) => e.target.style.display='none'} />
+          </div>
+          <form onSubmit={handleSubmit} className="auth-form">
+            <h2>{isLogin ? 'Bienvenido de nuevo' : 'Crear Cuenta'}</h2>
+            <p className="auth-subtitle">
+              {isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística'}
+            </p>
+            {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
+            
+            {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
+            <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
+            <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
+            
+            {!isLogin && (
+              <select className="auth-input" name="rol" onChange={handleInputChange}>
+                <option>Administrador</option>
+                <option>Coordinador</option>
+              </select>
+            )}
+            
+            <button type="submit" className="auth-button">
+              {isLogin ? 'Ingresar al Dashboard' : 'Completar Registro'}
+            </button>
+            
+            <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
+              {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
+            </p>
+          </form>
+        </div>
       </div>
     </div>
   );
