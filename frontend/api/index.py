@@ -20,9 +20,11 @@ HEADERS = {
 # --- Estado Global en Memoria ---
 rutas_estado_actual: List[Dict[str, Any]] = []
 usuarios_db: Dict[str, Dict[str, Any]] = {}
+conductores_db: Dict[str, Dict[str, Any]] = {}
+historial_rutas: List[Dict[str, Any]] = []
 
 def load_db():
-    global rutas_estado_actual, usuarios_db
+    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas
     try:
         with httpx.Client() as client:
             res = client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
@@ -30,6 +32,16 @@ def load_db():
                 data = res.json()[0]
                 usuarios_db = data.get("usuarios", {})
                 rutas_estado_actual = data.get("rutas", [])
+                historial_rutas = data.get("historial", [])
+                flota = data.get("flota", {})
+                if not flota:
+                    flota = {
+                        "KAP-001": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Juan Pérez", "soat": "2027-01-15", "revision": "2027-02-10", "atu": "2027-03-20", "licencia": "2028-05-10"},
+                        "KAP-002": {"capacidad": 15, "tipo": "Sprinter", "chofer": "Carlos Gómez", "soat": "2026-08-05", "revision": "2026-11-20", "atu": "2026-12-01", "licencia": "2027-04-15"},
+                        "KAP-003": {"capacidad": 10, "tipo": "Van", "chofer": "Luis Ramírez", "soat": "2027-05-10", "revision": "2026-09-15", "atu": "2026-10-30", "licencia": "2029-01-20"},
+                        "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"}
+                    }
+                conductores_db = flota
     except Exception as e:
         print(f"Error loading from Supabase: {e}")
 
@@ -40,7 +52,9 @@ async def persist():
         payload = {
             "id": 1,
             "usuarios": usuarios_db,
-            "rutas": rutas_estado_actual
+            "rutas": rutas_estado_actual,
+            "historial": historial_rutas,
+            "flota": conductores_db
         }
         async with httpx.AsyncClient() as client:
             await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
@@ -81,6 +95,16 @@ class EmergencyRequest(BaseModel):
     conductor_id: str
     tipo_emergencia: str
     horario: str
+
+class FlotaRegistro(BaseModel):
+    placa: str
+    capacidad: int
+    tipo: str
+    chofer: str
+    soat: str
+    revision: str
+    atu: str
+    licencia: str
 
 class UsuarioUpdate(BaseModel):
     email: EmailStr
@@ -152,15 +176,7 @@ async def update_profile(update_data: UsuarioUpdate):
     }
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
-conductores_db: Dict[str, Dict[str, Any]] = {
-    "KAP-001": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Juan Pérez", "soat": "2027-01-15", "revision": "2027-02-10", "atu": "2027-03-20", "licencia": "2028-05-10"},
-    "KAP-002": {"capacidad": 15, "tipo": "Sprinter", "chofer": "Carlos Gómez", "soat": "2026-08-05", "revision": "2026-11-20", "atu": "2026-12-01", "licencia": "2027-04-15"},
-    "KAP-003": {"capacidad": 10, "tipo": "Van", "chofer": "Luis Ramírez", "soat": "2027-05-10", "revision": "2026-09-15", "atu": "2026-10-30", "licencia": "2029-01-20"},
-    "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"},
-    "KAP-005": {"capacidad": 15, "tipo": "Sprinter", "chofer": "José Castro", "soat": "2026-12-15", "revision": "2027-03-10", "atu": "2027-04-05", "licencia": "2026-07-20"},
-    "KAP-006": {"capacidad": 1, "tipo": "Moto (Courier)", "chofer": "Andrés Silva", "soat": "2027-06-01", "revision": "2027-06-01", "atu": "2027-06-01", "licencia": "2029-10-15"},
-    "KAP-007": {"capacidad": 4, "tipo": "Auto (Remisse)", "chofer": "Roberto Díaz", "soat": "2027-08-20", "revision": "2027-09-15", "atu": "2027-10-10", "licencia": "2030-02-28"},
-}
+
 
 @app.get("/api/flota")
 async def get_flota_status():
@@ -305,3 +321,64 @@ async def get_rutas_cliente(empresa_id: str):
         return rutas_filtradas
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener rutas del cliente: {str(e)}")
+
+@app.post("/api/flota")
+async def add_flota(flota: FlotaRegistro):
+    global conductores_db
+    conductores_db[flota.placa] = {
+        "capacidad": flota.capacidad,
+        "tipo": flota.tipo,
+        "chofer": flota.chofer,
+        "soat": flota.soat,
+        "revision": flota.revision,
+        "atu": flota.atu,
+        "licencia": flota.licencia
+    }
+    await persist()
+    return {"message": "Unidad agregada exitosamente", "flota": conductores_db}
+
+@app.put("/api/flota/{placa}")
+async def update_flota(placa: str, flota: FlotaRegistro):
+    global conductores_db
+    if placa not in conductores_db:
+        raise HTTPException(status_code=404, detail="Unidad no encontrada")
+    conductores_db[placa] = {
+        "capacidad": flota.capacidad,
+        "tipo": flota.tipo,
+        "chofer": flota.chofer,
+        "soat": flota.soat,
+        "revision": flota.revision,
+        "atu": flota.atu,
+        "licencia": flota.licencia
+    }
+    await persist()
+    return {"message": "Unidad actualizada", "flota": conductores_db}
+
+@app.delete("/api/flota/{placa}")
+async def delete_flota(placa: str):
+    global conductores_db
+    if placa in conductores_db:
+        del conductores_db[placa]
+        await persist()
+        return {"message": "Unidad eliminada", "flota": conductores_db}
+    raise HTTPException(status_code=404, detail="Unidad no encontrada")
+
+@app.post("/api/clear-routes")
+async def clear_routes():
+    global rutas_estado_actual, historial_rutas
+    from datetime import datetime
+    if rutas_estado_actual:
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        registro_historial = {
+            "fecha": fecha_hoy,
+            "rutas": rutas_estado_actual
+        }
+        historial_rutas.append(registro_historial)
+    rutas_estado_actual = []
+    await persist()
+    return {"message": "Rutas archivadas y tablero limpiado"}
+
+@app.get("/api/reportes")
+async def get_reportes():
+    global historial_rutas
+    return {"historial": historial_rutas}

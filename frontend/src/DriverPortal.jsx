@@ -77,7 +77,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
 
   return (
     <div className="driver-portal">
-      <header className="driver-header">
+      <header className="driver-header no-print">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.2rem' }}>¡Hola, {usuario.nombre}!</h2>
@@ -91,11 +91,16 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
       </header>
 
       <main className="driver-content">
-        <button onClick={enviarSOS} style={{ width: '100%', background: '#dc2626', color: 'white', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '20px', boxShadow: '0 4px 6px rgba(220, 38, 38, 0.3)', cursor: 'pointer' }}>
+        <button className="no-print" onClick={enviarSOS} style={{ width: '100%', background: '#dc2626', color: 'white', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '20px', boxShadow: '0 4px 6px rgba(220, 38, 38, 0.3)', cursor: 'pointer' }}>
           🚨 BOTÓN DE EMERGENCIA (SOS)
         </button>
 
-        <h3 style={{ borderBottom: '1px solid var(--kapital-border)', paddingBottom: '10px' }}>Mis Rutas de Hoy</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kapital-border)', paddingBottom: '10px', marginBottom: '15px' }}>
+          <h3 style={{ margin: 0 }}>Mis Rutas de Hoy</h3>
+          <button className="no-print" onClick={() => window.print()} style={{ background: 'var(--kapital-accent-green)', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            🖨️ Imprimir Manifiesto
+          </button>
+        </div>
         
         {error && <p className="error-message">{error}</p>}
         {rutas.length === 0 && !error && <p>No tienes rutas asignadas en este momento.</p>}
@@ -117,7 +122,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
                       <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>🏠 {agente.direccion}</div>
                     </div>
                     <button 
-                      className={`driver-action-btn ${isRecogido ? 'btn-recogido' : ''}`}
+                      className={`driver-action-btn no-print ${isRecogido ? 'btn-recogido' : ''}`}
                       disabled={isRecogido}
                       onClick={() => marcarRecogido(ruta.horario, agente.id)}
                     >
@@ -192,7 +197,18 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
           color: var(--kapital-accent-green);
           cursor: default;
         }
-      `}</style>
+      `}
+        @media print {
+          .no-print { display: none !important; }
+          .driver-portal { background: white !important; color: black !important; padding: 0; min-height: auto; }
+          .driver-route-card { border: 1px solid #ccc !important; box-shadow: none !important; page-break-inside: avoid; }
+          body { background: white; }
+          * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
+          .driver-content { padding: 0 !important; max-width: 100% !important; }
+          h3 { color: black !important; }
+          .driver-passenger-info div { color: black !important; }
+        }
+      </style>
     </div>
   );
 };
