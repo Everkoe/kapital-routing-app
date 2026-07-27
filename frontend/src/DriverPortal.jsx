@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
-const DriverPortal = ({ usuario, onLogout }) => {
+const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -24,7 +24,29 @@ const DriverPortal = ({ usuario, onLogout }) => {
 
   useEffect(() => {
     fetchMisRutas();
-  }, []);
+  }, [conductorId]);
+
+  const cambiarUnidad = async () => {
+    const nuevoId = prompt("Ingresa el nuevo ID de tu Unidad (Ej. KAP-002):", conductorId);
+    if (nuevoId && nuevoId.trim() !== conductorId) {
+      try {
+        const response = await fetch('/api/user/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: usuario.email, unidad_id: nuevoId.trim().toUpperCase() })
+        });
+        if (!response.ok) throw new Error('Error al actualizar unidad');
+        const updatedUser = await response.json();
+        
+        localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+        if (setUsuarioActual) {
+          setUsuarioActual(updatedUser);
+        }
+      } catch (err) {
+        alert("Hubo un error al cambiar la unidad: " + err.message);
+      }
+    }
+  };
 
   const marcarRecogido = async (horario, agenteId) => {
     try {
@@ -59,7 +81,10 @@ const DriverPortal = ({ usuario, onLogout }) => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.2rem' }}>¡Hola, {usuario.nombre}!</h2>
-            <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>Unidad: {conductorId}</p>
+            <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Unidad: {conductorId}
+              <button onClick={cambiarUnidad} style={{ marginLeft: '10px', background: 'transparent', border: '1px solid rgba(255,255,255,0.4)', color: 'white', cursor: 'pointer', fontSize: '0.8rem', padding: '2px 6px', borderRadius: '4px' }} title="Cambiar Unidad">✏️ Editar</button>
+            </p>
           </div>
           <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}>Salir</button>
         </div>

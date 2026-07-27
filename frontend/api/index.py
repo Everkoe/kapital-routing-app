@@ -87,6 +87,7 @@ class UsuarioUpdate(BaseModel):
     current_password: Optional[str] = None
     new_password: Optional[str] = None
     avatar: Optional[str] = None
+    unidad_id: Optional[str] = None
 
 # --- Endpoints de Autenticación ---
 @app.post("/api/auth/register")
@@ -135,11 +136,15 @@ async def update_profile(update_data: UsuarioUpdate):
     if update_data.avatar:
         user_in_db["avatar"] = update_data.avatar
         
+    if update_data.unidad_id is not None:
+        user_in_db["unidad_id"] = update_data.unidad_id
+        
     await persist()
     return {
         "email": user_in_db["email"],
         "nombre": user_in_db["nombre"],
         "rol": user_in_db["rol"],
+        "unidad_id": user_in_db.get("unidad_id"),
         "avatar": user_in_db.get("avatar")
     }
 

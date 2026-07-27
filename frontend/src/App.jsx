@@ -308,7 +308,7 @@ function App() {
   }
 
   if (usuarioActual.rol === 'Conductor') {
-    return <DriverPortal usuario={usuarioActual} onLogout={handleLogout} />;
+    return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
   }
 
   return (
