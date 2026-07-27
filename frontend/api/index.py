@@ -71,6 +71,7 @@ class UsuarioRegistro(BaseModel):
     nombre: str
     rol: str
     unidad_id: Optional[str] = None
+    empresa_id: Optional[str] = None
 
 class UsuarioLogin(BaseModel):
     email: EmailStr
@@ -100,7 +101,8 @@ async def register_user(usuario: UsuarioRegistro):
         "password": usuario.password,
         "nombre": usuario.nombre,
         "rol": usuario.rol,
-        "unidad_id": usuario.unidad_id
+        "unidad_id": usuario.unidad_id,
+        "empresa_id": usuario.empresa_id
     }
     await persist()
     return {"message": "Usuario registrado exitosamente."}
@@ -116,6 +118,7 @@ async def login_user(usuario: UsuarioLogin):
         "nombre": user_in_db["nombre"],
         "rol": user_in_db["rol"],
         "unidad_id": user_in_db.get("unidad_id"),
+        "empresa_id": user_in_db.get("empresa_id"),
         "avatar": user_in_db.get("avatar")
     }
 
@@ -215,7 +218,8 @@ async def assign_routes(file: UploadFile = File(...)):
                                 "id": ag["ID Agente"], 
                                 "direccion": ag["Dirección/Distrito"],
                                 "lat": lat,
-                                "lng": lng
+                                "lng": lng,
+                                "empresa": random.choice(["GLOBO_AZUL", "BANCO_ANDINO"])
                             })
 
                         ruta_existente = next((r for r in rutas_generadas if r["conductor"] == conductor_id and r["micro_zona"] == zona and r["horario"] == horario), None)
@@ -231,7 +235,7 @@ async def assign_routes(file: UploadFile = File(...)):
                     agentes_format = []
                     for ag in agentes_grupo:
                         lat, lng = get_coordenadas_simuladas(zona)
-                        agentes_format.append({"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"], "lat": lat, "lng": lng})
+                        agentes_format.append({"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"], "lat": lat, "lng": lng, "empresa": random.choice(["GLOBO_AZUL", "BANCO_ANDINO"])})
                     rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": agentes_format})
                     break
         rutas_estado_actual = rutas_generadas
@@ -284,5 +288,20 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
         if agente:
             agente["estado"] = data.estado
             await persist()
-            return {"message": "Estado actualizado"}
+            return {"message": "Estado del pasajero actualizado exitosamente."}
     raise HTTPException(status_code=404, detail="Ruta o agente no encontrado")
+
+@app.get("/api/cliente/rutas/{empresa_id}")
+async def get_rutas_cliente(empresa_id: str):
+    global rutas_estado_actual
+    try:
+        rutas_filtradas = []
+        for ruta in rutas_estado_actual:
+            agentes_empresa = [ag for ag in ruta.get("agentes", []) if ag.get("empresa") == empresa_id.upper()]
+            if agentes_empresa:
+                ruta_copy = ruta.copy()
+                ruta_copy["agentes"] = agentes_empresa
+                rutas_filtradas.append(ruta_copy)
+        return rutas_filtradas
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener rutas del cliente: {str(e)}")
