@@ -197,7 +197,6 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
           color: var(--kapital-accent-green);
           cursor: default;
         }
-      `}
         @media print {
           .no-print { display: none !important; }
           .driver-portal { background: white !important; color: black !important; padding: 0; min-height: auto; }
@@ -208,7 +207,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
           h3 { color: black !important; }
           .driver-passenger-info div { color: black !important; }
         }
-      </style>
+      `}</style>
     </div>
   );
 };
