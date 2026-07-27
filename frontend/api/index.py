@@ -142,9 +142,22 @@ async def update_profile(update_data: UsuarioUpdate):
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
 conductores_db: Dict[str, Dict[str, Any]] = {
-    "KAP-001": {"capacidad": 12}, "KAP-002": {"capacidad": 15}, "KAP-003": {"capacidad": 10},
-    "KAP-004": {"capacidad": 12}, "KAP-005": {"capacidad": 15},
+    "KAP-001": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Juan Pérez", "soat": "2027-01-15", "revision": "2027-02-10", "atu": "2027-03-20", "licencia": "2028-05-10"},
+    "KAP-002": {"capacidad": 15, "tipo": "Sprinter", "chofer": "Carlos Gómez", "soat": "2026-08-05", "revision": "2026-11-20", "atu": "2026-12-01", "licencia": "2027-04-15"},
+    "KAP-003": {"capacidad": 10, "tipo": "Van", "chofer": "Luis Ramírez", "soat": "2027-05-10", "revision": "2026-09-15", "atu": "2026-10-30", "licencia": "2029-01-20"},
+    "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"},
+    "KAP-005": {"capacidad": 15, "tipo": "Sprinter", "chofer": "José Castro", "soat": "2026-12-15", "revision": "2027-03-10", "atu": "2027-04-05", "licencia": "2026-07-20"},
+    "KAP-006": {"capacidad": 1, "tipo": "Moto (Courier)", "chofer": "Andrés Silva", "soat": "2027-06-01", "revision": "2027-06-01", "atu": "2027-06-01", "licencia": "2029-10-15"},
+    "KAP-007": {"capacidad": 4, "tipo": "Auto (Remisse)", "chofer": "Roberto Díaz", "soat": "2027-08-20", "revision": "2027-09-15", "atu": "2027-10-10", "licencia": "2030-02-28"},
 }
+
+@app.get("/api/flota")
+async def get_flota_status():
+    # Convertimos el diccionario a una lista de objetos para el frontend
+    flota_list = []
+    for placa, data in conductores_db.items():
+        flota_list.append({"placa": placa, **data})
+    return {"flota": flota_list}
 
 def get_micro_zona(direccion: str) -> str:
     direccion = direccion.lower()
@@ -166,7 +179,8 @@ def get_coordenadas_simuladas(zona: str):
     elif "San Miguel" in zona:
         base_lat, base_lng = -12.0800, -77.0800
         
-    return base_lat + random.uniform(-0.02, 0.02), base_lng + random.uniform(-0.02, 0.02)
+    # Reducimos el offset de 0.02 a 0.005 para evitar que caigan al mar (San Miguel/Callao)
+    return base_lat + random.uniform(-0.005, 0.005), base_lng + random.uniform(-0.005, 0.005)
 
 @app.post("/api/assign-routes/")
 async def assign_routes(file: UploadFile = File(...)):

@@ -4,6 +4,7 @@ import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import './App.css';
 import LiveMap from './LiveMap';
+import FlotaView from './FlotaView';
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -286,7 +287,7 @@ function App() {
 
   const renderVista = () => {
     switch (vistaActual) {
-      case 'flota': return <VistaFlota />;
+      case 'flota': return <FlotaView />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
