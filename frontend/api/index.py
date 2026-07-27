@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 
 import httpx
 import json
+import random
 
 SUPABASE_URL = "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1"
 SUPABASE_KEY = "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o"
@@ -153,6 +154,20 @@ def get_micro_zona(direccion: str) -> str:
     if "san miguel" in direccion: return "San Miguel Centro"
     return "Zona General"
 
+def get_coordenadas_simuladas(zona: str):
+    base_lat = -12.0464
+    base_lng = -77.0428
+    if "Comas" in zona:
+        base_lat, base_lng = -11.9300, -77.0460
+    elif "Callao" in zona:
+        base_lat, base_lng = -12.0500, -77.1200
+    elif "Surco" in zona:
+        base_lat, base_lng = -12.1300, -76.9900
+    elif "San Miguel" in zona:
+        base_lat, base_lng = -12.0800, -77.0800
+        
+    return base_lat + random.uniform(-0.02, 0.02), base_lng + random.uniform(-0.02, 0.02)
+
 @app.post("/api/assign-routes/")
 async def assign_routes(file: UploadFile = File(...)):
     global rutas_estado_actual
@@ -170,17 +185,32 @@ async def assign_routes(file: UploadFile = File(...)):
                     if horario not in horarios_ocupados and capacidad_actual < conductores_db[conductor_id]["capacidad"]:
                         espacio_disponible = conductores_db[conductor_id]["capacidad"] - capacidad_actual
                         agentes_a_asignar = agentes_grupo[:espacio_disponible]
+                        
+                        agentes_format = []
+                        for ag in agentes_a_asignar:
+                            lat, lng = get_coordenadas_simuladas(zona)
+                            agentes_format.append({
+                                "id": ag["ID Agente"], 
+                                "direccion": ag["Dirección/Distrito"],
+                                "lat": lat,
+                                "lng": lng
+                            })
+
                         ruta_existente = next((r for r in rutas_generadas if r["conductor"] == conductor_id and r["micro_zona"] == zona and r["horario"] == horario), None)
                         if ruta_existente:
-                            ruta_existente["agentes"].extend([{"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"]} for ag in agentes_a_asignar])
+                            ruta_existente["agentes"].extend(agentes_format)
                         else:
-                            rutas_generadas.append({"conductor": conductor_id, "micro_zona": zona, "horario": horario, "agentes": [{"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"]} for ag in agentes_a_asignar]})
+                            rutas_generadas.append({"conductor": conductor_id, "micro_zona": zona, "horario": horario, "agentes": agentes_format})
                         disponibilidad_conductores[conductor_id].append(horario)
                         agentes_grupo = agentes_grupo[len(agentes_a_asignar):]
                         conductor_encontrado = True
                         break
                 if not conductor_encontrado:
-                    rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": [{"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"]} for ag in agentes_grupo]})
+                    agentes_format = []
+                    for ag in agentes_grupo:
+                        lat, lng = get_coordenadas_simuladas(zona)
+                        agentes_format.append({"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"], "lat": lat, "lng": lng})
+                    rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": agentes_format})
                     break
         rutas_estado_actual = rutas_generadas
         await persist()
