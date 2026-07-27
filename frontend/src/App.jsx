@@ -90,7 +90,7 @@ const PantallaAuth = ({ onLogin }) => {
 
 
 // --- Componentes de Vistas ---
-const Navbar = ({ vistaActual, setVistaActual, onLogout }) => {
+const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme }) => {
   const [isOpen, setIsOpen] = useState(false);
   
   const handleNav = (vista) => {
@@ -100,7 +100,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout }) => {
 
   return (
     <nav className="navbar">
-      <h1 className="navbar-title">Kapital Routing</h1>
+      <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" onClick={() => handleNav('dashboard')} />
       <button className="hamburger-menu" onClick={() => setIsOpen(!isOpen)}>
         {isOpen ? '✕' : '☰'}
       </button>
@@ -112,6 +112,9 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout }) => {
         <span className="nav-separator">|</span>
         <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>👤 Mi Perfil</a>
         <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link">Cerrar Sesión</a>
+        <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
       </div>
     </nav>
   );
@@ -247,6 +250,16 @@ function App() {
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [routes, setRoutes] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [theme, setTheme] = useState(localStorage.getItem('kapital_theme') || 'dark');
+
+  useEffect(() => {
+    document.body.setAttribute('data-theme', theme);
+    localStorage.setItem('kapital_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     const userFromStorage = localStorage.getItem('kapital_user');
@@ -288,7 +301,7 @@ function App() {
 
   return (
     <div className="App">
-      <Navbar vistaActual={vistaActual} setVistaActual={setVistaActual} onLogout={handleLogout} />
+      <Navbar vistaActual={vistaActual} setVistaActual={setVistaActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
       <main className="app-container">
         {renderVista()}
         <AuditLog logs={logs} />
