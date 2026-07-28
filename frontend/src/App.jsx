@@ -1,4 +1,4 @@
-// App.jsx
+// App.jsx - Trigger Vercel Deploy 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
