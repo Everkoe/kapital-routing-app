@@ -8,14 +8,9 @@ from typing import Dict, Any, List, Optional
 import httpx
 import json
 import random
-import google.generativeai as genai
-
-# Configuración de Gemini AI Copilot
+# Configuración de Gemini AI Copilot (Usando REST puro para ahorrar espacio en Vercel)
 import os
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-genai.configure(api_key=GEMINI_API_KEY)
-# Nota: usamos gemini-1.5-flash o gemini-pro. gemini-1.5-flash es recomendado actualmente.
-AI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
 
 SYSTEM_PROMPT = """Eres 'Kapital Copilot', el asistente virtual experto en logística de la aplicación B2B 'Kapital Routing'.
 Tu objetivo es ayudar al usuario (el administrador o despachador logístico) a utilizar la plataforma.
@@ -408,30 +403,45 @@ async def get_reportes():
     global historial_rutas
     return {"historial": historial_rutas}
 
-# --- AI Copilot Chat Route ---
+# --- AI Copilot Chat Route (REST API) ---
 @app.post("/api/chat")
 async def chat_with_copilot(req: ChatRequest):
     try:
-        # Convert frontend history to Gemini format
-        formatted_history = []
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        contents = []
         for msg in req.history:
-            # Gemini roles are 'user' and 'model'
             role = 'model' if msg.role == 'assistant' else 'user'
-            formatted_history.append({"role": role, "parts": [msg.text]})
+            contents.append({
+                "role": role,
+                "parts": [{"text": msg.text}]
+            })
             
-        chat = AI_MODEL.start_chat(history=formatted_history)
-        
-        # We inject the system prompt logic indirectly by prepending it to the first interaction 
-        # if history is empty, or just rely on standard prompt engineering. 
-        # Since gemini-1.5-flash supports system_instruction on init, we should use it.
-        # But for simplicity in this SDK version, we prepend to the message if it's the first one.
-        
-        user_message = req.message
+        # Add current user message with system prompt if no history
+        user_text = req.message
         if not req.history:
-            user_message = f"Instrucciones internas: {SYSTEM_PROMPT}\n\nPregunta del usuario: {req.message}"
+            user_text = f"Instrucciones internas: {SYSTEM_PROMPT}\n\nPregunta del usuario: {req.message}"
             
-        response = chat.send_message(user_message)
-        return {"response": response.text}
+        contents.append({
+            "role": "user",
+            "parts": [{"text": user_text}]
+        })
+        
+        payload = {
+            "contents": contents
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=30.0)
+            
+        if resp.status_code == 200:
+            data = resp.json()
+            reply = data["candidates"][0]["content"]["parts"][0]["text"]
+            return {"response": reply}
+        else:
+            print("Gemini API error:", resp.text)
+            raise Exception("API status no 200")
+            
     except Exception as e:
         print(f"Error in Gemini chat: {e}")
         raise HTTPException(status_code=500, detail="Error comunicándose con el asistente de Inteligencia Artificial.")
