@@ -439,9 +439,7 @@ async def chat_with_copilot(req: ChatRequest):
             reply = data["candidates"][0]["content"]["parts"][0]["text"]
             return {"response": reply}
         else:
-            print("Gemini API error:", resp.text)
-            raise Exception("API status no 200")
+            return {"error": True, "detail": f"Status {resp.status_code} - API msg: {resp.text}"}
             
     except Exception as e:
-        print(f"Error in Gemini chat: {e}")
-        raise HTTPException(status_code=500, detail="Error comunicándose con el asistente de Inteligencia Artificial.")
+        return {"error": True, "detail": f"Python Exception: {str(e)}"}

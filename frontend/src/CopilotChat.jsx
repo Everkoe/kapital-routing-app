@@ -47,12 +47,19 @@ const CopilotChat = () => {
         })
       });
 
-      if (!response.ok) throw new Error('Error de red');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Error de red en servidor');
+      }
 
       const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', text: data.response }]);
+      if (data.error) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `Debug Info: ${data.detail}` }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', text: data.response }]);
+      }
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'assistant', text: 'Ups, tuve un problema conectándome al servidor. Por favor intenta de nuevo.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', text: `Ups, tuve un problema: ${error.message}` }]);
     } finally {
       setIsLoading(false);
     }
