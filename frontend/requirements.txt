@@ -5,3 +5,4 @@ openpyxl
 python-multipart
 email-validator
 httpx
+google-generativeai

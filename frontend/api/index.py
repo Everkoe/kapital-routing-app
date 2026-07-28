@@ -8,6 +8,23 @@ from typing import Dict, Any, List, Optional
 import httpx
 import json
 import random
+import google.generativeai as genai
+
+# Configuración de Gemini AI Copilot
+import os
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+genai.configure(api_key=GEMINI_API_KEY)
+# Nota: usamos gemini-1.5-flash o gemini-pro. gemini-1.5-flash es recomendado actualmente.
+AI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
+
+SYSTEM_PROMPT = """Eres 'Kapital Copilot', el asistente virtual experto en logística de la aplicación B2B 'Kapital Routing'.
+Tu objetivo es ayudar al usuario (el administrador o despachador logístico) a utilizar la plataforma.
+Reglas del negocio que debes conocer:
+- Las unidades (Vans o Sprinters) tienen una capacidad MÁXIMA de 15 pasajeros.
+- Los usuarios pueden subir un Excel con la base de datos de los pasajeros a enrutar (ID, Nombres, Turno, Dirección, Zona).
+- La app tiene una función de "Arrastrar y Soltar" (Drag and Drop) para reasignar pasajeros entre unidades.
+- La app muestra gráficos de "Carga por Unidad" y "Eficiencia Global".
+Responde siempre de manera concisa, profesional, y directa (sin introducciones robóticas). Usa viñetas si es necesario."""
 
 SUPABASE_URL = "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1"
 SUPABASE_KEY = "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o"
@@ -98,6 +115,14 @@ class EmergencyRequest(BaseModel):
 
 class FlotaRegistro(BaseModel):
     placa: str
+
+class ChatMessagePayload(BaseModel):
+    role: str
+    text: str
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessagePayload] = []
     capacidad: int
     tipo: str
     chofer: str
@@ -382,3 +407,31 @@ async def clear_routes():
 async def get_reportes():
     global historial_rutas
     return {"historial": historial_rutas}
+
+# --- AI Copilot Chat Route ---
+@app.post("/api/chat")
+async def chat_with_copilot(req: ChatRequest):
+    try:
+        # Convert frontend history to Gemini format
+        formatted_history = []
+        for msg in req.history:
+            # Gemini roles are 'user' and 'model'
+            role = 'model' if msg.role == 'assistant' else 'user'
+            formatted_history.append({"role": role, "parts": [msg.text]})
+            
+        chat = AI_MODEL.start_chat(history=formatted_history)
+        
+        # We inject the system prompt logic indirectly by prepending it to the first interaction 
+        # if history is empty, or just rely on standard prompt engineering. 
+        # Since gemini-1.5-flash supports system_instruction on init, we should use it.
+        # But for simplicity in this SDK version, we prepend to the message if it's the first one.
+        
+        user_message = req.message
+        if not req.history:
+            user_message = f"Instrucciones internas: {SYSTEM_PROMPT}\n\nPregunta del usuario: {req.message}"
+            
+        response = chat.send_message(user_message)
+        return {"response": response.text}
+    except Exception as e:
+        print(f"Error in Gemini chat: {e}")
+        raise HTTPException(status_code=500, detail="Error comunicándose con el asistente de Inteligencia Artificial.")

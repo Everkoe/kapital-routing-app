@@ -9,6 +9,7 @@ import LiveMap from './LiveMap';
 import FlotaView from './FlotaView';
 import DriverPortal from './DriverPortal';
 import ClientPortal from './ClientPortal';
+import CopilotChat from './CopilotChat';
 import VistaReportes from './VistaReportes';
 
 // --- Componente de Autenticación ---
