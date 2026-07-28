@@ -469,6 +469,7 @@ function App() {
       <main className="app-container">
         {renderVista()}
         <AuditLog logs={logs} />
+        <CopilotChat />
       </main>
     </div>
   );
