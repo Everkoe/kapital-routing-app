@@ -110,6 +110,13 @@ class EmergencyRequest(BaseModel):
 
 class FlotaRegistro(BaseModel):
     placa: str
+    capacidad: int
+    tipo: str
+    chofer: str
+    soat: str
+    revision: str
+    atu: str
+    licencia: str
 
 class ChatMessagePayload(BaseModel):
     role: str
@@ -118,13 +125,6 @@ class ChatMessagePayload(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessagePayload] = []
-    capacidad: int
-    tipo: str
-    chofer: str
-    soat: str
-    revision: str
-    atu: str
-    licencia: str
 
 class UsuarioUpdate(BaseModel):
     email: EmailStr
