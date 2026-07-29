@@ -398,6 +398,22 @@ async def clear_routes():
     await persist()
     return {"message": "Rutas archivadas y tablero limpiado"}
 
+@app.post("/api/save-history")
+async def save_history():
+    global rutas_estado_actual, historial_rutas
+    from datetime import datetime
+    if rutas_estado_actual:
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        registro_historial = {
+            "fecha": fecha_hoy,
+            "rutas": rutas_estado_actual
+        }
+        historial_rutas.append(registro_historial)
+        await persist()
+        return {"message": "Rutas guardadas en el historial"}
+    return {"message": "No hay rutas para guardar"}
+
+
 @app.get("/api/reportes")
 async def get_reportes():
     global historial_rutas
