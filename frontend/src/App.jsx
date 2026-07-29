@@ -286,8 +286,8 @@ const KPIDashboard = ({ routes }) => {
         <KPICard title="Tasa de Optimización" value={`${kpis.tasaOptimizacion}%`} color="#8b5cf6" />
       </div> 
       {routes.length > 0 && (
-      <div style={{display: 'flex', gap: '20px', height: '300px', flexWrap: 'wrap'}}>
-        <div className="card" style={{flex: '2', minWidth: '400px'}}>
+      <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '20px'}}>
+        <div className="card" style={{flex: '1 1 300px', minWidth: '280px', height: '320px'}}>
           <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Carga por Unidad</h3>
           <ResponsiveContainer width="100%" height="80%">
             <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -300,7 +300,7 @@ const KPIDashboard = ({ routes }) => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="card" style={{flex: '1', minWidth: '300px'}}>
+        <div className="card" style={{flex: '1 1 280px', minWidth: '280px', height: '320px'}}>
            <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Eficiencia Global</h3>
            <ResponsiveContainer width="100%" height="80%">
             <PieChart>
