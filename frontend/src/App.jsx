@@ -16,6 +16,7 @@ import VistaReportes from './VistaReportes';
 const PantallaAuth = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
 
   const handleInputChange = (e) => {
@@ -29,6 +30,7 @@ const PantallaAuth = ({ onLogin }) => {
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const payload = isLogin ? { email: formData.email, password: formData.password } : formData;
 
+    setIsAuthLoading(true);
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -47,6 +49,8 @@ const PantallaAuth = ({ onLogin }) => {
       }
     } catch (err) {
       setError(err.message);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
@@ -91,8 +95,15 @@ const PantallaAuth = ({ onLogin }) => {
               </>
             )}
             
-            <button type="submit" className="auth-button">
-              {isLogin ? 'Ingresar al Dashboard' : 'Completar Registro'}
+            <button type="submit" className="auth-button" disabled={isAuthLoading}>
+              {isAuthLoading ? (
+                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}>
+                  <span className="auth-spinner"></span>
+                  {isLogin ? 'Iniciando sesión...' : 'Registrando...'}
+                </div>
+              ) : (
+                isLogin ? 'Ingresar al Dashboard' : 'Completar Registro'
+              )}
             </button>
             
             <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>

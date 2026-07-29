@@ -75,8 +75,23 @@ body, #root {
 .auth-input { width: 100%; padding: 14px 16px; margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 12px; font-size: 1rem; color: #1e293b; background: #f8fafc; transition: all 0.3s ease; box-sizing: border-box; }
 .auth-input:focus { outline: none; border-color: #38bdf8; background: #ffffff; box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.1); }
 
-.auth-button { width: 100%; padding: 14px; background: linear-gradient(to right, #0284c7, #2563eb); color: white; border: none; border-radius: 12px; font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); }
-.auth-button:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3); }
+.auth-button { width: 100%; padding: 14px; background: linear-gradient(to right, #0284c7, #2563eb); color: white; border: none; border-radius: 12px; font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); }
+.auth-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3); }
+.auth-button:disabled { opacity: 0.7; cursor: not-allowed; }
+
+.auth-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: auth-spin 1s ease-in-out infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
 
 .auth-toggle { text-align: center; margin-top: 25px; color: #64748b; font-weight: 500; cursor: pointer; transition: color 0.3s; }
 .auth-toggle:hover { color: #2563eb; text-decoration: underline; }
