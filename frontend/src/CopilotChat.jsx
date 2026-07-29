@@ -6,7 +6,7 @@ const LOCAL_API_BASE = "http://localhost:8000/api";
 const CopilotChat = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: '¡Hola! Soy Kapital Copilot, tu asistente de Inteligencia Artificial 🤖. ¿En qué puedo ayudarte hoy con la logística de tus rutas?' }
+    { role: 'assistant', text: '¡Hola! Soy Kapitalito, tu asistente de Inteligencia Artificial 🤖. ¿En qué puedo ayudarte hoy con la logística de tus rutas?' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -86,39 +86,44 @@ const CopilotChat = () => {
 
       <div style={{
         position: 'fixed', bottom: '100px', right: '30px', zIndex: 9999,
-        width: '350px', height: '500px', backgroundColor: 'var(--kapital-card-bg, #ffffff)',
-        borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
+        width: '360px', height: '550px', backgroundColor: 'var(--kapital-card-bg, #ffffff)',
+        borderRadius: '20px', boxShadow: '0 15px 40px rgba(0,0,0,0.25)',
         display: isOpen ? 'flex' : 'none', flexDirection: 'column',
-        overflow: 'hidden', border: '1px solid var(--kapital-border, #e2e8f0)',
+        overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)',
         fontFamily: 'system-ui, sans-serif'
       }}>
         <div style={{
-          padding: '15px 20px', backgroundColor: '#38bdf8', color: 'white',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          padding: '20px', background: 'linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)', color: 'white',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
         }}>
-          <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
-             <span style={{fontSize: '1.2rem'}}>🤖</span>
-             <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: '600'}}>Kapital Copilot</h3>
+          <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
+             <span style={{fontSize: '1.4rem', backgroundColor: 'rgba(255,255,255,0.2)', padding: '8px', borderRadius: '50%'}}>🤖</span>
+             <div>
+               <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: '700', letterSpacing: '0.5px'}}>Kapitalito</h3>
+               <span style={{fontSize: '0.75rem', opacity: 0.8}}>Asistente Virtual</span>
+             </div>
           </div>
-          <button onClick={toggleChat} style={{background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem'}}>✕</button>
+          <button onClick={toggleChat} style={{background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s'}} onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'} onMouseOut={e => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}>✕</button>
         </div>
 
         <div style={{
           flex: 1, padding: '20px', overflowY: 'auto', display: 'flex',
-          flexDirection: 'column', gap: '15px', backgroundColor: 'var(--kapital-bg, #f8fafc)'
+          flexDirection: 'column', gap: '18px', backgroundColor: 'var(--kapital-bg, #f1f5f9)'
         }}>
           {messages.map((msg, i) => (
             <div key={i} style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              backgroundColor: msg.role === 'user' ? '#10B981' : 'var(--kapital-card-bg, #ffffff)',
-              color: msg.role === 'user' ? 'white' : 'var(--kapital-text, #1e293b)',
-              padding: '10px 15px', borderRadius: '12px',
-              borderBottomRightRadius: msg.role === 'user' ? '2px' : '12px',
-              borderBottomLeftRadius: msg.role === 'assistant' ? '2px' : '12px',
-              maxWidth: '85%', fontSize: '0.9rem',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-              border: msg.role === 'assistant' ? '1px solid var(--kapital-border, #e2e8f0)' : 'none',
-              lineHeight: '1.4'
+              backgroundColor: msg.role === 'user' ? 'linear-gradient(135deg, #10B981 0%, #34d399 100%)' : 'var(--kapital-card-bg, #ffffff)',
+              background: msg.role === 'user' ? 'linear-gradient(135deg, #10B981 0%, #34d399 100%)' : 'var(--kapital-card-bg, #ffffff)',
+              color: msg.role === 'user' ? 'white' : 'var(--kapital-text, inherit)',
+              padding: '12px 16px', borderRadius: '16px',
+              borderBottomRightRadius: msg.role === 'user' ? '4px' : '16px',
+              borderBottomLeftRadius: msg.role === 'assistant' ? '4px' : '16px',
+              maxWidth: '85%', fontSize: '0.95rem',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
+              border: msg.role === 'assistant' ? '1px solid var(--kapital-border, rgba(0,0,0,0.05))' : 'none',
+              lineHeight: '1.5'
             }}>
               {msg.text}
             </div>
@@ -126,56 +131,76 @@ const CopilotChat = () => {
           
           {isLoading && (
             <div style={{
-              alignSelf: 'flex-start', padding: '10px 15px', borderRadius: '12px',
-              backgroundColor: 'var(--kapital-card-bg, #ffffff)', border: '1px solid var(--kapital-border, #e2e8f0)',
-              color: 'var(--kapital-text-secondary, #64748b)', fontSize: '0.9rem', display: 'flex', gap: '5px'
+              alignSelf: 'flex-start', padding: '12px 16px', borderRadius: '16px', borderBottomLeftRadius: '4px',
+              backgroundColor: 'var(--kapital-card-bg, #ffffff)', border: '1px solid var(--kapital-border, rgba(0,0,0,0.05))',
+              color: 'var(--kapital-text-secondary, #64748b)', fontSize: '0.9rem', display: 'flex', gap: '6px',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.06)'
             }}>
-              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0s'}}>.</span>
-              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0.2s'}}>.</span>
-              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0.4s'}}>.</span>
+              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0s', width: '6px', height: '6px', backgroundColor: '#38bdf8', borderRadius: '50%'}}></span>
+              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0.2s', width: '6px', height: '6px', backgroundColor: '#38bdf8', borderRadius: '50%'}}></span>
+              <span className="typing-dot" style={{animation: 'blink 1.4s infinite both', animationDelay: '0.4s', width: '6px', height: '6px', backgroundColor: '#38bdf8', borderRadius: '50%'}}></span>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
         <form onSubmit={sendMessage} style={{
-          display: 'flex', padding: '15px', borderTop: '1px solid var(--kapital-border, #e2e8f0)',
-          backgroundColor: 'var(--kapital-card-bg, #ffffff)', gap: '10px'
+          display: 'flex', padding: '20px', borderTop: '1px solid var(--kapital-border, rgba(0,0,0,0.05))',
+          backgroundColor: 'var(--kapital-card-bg, #ffffff)', gap: '12px', alignItems: 'center'
         }}>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Pregúntale a Copilot..."
+            placeholder="Pregúntale a Kapitalito..."
             disabled={isLoading}
             style={{
-              flex: 1, padding: '10px 15px', borderRadius: '20px',
-              border: '1px solid var(--kapital-border, #e2e8f0)',
-              outline: 'none', backgroundColor: 'var(--kapital-bg, #f8fafc)',
-              color: 'var(--kapital-text, #1e293b)'
+              flex: 1, padding: '12px 18px', borderRadius: '24px',
+              border: '1px solid var(--kapital-border, rgba(0,0,0,0.1))',
+              backgroundColor: 'var(--kapital-bg, #f8fafc)',
+              color: 'var(--kapital-text, inherit)', fontSize: '0.95rem',
+              outline: 'none', transition: 'border 0.2s, box-shadow 0.2s'
+            }}
+            onFocus={(e) => {
+              e.target.style.border = '1px solid #38bdf8';
+              e.target.style.boxShadow = '0 0 0 3px rgba(56, 189, 248, 0.2)';
+            }}
+            onBlur={(e) => {
+              e.target.style.border = '1px solid var(--kapital-border, rgba(0,0,0,0.1))';
+              e.target.style.boxShadow = 'none';
             }}
           />
           <button 
             type="submit" 
             disabled={isLoading || !input.trim()}
             style={{
-              backgroundColor: '#38bdf8', color: 'white', border: 'none',
-              borderRadius: '50%', width: '40px', height: '40px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: (isLoading || !input.trim()) ? 'not-allowed' : 'pointer',
-              opacity: (isLoading || !input.trim()) ? 0.6 : 1
+              backgroundColor: input.trim() ? '#38bdf8' : 'var(--kapital-border, #e2e8f0)',
+              color: 'white', border: 'none', borderRadius: '50%',
+              width: '44px', height: '44px', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', cursor: input.trim() ? 'pointer' : 'default',
+              transition: 'background-color 0.2s, transform 0.2s',
+              transform: input.trim() ? 'scale(1)' : 'scale(0.95)',
+              boxShadow: input.trim() ? '0 4px 10px rgba(56, 189, 248, 0.3)' : 'none'
             }}
+            onMouseOver={e => input.trim() && (e.currentTarget.style.transform = 'scale(1.05)')}
+            onMouseOut={e => input.trim() && (e.currentTarget.style.transform = 'scale(1)')}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
         </form>
-        <style>{`
-          @keyframes blink { 0% { opacity: 0.2; } 20% { opacity: 1; } 100% { opacity: 0.2; } }
-        `}</style>
       </div>
+      <style>
+        {`
+          @keyframes blink {
+            0% { opacity: 0.2; transform: scale(0.8); }
+            20% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0.2; transform: scale(0.8); }
+          }
+        `}
+      </style>
     </>
   );
 };
