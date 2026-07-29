@@ -35,11 +35,15 @@ usuarios_db: Dict[str, Dict[str, Any]] = {}
 conductores_db: Dict[str, Dict[str, Any]] = {}
 historial_rutas: List[Dict[str, Any]] = []
 
-def load_db():
-    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas
+db_loaded = False
+
+async def ensure_db_loaded():
+    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas
+    if db_loaded:
+        return
     try:
-        with httpx.Client() as client:
-            res = client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
             if res.status_code == 200 and len(res.json()) > 0:
                 data = res.json()[0]
                 usuarios_db = data.get("usuarios", {})
@@ -54,10 +58,9 @@ def load_db():
                         "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"}
                     }
                 conductores_db = flota
+                db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase: {e}")
-
-load_db()
 
 async def persist():
     try:
@@ -133,26 +136,39 @@ class UsuarioUpdate(BaseModel):
     new_password: Optional[str] = None
     avatar: Optional[str] = None
     unidad_id: Optional[str] = None
+    rol: Optional[str] = None
 
 # --- Endpoints de Autenticación ---
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
+    await ensure_db_loaded()
     if usuario.email in usuarios_db:
-        raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado.")
+        raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
-    usuarios_db[usuario.email] = {
+    nuevo_usuario = {
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
         "rol": usuario.rol,
         "unidad_id": usuario.unidad_id,
-        "empresa_id": usuario.empresa_id
+        "empresa_id": usuario.empresa_id,
+        "avatar": usuario.avatar
     }
+    usuarios_db[usuario.email] = nuevo_usuario
+    
+    # Generate mock schedule if role is Conductor
+    if usuario.rol == "Conductor" and usuario.unidad_id:
+        if usuario.unidad_id not in conductores_db:
+            conductores_db[usuario.unidad_id] = {
+                "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre, 
+                "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
+            }
     await persist()
     return {"message": "Usuario registrado exitosamente."}
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
+    await ensure_db_loaded()
     user_in_db = usuarios_db.get(usuario.email)
     if not user_in_db or user_in_db["password"] != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
@@ -168,6 +184,7 @@ async def login_user(usuario: UsuarioLogin):
 
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate):
+    await ensure_db_loaded()
     user_in_db = usuarios_db.get(update_data.email)
     if not user_in_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -183,16 +200,21 @@ async def update_profile(update_data: UsuarioUpdate):
     if update_data.avatar:
         user_in_db["avatar"] = update_data.avatar
         
-    if update_data.unidad_id is not None:
+    if update_data.rol == "Conductor" and update_data.unidad_id:
         user_in_db["unidad_id"] = update_data.unidad_id
         
     await persist()
+    
     return {
-        "email": user_in_db["email"],
-        "nombre": user_in_db["nombre"],
-        "rol": user_in_db["rol"],
-        "unidad_id": user_in_db.get("unidad_id"),
-        "avatar": user_in_db.get("avatar")
+        "message": "Perfil actualizado",
+        "user": {
+            "email": user_in_db["email"],
+            "nombre": user_in_db["nombre"],
+            "rol": user_in_db["rol"],
+            "unidad_id": user_in_db.get("unidad_id"),
+            "empresa_id": user_in_db.get("empresa_id"),
+            "avatar": user_in_db.get("avatar")
+        }
     }
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
@@ -230,7 +252,8 @@ def get_coordenadas_simuladas(zona: str):
     return base_lat + random.uniform(-0.005, 0.005), base_lng + random.uniform(-0.005, 0.005)
 
 @app.post("/api/assign-routes/")
-async def assign_routes(file: UploadFile = File(...)):
+async def assign_routes_from_excel(file: UploadFile = File(...)):
+    await ensure_db_loaded()
     global rutas_estado_actual
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
@@ -282,6 +305,7 @@ async def assign_routes(file: UploadFile = File(...)):
 
 @app.post("/api/emergency-reassign/")
 async def emergency_reassign(request: EmergencyRequest):
+    await ensure_db_loaded()
     global rutas_estado_actual
     if request.horario == "Todos los turnos" or request.tipo_emergencia == "Baja Total (Siniestro)":
         rutas_afectadas = [r for r in rutas_estado_actual if r["conductor"] == request.conductor_id]
@@ -313,11 +337,13 @@ class EstadoPasajeroUpdate(BaseModel):
 
 @app.get("/api/mis-rutas/{conductor_id}")
 async def mis_rutas(conductor_id: str):
+    await ensure_db_loaded()
     mis_rutas_asignadas = [r for r in rutas_estado_actual if r["conductor"] == conductor_id]
     return mis_rutas_asignadas
 
 @app.post("/api/actualizar-pasajero")
 async def actualizar_pasajero(data: EstadoPasajeroUpdate):
+    await ensure_db_loaded()
     ruta = next((r for r in rutas_estado_actual if r["conductor"] == data.conductor_id and r["horario"] == data.horario), None)
     if ruta:
         agente = next((a for a in ruta["agentes"] if a["id"] == data.agente_id), None)
@@ -329,6 +355,7 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
 
 @app.get("/api/cliente/rutas/{empresa_id}")
 async def get_rutas_cliente(empresa_id: str):
+    await ensure_db_loaded()
     global rutas_estado_actual
     try:
         rutas_filtradas = []
@@ -344,6 +371,7 @@ async def get_rutas_cliente(empresa_id: str):
 
 @app.post("/api/flota")
 async def add_flota(flota: FlotaRegistro):
+    await ensure_db_loaded()
     global conductores_db
     conductores_db[flota.placa] = {
         "capacidad": flota.capacidad,
@@ -359,6 +387,7 @@ async def add_flota(flota: FlotaRegistro):
 
 @app.put("/api/flota/{placa}")
 async def update_flota(placa: str, flota: FlotaRegistro):
+    await ensure_db_loaded()
     global conductores_db
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
@@ -376,6 +405,7 @@ async def update_flota(placa: str, flota: FlotaRegistro):
 
 @app.delete("/api/flota/{placa}")
 async def delete_flota(placa: str):
+    await ensure_db_loaded()
     global conductores_db
     if placa in conductores_db:
         del conductores_db[placa]
@@ -385,6 +415,7 @@ async def delete_flota(placa: str):
 
 @app.post("/api/clear-routes")
 async def clear_routes():
+    await ensure_db_loaded()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
     if rutas_estado_actual:
@@ -400,6 +431,7 @@ async def clear_routes():
 
 @app.post("/api/save-history")
 async def save_history():
+    await ensure_db_loaded()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
     if rutas_estado_actual:
@@ -416,12 +448,14 @@ async def save_history():
 
 @app.get("/api/reportes")
 async def get_reportes():
+    await ensure_db_loaded()
     global historial_rutas
     return {"historial": historial_rutas}
 
 # --- AI Copilot Chat Route (REST API) ---
 @app.post("/api/chat")
 async def chat_with_copilot(req: ChatRequest):
+    await ensure_db_loaded()
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
         
