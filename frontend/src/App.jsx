@@ -102,7 +102,7 @@ const PantallaAuth = ({ onLogin }) => {
                   {isLogin ? 'Iniciando sesión...' : 'Registrando...'}
                 </div>
               ) : (
-                isLogin ? 'Ingresar al Dashboard' : 'Completar Registro'
+                isLogin ? 'Ingresar' : 'Completar Registro'
               )}
             </button>
             
@@ -133,7 +133,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme }) =
         {isOpen ? '✕' : '☰'}
       </button>
       <div className={`nav-links ${isOpen ? 'open' : ''}`}>
-        <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard</a>
+        <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
         <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
         <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
         <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
