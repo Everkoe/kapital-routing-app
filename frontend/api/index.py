@@ -8,11 +8,9 @@ from typing import Dict, Any, List, Optional
 import httpx
 import json
 import random
-import smtplib
-from email.mime.text import MIMEText
 import os
 
-# Configuración de Resend API (Emails)
+# Configuración de Resend API (Emails) para Vercel (Puerto 443)
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 # Base de datos en memoria para OTPs (email -> {code: str})
@@ -171,24 +169,26 @@ async def send_verification_code(req: OTPRequest):
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json"
             }
+            # En modo prueba gratuito de Resend, solo se puede enviar al correo verificado (probablemente el correo del usuario)
+            # Pero para pruebas lo enviamos. Si Resend lo bloquea, mostramos el error.
             payload = {
                 "from": "Kapital Routing <onboarding@resend.dev>",
                 "to": [req.email],
                 "subject": "Código de Verificación - Kapital Routing",
-                "html": f"<p>Hola <strong>{req.nombre}</strong>,</p><p>Tu código de seguridad para registrarte en Kapital Routing es: <h2>{code}</h2></p><p>Si no solicitaste este código, por favor ignora este correo.</p>"
+                "html": f"<p>Hola <strong>{req.nombre}</strong>,</p><p>Tu código de seguridad para registrarte en Kapital Routing es: <h2 style='letter-spacing: 5px; color: #007aff;'>{code}</h2></p><p>Si no solicitaste este código, por favor ignora este correo.</p>"
             }
             async with httpx.AsyncClient() as client:
                 res = await client.post("https://api.resend.com/emails", json=payload, headers=headers)
                 if res.status_code >= 400:
                     print(f"Error de Resend: {res.text}")
-                    raise HTTPException(status_code=500, detail="Error enviando el correo de verificación desde el servidor.")
+                    raise HTTPException(status_code=500, detail=f"Resend API error: Asegúrate de registrarte usando el mismo correo con el que creaste tu cuenta en Resend. (Detalle: {res.text})")
         except HTTPException as he:
             raise he
         except Exception as e:
-            print(f"Error de conexión con Resend: {e}")
-            raise HTTPException(status_code=500, detail="No se pudo conectar con el servicio de correos.")
+            print(f"Error HTTP conectando a Resend: {e}")
+            raise HTTPException(status_code=500, detail="Error enviando el correo de verificación. Revisa la consola del servidor.")
     else:
-        # En modo demo (sin API Key), logueamos el código y dejamos el 1234
+        # En modo demo, logueamos el código y dejamos el 1234
         print(f"Modo Demo: Código para {req.email} es {code}. (Usa 1234 en frontend temporalmente)")
         otp_db[req.email] = {"code": "1234"} # Forzamos 1234 en demo para no romper el flujo
         
