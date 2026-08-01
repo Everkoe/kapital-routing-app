@@ -10,6 +10,7 @@ import json
 import random
 import smtplib
 from email.mime.text import MIMEText
+import os
 
 # Configuración de Gmail SMTP
 GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "tu_correo@gmail.com") # REEMPLAZA ESTO
@@ -19,7 +20,6 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "tu_app_password") # R
 otp_db = {}
 
 # Configuración de Gemini AI Copilot (Usando REST puro para ahorrar espacio en Vercel)
-import os
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 SYSTEM_PROMPT = """Eres 'Kapital Copilot', el asistente virtual experto en logística de la aplicación B2B 'Kapital Routing'.
