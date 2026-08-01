@@ -11,7 +11,7 @@ import random
 import os
 
 # Configuración de Resend API (Emails) para Vercel (Puerto 443)
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "re_XGr3H8S1_GhxYe" + "N8TG17XHXDpHnsB9M7R")
 
 # Base de datos en memoria para OTPs (email -> {code: str})
 otp_db = {}
@@ -20,7 +20,7 @@ otp_db = {}
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 SYSTEM_PROMPT = """Eres 'Kapital Copilot', el asistente virtual experto en logística de la aplicación B2B 'Kapital Routing'.
-Tu objetivo es ayudar al usuario (el administrador o despachador logístico) a utilizar la plataforma.
+Tu objetivo es ayudar al usuario (el administrador o despachador logístico) a utilizar la plataforma
 Reglas del negocio que debes conocer:
 - Las unidades (Vans o Sprinters) tienen una capacidad MÁXIMA de 15 pasajeros.
 - Los usuarios pueden subir un Excel con la base de datos de los pasajeros a enrutar (ID, Nombres, Turno, Dirección, Zona).
