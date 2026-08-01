@@ -173,7 +173,8 @@ async def send_verification_code(req: OTPRequest):
             msg['From'] = GMAIL_SENDER
             msg['To'] = req.email
             
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+            server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+            server.starttls()
             server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
             server.send_message(msg)
             server.quit()
