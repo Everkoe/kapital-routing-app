@@ -8,6 +8,16 @@ from typing import Dict, Any, List, Optional
 import httpx
 import json
 import random
+import smtplib
+from email.mime.text import MIMEText
+
+# Configuración de Gmail SMTP
+GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "tu_correo@gmail.com") # REEMPLAZA ESTO
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "tu_app_password") # REEMPLAZA ESTO
+
+# Base de datos en memoria para OTPs (email -> {code: str})
+otp_db = {}
+
 # Configuración de Gemini AI Copilot (Usando REST puro para ahorrar espacio en Vercel)
 import os
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -108,6 +118,14 @@ class UsuarioLogin(BaseModel):
     email: EmailStr
     password: str
 
+class OTPRequest(BaseModel):
+    email: EmailStr
+    nombre: str
+
+class OTPVerify(BaseModel):
+    email: EmailStr
+    code: str
+
 class EmergencyRequest(BaseModel):
     conductor_id: str
     tipo_emergencia: str
@@ -140,7 +158,45 @@ class UsuarioUpdate(BaseModel):
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
 
-# --- Endpoints de Autenticación ---
+# --- Endpoints de Autenticación y Verificación ---
+
+@app.post("/api/auth/send-code")
+async def send_verification_code(req: OTPRequest):
+    code = str(random.randint(1000, 9999))
+    otp_db[req.email] = {"code": code}
+    
+    # Intentar enviar el correo si las credenciales están configuradas
+    if GMAIL_SENDER != "tu_correo@gmail.com" and GMAIL_APP_PASSWORD != "tu_app_password":
+        try:
+            msg = MIMEText(f"Hola {req.nombre},\n\nTu código de seguridad para registrarte en Kapital Routing es: {code}\n\nSi no solicitaste este código, por favor ignora este correo.")
+            msg['Subject'] = 'Código de Verificación - Kapital Routing'
+            msg['From'] = GMAIL_SENDER
+            msg['To'] = req.email
+            
+            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+            server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
+            server.send_message(msg)
+            server.quit()
+        except Exception as e:
+            print(f"Error enviando correo SMTP: {e}")
+            # Si falla el envío (ej. credenciales malas), devolvemos error
+            raise HTTPException(status_code=500, detail="Error enviando el correo de verificación. Revisa la consola del servidor.")
+    else:
+        # En modo demo (credenciales por defecto), logueamos el código y dejamos el 1234
+        print(f"Modo Demo: Código para {req.email} es {code}. (Usa 1234 en frontend temporalmente o configura Gmail)")
+        otp_db[req.email] = {"code": "1234"} # Forzamos 1234 en demo para no romper el flujo
+        
+    return {"message": "Código de verificación enviado."}
+
+@app.post("/api/auth/verify-code")
+async def verify_code(req: OTPVerify):
+    stored = otp_db.get(req.email)
+    if not stored or stored["code"] != req.code:
+        raise HTTPException(status_code=400, detail="Código de verificación incorrecto o expirado.")
+    # El código es válido. Se borra para un solo uso.
+    del otp_db[req.email]
+    return {"message": "Código verificado."}
+
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
     await ensure_db_loaded()

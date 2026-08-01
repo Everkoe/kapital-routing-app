@@ -36,16 +36,45 @@ const PantallaAuth = ({ onLogin }) => {
         setError('Las contraseñas no coinciden.');
         return;
       }
-      setIsVerificationStep(true);
+      setIsAuthLoading(true);
+      try {
+        const response = await fetch('/api/auth/send-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email, nombre: formData.nombre }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Error enviando código.');
+        setIsVerificationStep(true);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setIsAuthLoading(false);
+      }
       return;
     }
 
     // Si estamos en el paso de verificación y el PIN es incorrecto
     if (!isLogin && isVerificationStep) {
-      if (verificationCode !== '1234') {
-        setError('Código de verificación incorrecto. Por favor, intenta de nuevo.');
+      setIsAuthLoading(true);
+      try {
+        const verifyRes = await fetch('/api/auth/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email, code: verificationCode }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok) {
+           setError(verifyData.detail || 'Código incorrecto');
+           setIsAuthLoading(false);
+           return;
+        }
+      } catch (err) {
+        setError('Error al verificar código.');
+        setIsAuthLoading(false);
         return;
       }
+      // Continue to register below...
     }
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -98,7 +127,7 @@ const PantallaAuth = ({ onLogin }) => {
             </h2>
             <p className="auth-subtitle">
               {isVerificationStep 
-                ? `Hemos enviado un código de seguridad al ${formData.email}. (Usa 1234 para demo)`
+                ? `Hemos enviado un código de seguridad al ${formData.email}. Revisa tu bandeja de entrada o spam.`
                 : (isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística')}
             </p>
             {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
