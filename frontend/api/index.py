@@ -10,11 +10,7 @@ import json
 import random
 import os
 
-# Configuración de Resend API (Emails) para Vercel (Puerto 443)
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "re_XGr3H8S1_GhxYe" + "N8TG17XHXDpHnsB9M7R")
 
-# Base de datos en memoria para OTPs (email -> {code: str})
-otp_db = {}
 
 # Configuración de Gemini AI Copilot (Usando REST puro para ahorrar espacio en Vercel)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -115,13 +111,7 @@ class UsuarioLogin(BaseModel):
     email: EmailStr
     password: str
 
-class OTPRequest(BaseModel):
-    email: EmailStr
-    nombre: str
 
-class OTPVerify(BaseModel):
-    email: EmailStr
-    code: str
 
 class EmergencyRequest(BaseModel):
     conductor_id: str
@@ -157,51 +147,7 @@ class UsuarioUpdate(BaseModel):
 
 # --- Endpoints de Autenticación y Verificación ---
 
-@app.post("/api/auth/send-code")
-async def send_verification_code(req: OTPRequest):
-    code = str(random.randint(1000, 9999))
-    otp_db[req.email] = {"code": code}
-    
-    # Intentar enviar el correo mediante la API de Resend
-    if RESEND_API_KEY:
-        try:
-            headers = {
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            # En modo prueba gratuito de Resend, solo se puede enviar al correo verificado (probablemente el correo del usuario)
-            # Pero para pruebas lo enviamos. Si Resend lo bloquea, mostramos el error.
-            payload = {
-                "from": "Kapital Routing <onboarding@resend.dev>",
-                "to": [req.email],
-                "subject": "Código de Verificación - Kapital Routing",
-                "html": f"<p>Hola <strong>{req.nombre}</strong>,</p><p>Tu código de seguridad para registrarte en Kapital Routing es: <h2 style='letter-spacing: 5px; color: #007aff;'>{code}</h2></p><p>Si no solicitaste este código, por favor ignora este correo.</p>"
-            }
-            async with httpx.AsyncClient() as client:
-                res = await client.post("https://api.resend.com/emails", json=payload, headers=headers)
-                if res.status_code >= 400:
-                    print(f"Error de Resend: {res.text}")
-                    raise HTTPException(status_code=500, detail=f"Resend API error: Asegúrate de registrarte usando el mismo correo con el que creaste tu cuenta en Resend. (Detalle: {res.text})")
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            print(f"Error HTTP conectando a Resend: {e}")
-            raise HTTPException(status_code=500, detail="Error enviando el correo de verificación. Revisa la consola del servidor.")
-    else:
-        # En modo demo, logueamos el código y dejamos el 1234
-        print(f"Modo Demo: Código para {req.email} es {code}. (Usa 1234 en frontend temporalmente)")
-        otp_db[req.email] = {"code": "1234"} # Forzamos 1234 en demo para no romper el flujo
-        
-    return {"message": "Código de verificación enviado."}
 
-@app.post("/api/auth/verify-code")
-async def verify_code(req: OTPVerify):
-    stored = otp_db.get(req.email)
-    if not stored or stored["code"] != req.code:
-        raise HTTPException(status_code=400, detail="Código de verificación incorrecto o expirado.")
-    # El código es válido. Se borra para un solo uso.
-    del otp_db[req.email]
-    return {"message": "Código verificado."}
 
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
@@ -209,15 +155,19 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
+    # Si es el primer usuario, se aprueba automáticamente como Admin
+    estado = "Activo" if len(usuarios_db) == 0 else "Pendiente"
+    
     nuevo_usuario = {
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": usuario.rol,
+        "rol": "Admin" if len(usuarios_db) == 0 else usuario.rol, # El primero siempre es Admin
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
         "empresa_id": usuario.empresa_id,
-        "avatar": usuario.avatar
+        "avatar": usuario.avatar,
+        "estado": estado
     }
     usuarios_db[usuario.email] = nuevo_usuario
     
@@ -238,6 +188,11 @@ async def login_user(usuario: UsuarioLogin):
     if not user_in_db or user_in_db["password"] != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
     
+    # Verificar si está pendiente de aprobación
+    if user_in_db.get("estado", "Activo") == "Pendiente":
+        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por un Administrador.")
+
+    
     return {
         "email": user_in_db["email"],
         "nombre": user_in_db["nombre"],
@@ -250,37 +205,71 @@ async def login_user(usuario: UsuarioLogin):
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate):
     await ensure_db_loaded()
-    user_in_db = usuarios_db.get(update_data.email)
-    if not user_in_db:
+    user = usuarios_db.get(update_data.email)
+    if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     
+    # Validar password actual si se intenta cambiar la password
     if update_data.new_password:
-        if user_in_db.get("password") != update_data.current_password:
+        if user["password"] != update_data.current_password:
             raise HTTPException(status_code=401, detail="Contraseña actual incorrecta.")
-        user_in_db["password"] = update_data.new_password
-        
-    if update_data.nombre:
-        user_in_db["nombre"] = update_data.nombre
-        
-    if update_data.avatar:
-        user_in_db["avatar"] = update_data.avatar
-        
-    if update_data.rol == "Conductor" and update_data.unidad_id:
-        user_in_db["unidad_id"] = update_data.unidad_id
-        
+        user["password"] = update_data.new_password
+
+    if update_data.nombre: user["nombre"] = update_data.nombre
+    if update_data.avatar: user["avatar"] = update_data.avatar
+    if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
+    if update_data.rol: user["rol"] = update_data.rol
+
     await persist()
+    return {"message": "Perfil actualizado exitosamente."}
+
+# --- Endpoints de Administración (Aprobación de Usuarios) ---
+@app.get("/api/admin/users")
+async def get_all_users(email: str):
+    await ensure_db_loaded()
+    req_user = usuarios_db.get(email)
+    if not req_user or req_user.get("rol") != "Admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Admin.")
     
-    return {
-        "message": "Perfil actualizado",
-        "user": {
-            "email": user_in_db["email"],
-            "nombre": user_in_db["nombre"],
-            "rol": user_in_db["rol"],
-            "unidad_id": user_in_db.get("unidad_id"),
-            "empresa_id": user_in_db.get("empresa_id"),
-            "avatar": user_in_db.get("avatar")
-        }
-    }
+    # Devolver lista de usuarios sin contraseñas
+    lista_usuarios = []
+    for k, v in usuarios_db.items():
+        lista_usuarios.append({
+            "email": v["email"],
+            "nombre": v["nombre"],
+            "rol": v["rol"],
+            "estado": v.get("estado", "Activo")
+        })
+    return {"usuarios": lista_usuarios}
+
+@app.put("/api/admin/users/approve/{target_email}")
+async def approve_user(target_email: str, admin_email: str):
+    await ensure_db_loaded()
+    req_user = usuarios_db.get(admin_email)
+    if not req_user or req_user.get("rol") != "Admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    
+    if target_email not in usuarios_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        
+    usuarios_db[target_email]["estado"] = "Activo"
+    await persist()
+    return {"message": f"Usuario {target_email} aprobado exitosamente."}
+
+@app.delete("/api/admin/users/reject/{target_email}")
+async def reject_user(target_email: str, admin_email: str):
+    await ensure_db_loaded()
+    req_user = usuarios_db.get(admin_email)
+    if not req_user or req_user.get("rol") != "Admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    
+    if target_email not in usuarios_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        
+    del usuarios_db[target_email]
+    await persist()
+    return {"message": f"Usuario {target_email} rechazado y eliminado."}
+
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
 

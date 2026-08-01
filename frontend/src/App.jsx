@@ -30,51 +30,11 @@ const PantallaAuth = ({ onLogin }) => {
     e.preventDefault();
     setError('');
 
-    // Si es registro y no estamos en verificación, validar y pasar a verificación
-    if (!isLogin && !isVerificationStep) {
+    if (!isLogin) {
       if (formData.password !== formData.confirmar_password) {
         setError('Las contraseñas no coinciden.');
         return;
       }
-      setIsAuthLoading(true);
-      try {
-        const response = await fetch('/api/auth/send-code', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: formData.email, nombre: formData.nombre }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Error enviando código.');
-        setIsVerificationStep(true);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setIsAuthLoading(false);
-      }
-      return;
-    }
-
-    // Si estamos en el paso de verificación y el PIN es incorrecto
-    if (!isLogin && isVerificationStep) {
-      setIsAuthLoading(true);
-      try {
-        const verifyRes = await fetch('/api/auth/verify-code', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: formData.email, code: verificationCode }),
-        });
-        const verifyData = await verifyRes.json();
-        if (!verifyRes.ok) {
-           setError(verifyData.detail || 'Código incorrecto');
-           setIsAuthLoading(false);
-           return;
-        }
-      } catch (err) {
-        setError('Error al verificar código.');
-        setIsAuthLoading(false);
-        return;
-      }
-      // Continue to register below...
     }
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -94,8 +54,7 @@ const PantallaAuth = ({ onLogin }) => {
       if (isLogin) {
         onLogin(data);
       } else {
-        alert('¡Registro exitoso! Por favor, inicia sesión.');
-        setIsVerificationStep(false);
+        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por un Administrador.');
         setIsLogin(true);
       }
     } catch (err) {
@@ -121,21 +80,13 @@ const PantallaAuth = ({ onLogin }) => {
           </div>
           <form onSubmit={handleSubmit} className="auth-form">
             <h2>
-              {isVerificationStep 
-                ? 'Verifica tu identidad' 
-                : (isLogin ? 'Bienvenido de nuevo' : 'Crear Cuenta')}
+              {isLogin ? 'Bienvenido de nuevo' : 'Solicitar Acceso'}
             </h2>
             <p className="auth-subtitle">
-              {isVerificationStep 
-                ? `Hemos enviado un código de seguridad al ${formData.email}. Revisa tu bandeja de entrada o spam.`
-                : (isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística')}
+              {isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística (Aprobación Requerida)'}
             </p>
             {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
             
-            {isVerificationStep ? (
-              <input className="auth-input" type="text" placeholder="Código de 4 dígitos" maxLength="4" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value)} required style={{textAlign: 'center', letterSpacing: '8px', fontSize: '1.5rem'}} />
-            ) : (
-              <>
                 {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
                 {!isLogin && <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />}
                 <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
@@ -157,31 +108,21 @@ const PantallaAuth = ({ onLogin }) => {
                     )}
                   </>
                 )}
-              </>
-            )}
             
             <button type="submit" className="auth-button" disabled={isAuthLoading}>
               {isAuthLoading ? (
                 <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}>
                   <span className="auth-spinner"></span>
-                  {isLogin ? 'Iniciando sesión...' : 'Verificando...'}
+                  {isLogin ? 'Iniciando sesión...' : 'Registrando...'}
                 </div>
               ) : (
-                isVerificationStep ? 'Verificar y Completar Registro' : (isLogin ? 'Ingresar' : 'Continuar')
+                isLogin ? 'Ingresar' : 'Enviar Solicitud'
               )}
             </button>
             
-            {!isVerificationStep && (
-              <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
-                {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
-              </p>
-            )}
-            
-            {isVerificationStep && (
-               <p className="auth-toggle" onClick={() => setIsVerificationStep(false)}>
-                 Volver al registro
-               </p>
-            )}
+            <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
+              {isLogin ? '¿No tienes cuenta? Solicita acceso' : '¿Ya tienes cuenta? Inicia sesión'}
+            </p>
           </form>
         </div>
       </div>
@@ -191,7 +132,88 @@ const PantallaAuth = ({ onLogin }) => {
 
 
 // --- Componentes de Vistas ---
-const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme }) => {
+const UsersManagementTab = ({ usuarioActual }) => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`/api/admin/users?email=${encodeURIComponent(usuarioActual.email)}`);
+      const data = await res.json();
+      if (res.ok) setUsers(data.usuarios || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleAction = async (targetEmail, action) => {
+    try {
+      const res = await fetch(`/api/admin/users/${action}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, {
+        method: action === 'approve' ? 'PUT' : 'DELETE'
+      });
+      if (res.ok) fetchUsers();
+      else alert("Error al realizar la acción");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Gestión de Accesos (B2B)</h2>
+      <p>Administra las solicitudes de ingreso a la plataforma Kapital Routing.</p>
+      
+      {loading ? <p>Cargando...</p> : (
+        <table className="rt-table" style={{width: '100%', marginTop: '20px'}}>
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Correo</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.email}>
+                <td>{u.nombre}</td>
+                <td>{u.email}</td>
+                <td>{u.rol}</td>
+                <td>
+                  <span style={{ 
+                    padding: '4px 8px', borderRadius: '4px', fontSize: '12px',
+                    backgroundColor: u.estado === 'Activo' ? '#28a745' : '#ffc107',
+                    color: u.estado === 'Activo' ? 'white' : 'black'
+                  }}>{u.estado}</span>
+                </td>
+                <td>
+                  {u.estado === 'Pendiente' && (
+                    <>
+                      <button onClick={() => handleAction(u.email, 'approve')} style={{marginRight: '8px', backgroundColor: '#28a745', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>✅ Aprobar</button>
+                      <button onClick={() => handleAction(u.email, 'reject')} style={{backgroundColor: '#dc3545', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>❌ Denegar</button>
+                    </>
+                  )}
+                  {u.estado === 'Activo' && u.email !== usuarioActual.email && (
+                    <button onClick={() => handleAction(u.email, 'reject')} style={{backgroundColor: '#dc3545', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>Desactivar</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+};
+
+const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usuarioActual }) => {
   const [isOpen, setIsOpen] = useState(false);
   
   const handleNav = (vista) => {
@@ -210,6 +232,11 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme }) =
         <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
         <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
         <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+        
+        {usuarioActual?.rol === 'Admin' && (
+           <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={{color: '#007aff'}}>🛡️ Usuarios</a>
+        )}
+        
         <span className="nav-separator">|</span>
         <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>👤 Mi Perfil</a>
         <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link">Cerrar Sesión</a>
@@ -553,6 +580,7 @@ function App() {
       case 'flota': return <FlotaView />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
+      case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
@@ -574,7 +602,7 @@ function App() {
 
   return (
     <div className="App">
-      <Navbar vistaActual={vistaActual} setVistaActual={setVistaActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
+      <Navbar vistaActual={vistaActual} setVistaActual={setVistaActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} usuarioActual={usuarioActual} />
       <main className="app-container">
         {renderVista()}
         <AuditLog logs={logs} />
