@@ -12,9 +12,8 @@ import smtplib
 from email.mime.text import MIMEText
 import os
 
-# Configuración de Gmail SMTP
-GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "anyelobill31@gmail.com")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "obcytfvipbetwpll")
+# Configuración de Resend API (Emails)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 # Base de datos en memoria para OTPs (email -> {code: str})
 otp_db = {}
@@ -165,26 +164,32 @@ async def send_verification_code(req: OTPRequest):
     code = str(random.randint(1000, 9999))
     otp_db[req.email] = {"code": code}
     
-    # Intentar enviar el correo si las credenciales están configuradas
-    if GMAIL_SENDER and GMAIL_APP_PASSWORD:
+    # Intentar enviar el correo mediante la API de Resend
+    if RESEND_API_KEY:
         try:
-            msg = MIMEText(f"Hola {req.nombre},\n\nTu código de seguridad para registrarte en Kapital Routing es: {code}\n\nSi no solicitaste este código, por favor ignora este correo.")
-            msg['Subject'] = 'Código de Verificación - Kapital Routing'
-            msg['From'] = GMAIL_SENDER
-            msg['To'] = req.email
-            
-            server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-            server.starttls()
-            server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
+            headers = {
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "from": "Kapital Routing <onboarding@resend.dev>",
+                "to": [req.email],
+                "subject": "Código de Verificación - Kapital Routing",
+                "html": f"<p>Hola <strong>{req.nombre}</strong>,</p><p>Tu código de seguridad para registrarte en Kapital Routing es: <h2>{code}</h2></p><p>Si no solicitaste este código, por favor ignora este correo.</p>"
+            }
+            async with httpx.AsyncClient() as client:
+                res = await client.post("https://api.resend.com/emails", json=payload, headers=headers)
+                if res.status_code >= 400:
+                    print(f"Error de Resend: {res.text}")
+                    raise HTTPException(status_code=500, detail="Error enviando el correo de verificación desde el servidor.")
+        except HTTPException as he:
+            raise he
         except Exception as e:
-            print(f"Error enviando correo SMTP: {e}")
-            # Si falla el envío (ej. credenciales malas), devolvemos error
-            raise HTTPException(status_code=500, detail="Error enviando el correo de verificación. Revisa la consola del servidor.")
+            print(f"Error de conexión con Resend: {e}")
+            raise HTTPException(status_code=500, detail="No se pudo conectar con el servicio de correos.")
     else:
-        # En modo demo (credenciales por defecto), logueamos el código y dejamos el 1234
-        print(f"Modo Demo: Código para {req.email} es {code}. (Usa 1234 en frontend temporalmente o configura Gmail)")
+        # En modo demo (sin API Key), logueamos el código y dejamos el 1234
+        print(f"Modo Demo: Código para {req.email} es {code}. (Usa 1234 en frontend temporalmente)")
         otp_db[req.email] = {"code": "1234"} # Forzamos 1234 en demo para no romper el flujo
         
     return {"message": "Código de verificación enviado."}
