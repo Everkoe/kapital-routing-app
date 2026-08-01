@@ -162,7 +162,7 @@ async def register_user(usuario: UsuarioRegistro):
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": "Admin" if len(usuarios_db) == 0 else usuario.rol, # El primero siempre es Admin
+        "rol": "Administrador" if len(usuarios_db) == 0 else usuario.rol, # El primero siempre es Admin
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
         "empresa_id": usuario.empresa_id,
@@ -228,7 +228,7 @@ async def update_profile(update_data: UsuarioUpdate):
 async def get_all_users(email: str):
     await ensure_db_loaded()
     req_user = usuarios_db.get(email)
-    if not req_user or req_user.get("rol") != "Admin":
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Admin.")
     
     # Devolver lista de usuarios sin contraseñas
@@ -246,7 +246,7 @@ async def get_all_users(email: str):
 async def approve_user(target_email: str, admin_email: str):
     await ensure_db_loaded()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") != "Admin":
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
@@ -260,7 +260,7 @@ async def approve_user(target_email: str, admin_email: str):
 async def reject_user(target_email: str, admin_email: str):
     await ensure_db_loaded()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") != "Admin":
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:

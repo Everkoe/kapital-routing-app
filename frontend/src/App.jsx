@@ -233,7 +233,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
         <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
         
-        {usuarioActual?.rol === 'Admin' && (
+        {usuarioActual?.rol === 'Administrador' && (
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={{color: '#007aff'}}>🛡️ Usuarios</a>
         )}
         
