@@ -13,8 +13,8 @@ from email.mime.text import MIMEText
 import os
 
 # Configuración de Gmail SMTP
-GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "tu_correo@gmail.com") # REEMPLAZA ESTO
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "tu_app_password") # REEMPLAZA ESTO
+GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "anyelobill31@gmail.com")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "obcytfvipbetwpll")
 
 # Base de datos en memoria para OTPs (email -> {code: str})
 otp_db = {}
@@ -166,7 +166,7 @@ async def send_verification_code(req: OTPRequest):
     otp_db[req.email] = {"code": code}
     
     # Intentar enviar el correo si las credenciales están configuradas
-    if GMAIL_SENDER != "tu_correo@gmail.com" and GMAIL_APP_PASSWORD != "tu_app_password":
+    if GMAIL_SENDER and GMAIL_APP_PASSWORD:
         try:
             msg = MIMEText(f"Hola {req.nombre},\n\nTu código de seguridad para registrarte en Kapital Routing es: {code}\n\nSi no solicitaste este código, por favor ignora este correo.")
             msg['Subject'] = 'Código de Verificación - Kapital Routing'
