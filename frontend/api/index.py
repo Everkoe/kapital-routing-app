@@ -99,8 +99,10 @@ class UsuarioRegistro(BaseModel):
     password: str
     nombre: str
     rol: str
+    telefono: Optional[str] = None
     unidad_id: Optional[str] = None
     empresa_id: Optional[str] = None
+    avatar: Optional[str] = None
 
 class UsuarioLogin(BaseModel):
     email: EmailStr
@@ -150,6 +152,7 @@ async def register_user(usuario: UsuarioRegistro):
         "password": usuario.password,
         "nombre": usuario.nombre,
         "rol": usuario.rol,
+        "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
         "empresa_id": usuario.empresa_id,
         "avatar": usuario.avatar

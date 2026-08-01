@@ -17,7 +17,9 @@ const PantallaAuth = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
+  const [isVerificationStep, setIsVerificationStep] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [formData, setFormData] = useState({ email: '', password: '', confirmar_password: '', telefono: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -27,6 +29,25 @@ const PantallaAuth = ({ onLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    // Si es registro y no estamos en verificación, validar y pasar a verificación
+    if (!isLogin && !isVerificationStep) {
+      if (formData.password !== formData.confirmar_password) {
+        setError('Las contraseñas no coinciden.');
+        return;
+      }
+      setIsVerificationStep(true);
+      return;
+    }
+
+    // Si estamos en el paso de verificación y el PIN es incorrecto
+    if (!isLogin && isVerificationStep) {
+      if (verificationCode !== '1234') {
+        setError('Código de verificación incorrecto. Por favor, intenta de nuevo.');
+        return;
+      }
+    }
+
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const payload = isLogin ? { email: formData.email, password: formData.password } : formData;
 
@@ -45,6 +66,7 @@ const PantallaAuth = ({ onLogin }) => {
         onLogin(data);
       } else {
         alert('¡Registro exitoso! Por favor, inicia sesión.');
+        setIsVerificationStep(false);
         setIsLogin(true);
       }
     } catch (err) {
@@ -69,28 +91,42 @@ const PantallaAuth = ({ onLogin }) => {
             <img src="/logo.png" alt="Kapital Routing Logo" className="auth-logo" onError={(e) => e.target.style.display='none'} />
           </div>
           <form onSubmit={handleSubmit} className="auth-form">
-            <h2>{isLogin ? 'Bienvenido de nuevo' : 'Crear Cuenta'}</h2>
+            <h2>
+              {isVerificationStep 
+                ? 'Verifica tu identidad' 
+                : (isLogin ? 'Bienvenido de nuevo' : 'Crear Cuenta')}
+            </h2>
             <p className="auth-subtitle">
-              {isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística'}
+              {isVerificationStep 
+                ? `Hemos enviado un código de seguridad al ${formData.email}. (Usa 1234 para demo)`
+                : (isLogin ? 'Ingresa tus credenciales para acceder al sistema' : 'Únete a nuestra plataforma logística')}
             </p>
             {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
             
-            {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
-            <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
-            <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
-            
-            {!isLogin && (
+            {isVerificationStep ? (
+              <input className="auth-input" type="text" placeholder="Código de 4 dígitos" maxLength="4" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value)} required style={{textAlign: 'center', letterSpacing: '8px', fontSize: '1.5rem'}} />
+            ) : (
               <>
-                <select className="auth-input" name="rol" onChange={handleInputChange}>
-                  <option>Administrador</option>
-                  <option>Conductor</option>
-                  <option>Cliente</option>
-                </select>
-                {formData.rol === 'Conductor' && (
-                  <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
-                )}
-                {formData.rol === 'Cliente' && (
-                  <input className="auth-input" name="empresa_id" type="text" placeholder="Código de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
+                {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
+                {!isLogin && <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />}
+                <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
+                <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
+                {!isLogin && <input className="auth-input" name="confirmar_password" type="password" placeholder="Confirmar Contraseña" onChange={handleInputChange} required />}
+                
+                {!isLogin && (
+                  <>
+                    <select className="auth-input" name="rol" onChange={handleInputChange}>
+                      <option>Administrador</option>
+                      <option>Conductor</option>
+                      <option>Cliente</option>
+                    </select>
+                    {formData.rol === 'Conductor' && (
+                      <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
+                    )}
+                    {formData.rol === 'Cliente' && (
+                      <input className="auth-input" name="empresa_id" type="text" placeholder="Código de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -99,16 +135,24 @@ const PantallaAuth = ({ onLogin }) => {
               {isAuthLoading ? (
                 <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}>
                   <span className="auth-spinner"></span>
-                  {isLogin ? 'Iniciando sesión...' : 'Registrando...'}
+                  {isLogin ? 'Iniciando sesión...' : 'Verificando...'}
                 </div>
               ) : (
-                isLogin ? 'Ingresar' : 'Completar Registro'
+                isVerificationStep ? 'Verificar y Completar Registro' : (isLogin ? 'Ingresar' : 'Continuar')
               )}
             </button>
             
-            <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
-              {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
-            </p>
+            {!isVerificationStep && (
+              <p className="auth-toggle" onClick={() => setIsLogin(!isLogin)}>
+                {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
+              </p>
+            )}
+            
+            {isVerificationStep && (
+               <p className="auth-toggle" onClick={() => setIsVerificationStep(false)}>
+                 Volver al registro
+               </p>
+            )}
           </form>
         </div>
       </div>
