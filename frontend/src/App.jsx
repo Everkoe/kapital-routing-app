@@ -474,6 +474,18 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
 const DashboardView = ({ routes, addLog, setRoutes }) => {
+  const syncToBackend = async (newRoutes) => {
+    try {
+      await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRoutes)
+      });
+    } catch (err) {
+      console.error("Error guardando cambios:", err);
+    }
+  };
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -509,6 +521,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
       }
       newRoutes[fromRouteIndex] = fromRoute;
       newRoutes[toRouteIndex] = toRoute;
+      syncToBackend(newRoutes);
       return newRoutes;
     });
     addLog(`Pasajero ${agenteId} reasignado manualmente por Drag & Drop.`);
@@ -708,6 +721,29 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
 
 // --- Componente Raíz ---
 function App() {
+  // Sincronización en Tiempo Real
+  useEffect(() => {
+    if (!usuario) return;
+    const syncRoutes = async () => {
+      try {
+        const res = await fetch('/api/routes');
+        if (res.ok) {
+          const data = await res.json();
+          // Comparación simple por longitud y contenido para evitar re-renders ciegos
+          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data) ? data : prev);
+        }
+      } catch (err) {
+        console.error("Error en sincronización en tiempo real:", err);
+      }
+    };
+    
+    // Polling cada 3 segundos
+    const intervalId = setInterval(syncRoutes, 3000);
+    syncRoutes(); // Sincronización inicial
+    
+    return () => clearInterval(intervalId);
+  }, [usuario]);
+
   const [usuarioActual, setUsuarioActual] = useState(null);
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [routes, setRoutes] = useState(() => {

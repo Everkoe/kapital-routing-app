@@ -66,6 +66,21 @@ async def ensure_db_loaded():
     except Exception as e:
         print(f"Error loading from Supabase: {e}")
 
+
+async def reload_db():
+    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
+            if res.status_code == 200 and len(res.json()) > 0:
+                data = res.json()[0]
+                usuarios_db = data.get("usuarios", {})
+                rutas_estado_actual = data.get("rutas", [])
+                historial_rutas = data.get("historial", [])
+                db_loaded = True
+    except Exception as e:
+        print(f"Error loading from Supabase in reload: {e}")
+
 async def persist():
     try:
         payload = {
@@ -343,6 +358,19 @@ def native_kmeans(points, k, max_iters=10):
         centroids = new_centroids
         
     return labels
+
+
+@app.get("/api/routes")
+async def get_routes():
+    await reload_db()
+    return rutas_estado_actual
+
+@app.post("/api/routes")
+async def update_routes(rutas: list = Body(...)):
+    global rutas_estado_actual
+    rutas_estado_actual = rutas
+    await persist()
+    return {"message": "Rutas actualizadas sincronizadas", "rutas": rutas_estado_actual}
 
 @app.post("/api/assign-routes/")
 async def assign_routes_from_excel(
