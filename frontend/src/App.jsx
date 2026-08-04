@@ -615,6 +615,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
   const handleClearBoard = async () => {
     if(!window.confirm("¿Limpiar tablero?")) return;
     setRoutes([]);
+    syncToBackend([]);
     localStorage.removeItem('kapital_current_routes');
     setSelectedFile(null);
     setError(null);
