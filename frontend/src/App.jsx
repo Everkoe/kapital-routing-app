@@ -47,9 +47,17 @@ const PantallaAuth = ({ onLogin }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json();
+      
+      let data = {};
+      const text = await response.text();
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (jsonErr) {
+        data = { detail: `Error en la respuesta del servidor (${response.status})` };
+      }
+
       if (!response.ok) {
-        throw new Error(data.detail || 'Ocurrió un error.');
+        throw new Error(data.detail || data.message || `Error ${response.status}: Error en el servidor.`);
       }
       if (isLogin) {
         onLogin(data);
@@ -139,8 +147,11 @@ const UsersManagementTab = ({ usuarioActual }) => {
   const fetchUsers = async () => {
     try {
       const res = await fetch(`/api/admin/users?email=${encodeURIComponent(usuarioActual.email)}`);
-      const data = await res.json();
-      if (res.ok) setUsers(data.usuarios || []);
+      if (res.ok) {
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        setUsers(data.usuarios || []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -786,9 +797,12 @@ function App() {
       try {
         const res = await fetch('/api/board/status');
         if (res.ok) {
-          const data = await res.json();
-          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
-          setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
+          const text = await res.text();
+          if (text) {
+            const data = JSON.parse(text);
+            if (data.rutas) setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
+            if (data.lock !== undefined) setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
+          }
         }
       } catch (err) {
         console.error("Error en sincronización en tiempo real:", err);

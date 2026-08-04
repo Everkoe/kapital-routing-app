@@ -38,11 +38,12 @@ rutas_estado_actual: List[Dict[str, Any]] = []
 usuarios_db: Dict[str, Dict[str, Any]] = {}
 conductores_db: Dict[str, Dict[str, Any]] = {}
 historial_rutas: List[Dict[str, Any]] = []
+board_lock: Dict[str, Any] = {}
 
 db_loaded = False
 
 async def ensure_db_loaded():
-    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas
+    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, board_lock
     if db_loaded:
         return
     try:
@@ -53,6 +54,7 @@ async def ensure_db_loaded():
                 usuarios_db = data.get("usuarios", {})
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
+                board_lock = data.get("lock", {})
                 flota = data.get("flota", {})
                 if not flota:
                     flota = {
@@ -68,7 +70,7 @@ async def ensure_db_loaded():
 
 
 async def reload_db():
-    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded
+    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock
     try:
         async with httpx.AsyncClient() as client:
             res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
@@ -77,6 +79,7 @@ async def reload_db():
                 usuarios_db = data.get("usuarios", {})
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
+                board_lock = data.get("lock", {})
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
@@ -88,7 +91,8 @@ async def persist():
             "usuarios": usuarios_db,
             "rutas": rutas_estado_actual,
             "historial": historial_rutas,
-            "flota": conductores_db
+            "flota": conductores_db,
+            "lock": board_lock
         }
         async with httpx.AsyncClient() as client:
             await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
@@ -358,6 +362,27 @@ def native_kmeans(points, k, max_iters=10):
         centroids = new_centroids
         
     return labels
+
+
+
+@app.get("/api/board/status")
+async def get_board_status():
+    await reload_db()
+    return {"rutas": rutas_estado_actual, "lock": board_lock}
+
+@app.post("/api/board/unlock")
+async def unlock_board(body: dict = Body(...)):
+    global board_lock
+    await reload_db()
+    owner = body.get("owner")
+    if not owner:
+        raise HTTPException(status_code=400, detail="Falta el dueño (owner).")
+    if not board_lock or board_lock.get("locked_by") == owner:
+        board_lock = {}
+        await persist()
+        return {"success": True, "message": "Tablero liberado"}
+    else:
+        raise HTTPException(status_code=403, detail="No tienes permiso para liberar el tablero de otro.")
 
 
 @app.get("/api/routes")
