@@ -484,7 +484,7 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) => {
+const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, syncPausedRef }) => {
   const syncToBackend = async (newRoutes) => {
     try {
       await fetch('/api/routes', {
@@ -498,6 +498,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
   };
 
   const [selectedFile, setSelectedFile] = useState(null);
+  const [fileInputKey, setFileInputKey] = useState(0); // to reset input
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
@@ -539,9 +540,13 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
   };
 
   const handleFileChange = (event) => { 
-    setSelectedFile(event.target.files[0]); 
+    const file = event.target.files[0];
+    if (!file) return;
+    setSelectedFile(file); 
     setRoutes([]); 
-    setError(null); 
+    setError(null);
+    // Pause sync so the poller doesn't restore old Supabase data while user sets up the new load
+    if (syncPausedRef) syncPausedRef.current = true;
   };
 
   const isLockedByOther = boardLock?.locked_by && boardLock.locked_by !== (usuarioActual?.email || 'Desconocido');
@@ -550,16 +555,16 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
       setError("Por favor, seleccione un archivo Excel para procesar.");
       return;
     }
-    // Ya no es obligatorio llenar todos los filtros (si dejan vacio, el backend trae todo)
     setIsLoading(true);
     setError(null);
+    if (syncPausedRef) syncPausedRef.current = true; // Pause poller during generation
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('fecha', filtroFecha);
     formData.append('hora', filtroHora);
     formData.append('sentido', filtroSentido);
     formData.append('sede', filtroSede);
-      formData.append('owner', usuarioActual?.email || 'Desconocido');
+    formData.append('owner', usuarioActual?.email || 'Desconocido');
 
     try {
       const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
@@ -567,7 +572,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
         const errData = await response.json();
         let errMsg = errData.detail;
         if (typeof errMsg === 'object') {
-          errMsg = JSON.stringify(errMsg).replace(/[\[\]"{}]+/g, ' '); // Clean up the JSON string for the user
+          errMsg = JSON.stringify(errMsg).replace(/[\[\]"{}]+/g, ' ');
         }
         throw new Error(errMsg || 'Ocurrió un error interno en el servidor.');
       }
@@ -579,6 +584,8 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
       addLog(`ERROR al generar rutas: ${err.message}`);
     } finally {
       setIsLoading(false);
+      // Resume poller 2s after generation completes (enough time for Supabase to be updated)
+      setTimeout(() => { if (syncPausedRef) syncPausedRef.current = false; }, 2000);
     }
   };
 
@@ -627,8 +634,13 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
 
   const handleClearBoard = async () => {
     if(!window.confirm("¿Limpiar tablero?")) return;
+    if (syncPausedRef) syncPausedRef.current = false;
     setRoutes([]);
     syncToBackend([]);
+    localStorage.removeItem('kapital_current_routes');
+    setSelectedFile(null);
+    setFileInputKey(prev => prev + 1);
+    setError(null);
     try {
       await fetch('/api/board/unlock', {
         method: 'POST',
@@ -636,9 +648,6 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
         body: JSON.stringify({ owner: usuarioActual?.email || 'Desconocido' })
       });
     } catch(e) {}
-    localStorage.removeItem('kapital_current_routes');
-    setSelectedFile(null);
-    setError(null);
   };
 
   return (
@@ -704,7 +713,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) 
             </h3>
             
             <div className="file-dropzone">
-              <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: isLockedByOther ? 'not-allowed' : 'pointer', zIndex: 10, pointerEvents: isLockedByOther ? 'none' : 'auto' }} />
+              <input key={fileInputKey} type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: isLockedByOther ? 'not-allowed' : 'pointer', zIndex: 10, pointerEvents: isLockedByOther ? 'none' : 'auto' }} />
               <div className="folder-icon">📂</div>
               <p style={{ margin: 0, fontWeight: '700', fontSize: '1.2rem', color: 'var(--primary-color)', textAlign: 'center' }}>
                 {selectedFile ? selectedFile.name : "Arrastra o haz clic para subir tu Excel"}
@@ -770,6 +779,7 @@ function App() {
 
   const [usuarioActual, setUsuarioActual] = useState(null);
   const [boardLock, setBoardLock] = useState({});
+  const syncPausedRef = React.useRef(false);
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [routes, setRoutes] = useState(() => {
     const savedRoutes = localStorage.getItem('kapital_current_routes');
@@ -798,7 +808,7 @@ function App() {
         const res = await fetch('/api/board/status');
         if (res.ok) {
           const text = await res.text();
-          if (text) {
+          if (text && !syncPausedRef.current) {
             const data = JSON.parse(text);
             if (data.rutas) setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
             if (data.lock !== undefined) setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
@@ -854,7 +864,7 @@ function App() {
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
-        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} boardLock={boardLock} usuarioActual={usuarioActual} />;
+        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} boardLock={boardLock} usuarioActual={usuarioActual} syncPausedRef={syncPausedRef} />;
     }
   };
 
