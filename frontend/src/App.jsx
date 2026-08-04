@@ -484,7 +484,7 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, syncPausedRef }) => {
+const DashboardView = ({ routes, addLog, setRoutes, usuarioActual }) => {
   const syncToBackend = async (newRoutes) => {
     try {
       await fetch('/api/routes', {
@@ -498,7 +498,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
   };
 
   const [selectedFile, setSelectedFile] = useState(null);
-  const [fileInputKey, setFileInputKey] = useState(0); // to reset input
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
@@ -545,11 +545,9 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
     setSelectedFile(file); 
     setRoutes([]); 
     setError(null);
-    // Pause sync so the poller doesn't restore old Supabase data while user sets up the new load
-    if (syncPausedRef) syncPausedRef.current = true;
+
   };
 
-  const isLockedByOther = boardLock?.locked_by && boardLock.locked_by !== (usuarioActual?.email || 'Desconocido');
   const handleGenerateRoutes = async () => {
     if (!selectedFile) {
       setError("Por favor, seleccione un archivo Excel para procesar.");
@@ -557,14 +555,12 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
     }
     setIsLoading(true);
     setError(null);
-    if (syncPausedRef) syncPausedRef.current = true; // Pause poller during generation
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('fecha', filtroFecha);
     formData.append('hora', filtroHora);
     formData.append('sentido', filtroSentido);
     formData.append('sede', filtroSede);
-    formData.append('owner', usuarioActual?.email || 'Desconocido');
 
     try {
       const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
@@ -584,8 +580,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
       addLog(`ERROR al generar rutas: ${err.message}`);
     } finally {
       setIsLoading(false);
-      // Keep poller paused after generation - it will resume only when user clears the board.
-      // This prevents stale Supabase data from overwriting freshly-generated routes.
+
     }
   };
 
@@ -633,36 +628,21 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
   };
 
   const handleClearBoard = async () => {
-    if(!window.confirm("¿Limpiar tablero?\n\nEsto borrará las rutas actuales del servidor para todos los usuarios.")) return;
-    
-    // Keep poller paused while we clear — prevents stale Supabase data from coming back
-    if (syncPausedRef) syncPausedRef.current = true;
-    
-    // Clear local state immediately
+    if(!window.confirm("¿Limpiar tablero?")) return;
     setRoutes([]);
-    localStorage.removeItem('kapital_current_routes');
     setSelectedFile(null);
     setFileInputKey(prev => prev + 1);
     setError(null);
-    
+    localStorage.removeItem('kapital_current_routes');
+    // Save empty state to backend so next login also starts clean
     try {
-      // 1. Save empty routes to Supabase FIRST (await so we know it completed)
       await fetch('/api/routes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Owner-Email': usuarioActual?.email || 'Desconocido' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify([])
       });
-      // 2. Unlock the board AFTER routes are cleared
-      await fetch('/api/board/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner: usuarioActual?.email || 'Desconocido' })
-      });
     } catch(e) {
-      console.error("Error clearing board:", e);
-    } finally {
-      // Resume poller ONLY after Supabase has been updated (empty routes confirmed)
-      if (syncPausedRef) syncPausedRef.current = false;
+      console.error("Error clearing board on server:", e);
     }
   };
 
@@ -684,12 +664,6 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
         </div>
         
         {/* Grid Principal Responsivo */}
-        
-        {isLockedByOther && (
-          <div style={{ background: 'rgba(245, 158, 11, 0.2)', border: '1px solid #f59e0b', color: '#fbbf24', padding: '15px 30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            🔒 Tablero bloqueado por {boardLock.locked_by}. Solo puedes observar (Modo Lectura).
-          </div>
-        )}
 
         <div className="dashboard-grid">
           
@@ -729,7 +703,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
             </h3>
             
             <div className="file-dropzone">
-              <input key={fileInputKey} type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: isLockedByOther ? 'not-allowed' : 'pointer', zIndex: 10, pointerEvents: isLockedByOther ? 'none' : 'auto' }} />
+              <input key={fileInputKey} type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 10 }} />
               <div className="folder-icon">📂</div>
               <p style={{ margin: 0, fontWeight: '700', fontSize: '1.2rem', color: 'var(--primary-color)', textAlign: 'center' }}>
                 {selectedFile ? selectedFile.name : "Arrastra o haz clic para subir tu Excel"}
@@ -749,7 +723,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
                   <button className="btn-secondary" onClick={handleExportToExcel} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px' }}>
                     <span style={{ fontSize: '1.2rem' }}>📥</span> Exportar Excel
                   </button>
-                  <button className="btn-danger" onClick={handleClearBoard} disabled={isLockedByOther} style={{ opacity: isLockedByOther ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', cursor: isLockedByOther ? 'not-allowed' : 'pointer' }} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444' }}>
+                  <button className="btn-danger" onClick={handleClearBoard} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444' }}>
                     <span style={{ fontSize: '1.2rem' }}>🗑️</span> Limpiar Tablero
                   </button>
                 </>
@@ -759,7 +733,7 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
            <button 
               className="btn-generate-ai" 
               onClick={handleGenerateRoutes} 
-              disabled={isLoading || !selectedFile || isLockedByOther}
+              disabled={isLoading || !selectedFile}
             >
               {isLoading ? (
                 <>
@@ -794,8 +768,7 @@ function App() {
 
 
   const [usuarioActual, setUsuarioActual] = useState(null);
-  const [boardLock, setBoardLock] = useState({});
-  const syncPausedRef = React.useRef(false);
+
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [routes, setRoutes] = useState(() => {
     const savedRoutes = localStorage.getItem('kapital_current_routes');
@@ -816,33 +789,26 @@ function App() {
     localStorage.setItem('kapital_current_routes', JSON.stringify(routes));
   }, [routes]);
 
-  // Sincronización en Tiempo Real
+  // Load initial routes once from backend on login (no polling)
   useEffect(() => {
     if (!usuarioActual) return;
-    const syncRoutes = async () => {
+    const loadInitialRoutes = async () => {
       try {
-        const res = await fetch('/api/board/status');
+        const res = await fetch('/api/routes');
         if (res.ok) {
           const text = await res.text();
-          if (text && !syncPausedRef.current) {
+          if (text) {
             const data = JSON.parse(text);
-            // Don't let Supabase overwrite if we are the board owner (we have the freshest data).
-            const lockedByCurrentUser = data.lock?.locked_by && data.lock.locked_by === (usuarioActual?.email || '');
-            if (data.rutas && !lockedByCurrentUser) {
-              setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
+            if (Array.isArray(data) && data.length > 0) {
+              setRoutes(data);
             }
-            if (data.lock !== undefined) setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
           }
         }
       } catch (err) {
-        console.error("Error en sincronización en tiempo real:", err);
+        console.error("Error cargando rutas iniciales:", err);
       }
     };
-    
-    const intervalId = setInterval(syncRoutes, 3000);
-    syncRoutes();
-    
-    return () => clearInterval(intervalId);
+    loadInitialRoutes();
   }, [usuarioActual]);
 
   const toggleTheme = () => {
@@ -884,7 +850,7 @@ function App() {
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
-        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} boardLock={boardLock} usuarioActual={usuarioActual} syncPausedRef={syncPausedRef} />;
+        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} />;
     }
   };
 

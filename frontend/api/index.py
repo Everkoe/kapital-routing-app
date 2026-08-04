@@ -367,26 +367,6 @@ def native_kmeans(points, k, max_iters=10):
 
 
 
-@app.get("/api/board/status")
-async def get_board_status():
-    await reload_db()
-    return {"rutas": rutas_estado_actual, "lock": board_lock}
-
-@app.post("/api/board/unlock")
-async def unlock_board(body: dict = Body(...)):
-    global board_lock
-    await reload_db()
-    owner = body.get("owner")
-    if not owner:
-        raise HTTPException(status_code=400, detail="Falta el dueño (owner).")
-    if not board_lock or board_lock.get("locked_by") == owner:
-        board_lock = {}
-        await persist()
-        return {"success": True, "message": "Tablero liberado"}
-    else:
-        raise HTTPException(status_code=403, detail="No tienes permiso para liberar el tablero de otro.")
-
-
 @app.get("/api/routes")
 async def get_routes():
     await reload_db()
@@ -405,15 +385,10 @@ async def assign_routes_from_excel(
     fecha: str = Form(""),
     hora: str = Form(""),
     sentido: str = Form(""),
-    sede: str = Form(""),
-    owner: str = Form("Desconocido")
+    sede: str = Form("")
 ):
-    global rutas_estado_actual, board_lock
+    global rutas_estado_actual
     await reload_db()
-    if board_lock and board_lock.get("locked_by") and board_lock.get("locked_by") != owner:
-        raise HTTPException(status_code=403, detail=f"Tablero bloqueado por {board_lock.get('locked_by')}")
-    board_lock = {"locked_by": owner}
-    await persist()
 
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
