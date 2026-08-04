@@ -47,7 +47,7 @@ async def ensure_db_loaded():
     if db_loaded:
         return
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
             if res.status_code == 200 and len(res.json()) > 0:
                 data = res.json()[0]
@@ -72,7 +72,7 @@ async def ensure_db_loaded():
 async def reload_db():
     global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
             if res.status_code == 200 and len(res.json()) > 0:
                 data = res.json()[0]
@@ -94,8 +94,10 @@ async def persist():
             "flota": conductores_db,
             "lock": board_lock
         }
-        async with httpx.AsyncClient() as client:
-            await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
+            if res.status_code not in [200, 204]:
+                print(f"Supabase persist FAILED: {res.status_code} - {res.text[:200]}")
     except Exception as e:
         print(f"Error saving to Supabase: {e}")
 

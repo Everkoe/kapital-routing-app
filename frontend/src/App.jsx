@@ -584,8 +584,8 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
       addLog(`ERROR al generar rutas: ${err.message}`);
     } finally {
       setIsLoading(false);
-      // Resume poller 2s after generation completes (enough time for Supabase to be updated)
-      setTimeout(() => { if (syncPausedRef) syncPausedRef.current = false; }, 2000);
+      // Keep poller paused after generation - it will resume only when user clears the board.
+      // This prevents stale Supabase data from overwriting freshly-generated routes.
     }
   };
 
@@ -810,7 +810,11 @@ function App() {
           const text = await res.text();
           if (text && !syncPausedRef.current) {
             const data = JSON.parse(text);
-            if (data.rutas) setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
+            // Don't let Supabase overwrite if we are the board owner (we have the freshest data).
+            const lockedByCurrentUser = data.lock?.locked_by && data.lock.locked_by === (usuarioActual?.email || '');
+            if (data.rutas && !lockedByCurrentUser) {
+              setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
+            }
             if (data.lock !== undefined) setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
           }
         }
