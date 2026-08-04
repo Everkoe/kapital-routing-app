@@ -347,10 +347,10 @@ def native_kmeans(points, k, max_iters=10):
 @app.post("/api/assign-routes/")
 async def assign_routes_from_excel(
     file: UploadFile = File(...),
-    fecha: str = Form(...),
-    hora: str = Form(...),
-    sentido: str = Form(...),
-    sede: str = Form(...)
+    fecha: str = Form(""),
+    hora: str = Form(""),
+    sentido: str = Form(""),
+    sede: str = Form("")
 ):
     await ensure_db_loaded()
     global rutas_estado_actual

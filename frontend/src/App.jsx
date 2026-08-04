@@ -537,7 +537,14 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
 
     try {
       const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
-      if (!response.ok) throw new Error((await response.json()).detail || 'Ocurrió un error.');
+      if (!response.ok) {
+        const errData = await response.json();
+        let errMsg = errData.detail;
+        if (typeof errMsg === 'object') {
+          errMsg = JSON.stringify(errMsg).replace(/[\[\]"{}]+/g, ' '); // Clean up the JSON string for the user
+        }
+        throw new Error(errMsg || 'Ocurrió un error interno en el servidor.');
+      }
       const result = await response.json();
       setRoutes(result);
       addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos usando Smart Routing.`);
@@ -604,43 +611,83 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
     <>
       <KPIDashboard routes={routes} />
       
-      <div className="card">
-        <div className="card-header">
-          <h2>Motor de Ruteo Automático (Smart Routing)</h2>
-          <p style={{marginTop: '5px', opacity: 0.8, fontSize: '0.9rem'}}>Ingresa los datos del turno que deseas enrutar. El algoritmo agrupará a los pasajeros automáticamente en vehículos de 15.</p>
+      <div className="card" style={{ padding: '0', overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
+        <div style={{ background: 'linear-gradient(135deg, var(--primary-color) 0%, #3b82f6 100%)', padding: '25px', color: 'white' }}>
+          <h2 style={{ margin: '0 0 10px 0', fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            🤖 Motor de Ruteo Automático <span style={{ fontSize: '1rem', background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px' }}>Powered by IA</span>
+          </h2>
+          <p style={{ margin: 0, opacity: 0.9, fontSize: '0.95rem' }}>
+            El sistema analizará las coordenadas espaciales de cada pasajero y generará rutas eficientes aglomerando grupos de 15 personas.
+          </p>
         </div>
         
-        <div className="filters-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '15px', padding: '15px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '20px'}}>
-          <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>📅 Fecha</label>
-            <input className="form-input" type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="Ej: 3/08/2026 (O deja vacío)" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0', background: 'var(--bg-secondary)' }}>
+          {/* Columna Izquierda: Filtros */}
+          <div style={{ padding: '30px', borderRight: '1px solid var(--border-color)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '20px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ background: 'var(--primary-color)', color: 'white', width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: '0.8rem', fontWeight: 'bold' }}>1</span>
+              Filtros del Turno (Opcional)
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '20px' }}>Si dejas los campos vacíos, se procesará toda la base de datos sin restricciones.</p>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div className="filter-group">
+                <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>📅 Fecha Exacta</label>
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="Ej: 3/08/2026" />
+              </div>
+              <div className="filter-group">
+                <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>⏰ Hora</label>
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} placeholder="Ej: 00:00" />
+              </div>
+              <div className="filter-group">
+                <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>🔄 Sentido</label>
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroSentido} onChange={e => setFiltroSentido(e.target.value)} placeholder="INGRESO / SALIDA" />
+              </div>
+              <div className="filter-group">
+                <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>🏢 Sede Corporativa</label>
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroSede} onChange={e => setFiltroSede(e.target.value)} placeholder="Ej: BELLAVISTA" />
+              </div>
+            </div>
           </div>
-          <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>⏰ Hora</label>
-            <input className="form-input" type="text" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} placeholder="Ej: 00:00 (O deja vacío)" />
-          </div>
-          <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>🔄 Sentido</label>
-            <input className="form-input" type="text" value={filtroSentido} onChange={e => setFiltroSentido(e.target.value)} placeholder="INGRESO / SALIDA" />
-          </div>
-          <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>🏢 Sede</label>
-            <input className="form-input" type="text" value={filtroSede} onChange={e => setFiltroSede(e.target.value)} placeholder="Ej: BELLAVISTA" />
+
+          {/* Columna Derecha: Archivo y Acción */}
+          <div style={{ padding: '30px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+             <h3 style={{ marginTop: 0, marginBottom: '20px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' }}>
+              <span style={{ background: 'var(--primary-color)', color: 'white', width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: '0.8rem', fontWeight: 'bold' }}>2</span>
+              Base de Datos
+            </h3>
+            
+            <div style={{ border: '2px dashed var(--primary-color)', borderRadius: '12px', padding: '30px', width: '100%', background: 'var(--bg-primary)', position: 'relative', cursor: 'pointer', transition: 'all 0.2s' }}>
+              <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+              <div style={{ fontSize: '3rem', marginBottom: '10px' }}>📁</div>
+              <p style={{ margin: 0, fontWeight: 'bold', color: 'var(--primary-color)' }}>
+                {selectedFile ? selectedFile.name : "Haz clic aquí para subir tu Excel"}
+              </p>
+              <p style={{ margin: '5px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Soporta .xlsx con múltiples columnas</p>
+            </div>
           </div>
         </div>
 
-        <div className="controls-container" style={{display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center'}}>
-          <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} />
-          <button className="btn-primary" onClick={handleGenerateRoutes} disabled={isLoading || !selectedFile} style={{padding: '10px 20px', fontWeight: 'bold'}}>
-            {isLoading ? 'Procesando (AI)...' : 'Generar Rutas Inteligentes 🚀'}
-          </button>
-          {routes.length > 0 && (
-            <>
-              <button className="btn-secondary" onClick={handleExportToExcel}>Exportar a Excel</button>
-              <button className="btn-clear" onClick={handleClearBoard}>Limpiar Tablero</button>
-            </>
-          )}
-        </div>
+        {/* Footer Acción */}
+        <div style={{ padding: '20px 30px', background: 'var(--bg-primary)', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+           <div>
+             {routes.length > 0 && (
+                <>
+                  <button className="btn-secondary" onClick={handleExportToExcel} style={{ marginRight: '10px' }}>📥 Exportar a Excel</button>
+                  <button className="btn-clear" onClick={handleClearBoard}>🗑️ Limpiar Tablero</button>
+                </>
+              )}
+           </div>
+           
+           <button 
+              className="btn-primary" 
+              onClick={handleGenerateRoutes} 
+              disabled={isLoading || !selectedFile} 
+              style={{ padding: '15px 30px', fontSize: '1.1rem', fontWeight: 'bold', borderRadius: '30px', boxShadow: '0 4px 15px rgba(59, 130, 246, 0.4)', transition: 'transform 0.1s' }}
+            >
+              {isLoading ? '🧠 Analizando Coordenadas...' : '🚀 Generar Rutas con Inteligencia Espacial'}
+           </button>
+        </div></div>
       </div>
       
       {isLoading && <div className="loading-indicator">Ejecutando algoritmo K-Means. Agrupando cientos de pasajeros...</div>}
