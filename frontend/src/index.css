@@ -150,11 +150,11 @@ code {
 }
 
 .file-dropzone {
-  border: 2px dashed var(--primary-color);
+  border: 2px dashed rgba(120, 120, 150, 0.4);
   border-radius: 16px;
-  padding: 40px;
+  padding: 30px 20px;
   width: 100%;
-  background: var(--bg-primary);
+  background: rgba(0, 0, 0, 0.05);
   position: relative;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -162,7 +162,7 @@ code {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+  text-align: center;
 }
 
 .file-dropzone:hover {
@@ -186,13 +186,20 @@ code {
 .form-input-premium {
   width: 100%;
   padding: 12px 15px;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(120, 120, 150, 0.4);
   border-radius: 8px;
-  background: var(--bg-primary);
+  background: rgba(0, 0, 0, 0.15);
   color: var(--text-primary);
   transition: all 0.2s ease;
   font-family: inherit;
   box-sizing: border-box;
+}
+
+@media (prefers-color-scheme: light) {
+  .form-input-premium {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
 }
 
 .form-input-premium:focus {

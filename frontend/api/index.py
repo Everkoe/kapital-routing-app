@@ -441,6 +441,10 @@ async def assign_routes_from_excel(
         
         rutas_generadas = []
         c_distrito = col_name("DISTRITO")
+        c_dni = col_name("DNI")
+        c_nombres = col_name("NOMBRES")
+        c_dir = col_name("DIRECCION")
+        c_emp = col_name("PROVEEDOR")
         
         # Agrupar por distrito para aplicar KMeans
         for distrito, grupo in df_filtered.groupby(c_distrito):
@@ -472,11 +476,7 @@ async def assign_routes_from_excel(
                             
                             agentes_format = []
                             for ag in agentes_a_asignar:
-                                c_dni = col_name("DNI")
-                                c_nombres = col_name("NOMBRES")
-                                c_dir = col_name("DIRECCION")
-                                c_emp = col_name("PROVEEDOR") # o campana
-                                
+
                                 agentes_format.append({
                                     "id": str(ag[c_dni]), 
                                     "nombre": str(ag.get(c_nombres, "Desconocido")),
