@@ -388,7 +388,13 @@ async def assign_routes_from_excel(
         ].copy()
         
         if df_filtered.empty:
-            raise HTTPException(status_code=400, detail="No se encontraron pasajeros para estos filtros en el Excel.")
+            fechas_demo = df[c_fecha].dropna().unique()[:3].tolist() if c_fecha in df.columns else []
+            horas_demo = df[c_hora].dropna().unique()[:3].tolist() if c_hora in df.columns else []
+            sentidos_demo = df[c_sentido].dropna().unique()[:3].tolist() if c_sentido in df.columns else []
+            sedes_demo = df[c_sede].dropna().unique()[:3].tolist() if c_sede in df.columns else []
+            
+            debug_info = f"Columnas: {list(df.columns)}. Fechas detectadas: {fechas_demo}. Horas detectadas: {horas_demo}. Sentidos detectadas: {sentidos_demo}. Sedes detectadas: {sedes_demo}."
+            raise HTTPException(status_code=400, detail=f"No se encontraron pasajeros para estos filtros. INFO DEL EXCEL: {debug_info}")
             
         # Parsear coordenadas
         # Ej: "-11.976813,-77.0943"
