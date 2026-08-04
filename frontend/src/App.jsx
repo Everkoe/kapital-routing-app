@@ -770,10 +770,7 @@ function App() {
   const [usuarioActual, setUsuarioActual] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
-  const [routes, setRoutes] = useState(() => {
-    const savedRoutes = localStorage.getItem('kapital_current_routes');
-    return savedRoutes ? JSON.parse(savedRoutes) : [];
-  });
+  const [routes, setRoutes] = useState([]);
   const [logs, setLogs] = useState(() => {
     const savedLogs = localStorage.getItem('kapital_audit_logs');
     return savedLogs ? JSON.parse(savedLogs) : [];
@@ -785,31 +782,7 @@ function App() {
     localStorage.setItem('kapital_theme', theme);
   }, [theme]);
 
-  useEffect(() => {
-    localStorage.setItem('kapital_current_routes', JSON.stringify(routes));
-  }, [routes]);
 
-  // Load initial routes once from backend on login (no polling)
-  useEffect(() => {
-    if (!usuarioActual) return;
-    const loadInitialRoutes = async () => {
-      try {
-        const res = await fetch('/api/routes');
-        if (res.ok) {
-          const text = await res.text();
-          if (text) {
-            const data = JSON.parse(text);
-            if (Array.isArray(data) && data.length > 0) {
-              setRoutes(data);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error cargando rutas iniciales:", err);
-      }
-    };
-    loadInitialRoutes();
-  }, [usuarioActual]);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
