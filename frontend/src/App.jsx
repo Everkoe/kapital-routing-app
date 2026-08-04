@@ -633,21 +633,37 @@ const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual, sy
   };
 
   const handleClearBoard = async () => {
-    if(!window.confirm("¿Limpiar tablero?")) return;
-    if (syncPausedRef) syncPausedRef.current = false;
+    if(!window.confirm("¿Limpiar tablero?\n\nEsto borrará las rutas actuales del servidor para todos los usuarios.")) return;
+    
+    // Keep poller paused while we clear — prevents stale Supabase data from coming back
+    if (syncPausedRef) syncPausedRef.current = true;
+    
+    // Clear local state immediately
     setRoutes([]);
-    syncToBackend([]);
     localStorage.removeItem('kapital_current_routes');
     setSelectedFile(null);
     setFileInputKey(prev => prev + 1);
     setError(null);
+    
     try {
+      // 1. Save empty routes to Supabase FIRST (await so we know it completed)
+      await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Owner-Email': usuarioActual?.email || 'Desconocido' },
+        body: JSON.stringify([])
+      });
+      // 2. Unlock the board AFTER routes are cleared
       await fetch('/api/board/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ owner: usuarioActual?.email || 'Desconocido' })
       });
-    } catch(e) {}
+    } catch(e) {
+      console.error("Error clearing board:", e);
+    } finally {
+      // Resume poller ONLY after Supabase has been updated (empty routes confirmed)
+      if (syncPausedRef) syncPausedRef.current = false;
+    }
   };
 
   return (
