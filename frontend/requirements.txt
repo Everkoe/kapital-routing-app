@@ -5,5 +5,3 @@ openpyxl
 python-multipart
 email-validator
 httpx
-scikit-learn
-numpy

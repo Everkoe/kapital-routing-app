@@ -2,8 +2,6 @@
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import math
-import numpy as np
-from sklearn.cluster import KMeans
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Dict, Any, List, Optional
@@ -308,6 +306,44 @@ def get_coordenadas_simuladas(zona: str):
     # Reducimos el offset de 0.02 a 0.005 para evitar que caigan al mar (San Miguel/Callao)
     return base_lat + random.uniform(-0.005, 0.005), base_lng + random.uniform(-0.005, 0.005)
 
+
+# K-Means nativo y ligero para evitar que Vercel explote por límite de tamaño (250MB)
+def native_kmeans(points, k, max_iters=10):
+    if len(points) <= k:
+        return list(range(len(points)))
+        
+    import random
+    # Inicializar centroides al azar
+    centroids = random.sample(points, k)
+    labels = []
+    
+    for _ in range(max_iters):
+        labels = []
+        clusters = [[] for _ in range(k)]
+        
+        # Asignar cada punto al centroide más cercano
+        for pt in points:
+            dists = [math.hypot(pt[0] - c[0], pt[1] - c[1]) for c in centroids]
+            best_k = dists.index(min(dists))
+            labels.append(best_k)
+            clusters[best_k].append(pt)
+            
+        # Recalcular centroides
+        new_centroids = []
+        for i in range(k):
+            if not clusters[i]:
+                new_centroids.append(centroids[i])
+            else:
+                avg_lat = sum(p[0] for p in clusters[i]) / len(clusters[i])
+                avg_lng = sum(p[1] for p in clusters[i]) / len(clusters[i])
+                new_centroids.append((avg_lat, avg_lng))
+                
+        if new_centroids == centroids:
+            break
+        centroids = new_centroids
+        
+    return labels
+
 @app.post("/api/assign-routes/")
 async def assign_routes_from_excel(
     file: UploadFile = File(...),
@@ -366,11 +402,10 @@ async def assign_routes_from_excel(
             n_pasajeros = len(grupo)
             k_clusters = math.ceil(n_pasajeros / 15.0)
             
-            # KMeans clustering
-            coords = grupo[['lat', 'lng']].values
+            # KMeans nativo
+            coords = list(zip(grupo['lat'], grupo['lng']))
             if k_clusters > 1 and len(coords) >= k_clusters:
-                kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
-                labels = kmeans.fit_predict(coords)
+                labels = native_kmeans(coords, k_clusters)
                 grupo['cluster'] = labels
             else:
                 grupo['cluster'] = 0
