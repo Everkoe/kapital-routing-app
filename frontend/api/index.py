@@ -356,7 +356,8 @@ async def assign_routes_from_excel(
     global rutas_estado_actual
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
-        df = pd.read_excel(file.file)
+        # Leer todo como texto para evitar que Pandas convierta fechas a '2026-08-03' en lugar de '3/08/2026'
+        df = pd.read_excel(file.file, dtype=str)
         
         # Limpiar nombres de columnas
         df.columns = df.columns.str.strip()

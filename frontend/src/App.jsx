@@ -525,10 +525,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
       setError("Por favor, seleccione un archivo Excel para procesar.");
       return;
     }
-    if (!filtroFecha || !filtroHora || !filtroSentido || !filtroSede) {
-      setError("Por favor complete los 4 filtros de Ruteo (Fecha, Hora, Sentido, Sede).");
-      return;
-    }
+    // Ya no es obligatorio llenar todos los filtros (si dejan vacio, el backend trae todo)
     setIsLoading(true);
     setError(null);
     const formData = new FormData();
@@ -613,28 +610,22 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
           <p style={{marginTop: '5px', opacity: 0.8, fontSize: '0.9rem'}}>Ingresa los datos del turno que deseas enrutar. El algoritmo agrupará a los pasajeros automáticamente en vehículos de 15.</p>
         </div>
         
-        <div className="filters-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', padding: '15px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '20px'}}>
+        <div className="filters-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '15px', padding: '15px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '20px'}}>
           <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Fecha (Ej: 3/08/2026)</label>
-            <input className="form-input" type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="DD/MM/YYYY" />
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>📅 Fecha</label>
+            <input className="form-input" type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="Ej: 3/08/2026 (O deja vacío)" />
           </div>
           <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Hora</label>
-            <input className="form-input" type="time" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} />
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>⏰ Hora</label>
+            <input className="form-input" type="text" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} placeholder="Ej: 00:00 (O deja vacío)" />
           </div>
           <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Sentido</label>
-            <select className="form-select" value={filtroSentido} onChange={e => setFiltroSentido(e.target.value)}>
-              <option value="INGRESO">INGRESO</option>
-              <option value="SALIDA">SALIDA</option>
-            </select>
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>🔄 Sentido</label>
+            <input className="form-input" type="text" value={filtroSentido} onChange={e => setFiltroSentido(e.target.value)} placeholder="INGRESO / SALIDA" />
           </div>
           <div className="filter-group">
-            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Sede</label>
-            <select className="form-select" value={filtroSede} onChange={e => setFiltroSede(e.target.value)}>
-              <option value="BELLAVISTA">BELLAVISTA</option>
-              <option value="OTRA">OTRA</option>
-            </select>
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>🏢 Sede</label>
+            <input className="form-input" type="text" value={filtroSede} onChange={e => setFiltroSede(e.target.value)} placeholder="Ej: BELLAVISTA" />
           </div>
         </div>
 
