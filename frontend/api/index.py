@@ -375,13 +375,23 @@ async def update_routes(rutas: list = Body(...)):
 @app.post("/api/assign-routes/")
 async def assign_routes_from_excel(
     file: UploadFile = File(...),
-    fecha: str = Form(""),
-    hora: str = Form(""),
-    sentido: str = Form(""),
-    sede: str = Form("")
+    fecha: str = Form(\"\"),
+    hora: str = Form(\"\"),
+    sentido: str = Form(\"\"),
+    sede: str = Form(\"\"),
+    owner: str = Form(\"Desconocido\")
 ):
     await reload_db()
     global rutas_estado_actual
+
+    global board_lock
+    await ensure_db_loaded()
+    if board_lock and board_lock.get("locked_by") and board_lock.get("locked_by") != owner:
+        raise HTTPException(status_code=403, detail=f"Tablero bloqueado por {board_lock.get('locked_by')}")
+    
+    board_lock = {"locked_by": owner}
+    await persist()
+
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
         # Leer todo como texto para evitar que Pandas convierta fechas a '2026-08-03' en lugar de '3/08/2026'

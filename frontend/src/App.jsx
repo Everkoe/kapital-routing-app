@@ -473,12 +473,12 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes }) => {
+const DashboardView = ({ routes, addLog, setRoutes, boardLock, usuarioActual }) => {
   const syncToBackend = async (newRoutes) => {
     try {
       await fetch('/api/routes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Owner-Email': usuarioActual?.email || 'Desconocido' },
         body: JSON.stringify(newRoutes)
       });
     } catch (err) {
@@ -533,6 +533,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
     setError(null); 
   };
 
+  const isLockedByOther = boardLock?.locked_by && boardLock.locked_by !== (usuarioActual?.email || 'Desconocido');
   const handleGenerateRoutes = async () => {
     if (!selectedFile) {
       setError("Por favor, seleccione un archivo Excel para procesar.");
@@ -547,6 +548,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
     formData.append('hora', filtroHora);
     formData.append('sentido', filtroSentido);
     formData.append('sede', filtroSede);
+      formData.append('owner', usuarioActual?.email || 'Desconocido');
 
     try {
       const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
@@ -616,6 +618,13 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
     if(!window.confirm("¿Limpiar tablero?")) return;
     setRoutes([]);
     syncToBackend([]);
+    try {
+      await fetch('/api/board/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: usuarioActual?.email || 'Desconocido' })
+      });
+    } catch(e) {}
     localStorage.removeItem('kapital_current_routes');
     setSelectedFile(null);
     setError(null);
@@ -639,6 +648,13 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
         </div>
         
         {/* Grid Principal Responsivo */}
+        
+        {isLockedByOther && (
+          <div style={{ background: 'rgba(245, 158, 11, 0.2)', border: '1px solid #f59e0b', color: '#fbbf24', padding: '15px 30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            🔒 Tablero bloqueado por {boardLock.locked_by}. Solo puedes observar (Modo Lectura).
+          </div>
+        )}
+
         <div className="dashboard-grid">
           
           {/* Columna Izquierda: Filtros Inteligentes */}
@@ -677,7 +693,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
             </h3>
             
             <div className="file-dropzone">
-              <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 10 }} />
+              <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} style={{ opacity: 0, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', cursor: isLockedByOther ? 'not-allowed' : 'pointer', zIndex: 10, pointerEvents: isLockedByOther ? 'none' : 'auto' }} />
               <div className="folder-icon">📂</div>
               <p style={{ margin: 0, fontWeight: '700', fontSize: '1.2rem', color: 'var(--primary-color)', textAlign: 'center' }}>
                 {selectedFile ? selectedFile.name : "Arrastra o haz clic para subir tu Excel"}
@@ -697,7 +713,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
                   <button className="btn-secondary" onClick={handleExportToExcel} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px' }}>
                     <span style={{ fontSize: '1.2rem' }}>📥</span> Exportar Excel
                   </button>
-                  <button className="btn-danger" onClick={handleClearBoard} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444' }}>
+                  <button className="btn-danger" onClick={handleClearBoard} disabled={isLockedByOther} style={{ opacity: isLockedByOther ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', cursor: isLockedByOther ? 'not-allowed' : 'pointer' }} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444' }}>
                     <span style={{ fontSize: '1.2rem' }}>🗑️</span> Limpiar Tablero
                   </button>
                 </>
@@ -707,7 +723,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
            <button 
               className="btn-generate-ai" 
               onClick={handleGenerateRoutes} 
-              disabled={isLoading || !selectedFile}
+              disabled={isLoading || !selectedFile || isLockedByOther}
             >
               {isLoading ? (
                 <>
@@ -742,6 +758,7 @@ function App() {
 
 
   const [usuarioActual, setUsuarioActual] = useState(null);
+  const [boardLock, setBoardLock] = useState({});
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [routes, setRoutes] = useState(() => {
     const savedRoutes = localStorage.getItem('kapital_current_routes');
@@ -767,10 +784,11 @@ function App() {
     if (!usuarioActual) return;
     const syncRoutes = async () => {
       try {
-        const res = await fetch('/api/routes');
+        const res = await fetch('/api/board/status');
         if (res.ok) {
           const data = await res.json();
-          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data) ? data : prev);
+          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data.rutas) ? data.rutas : prev);
+          setBoardLock(prev => JSON.stringify(prev) !== JSON.stringify(data.lock || {}) ? (data.lock || {}) : prev);
         }
       } catch (err) {
         console.error("Error en sincronización en tiempo real:", err);
@@ -822,7 +840,7 @@ function App() {
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
-        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} />;
+        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} boardLock={boardLock} usuarioActual={usuarioActual} />;
     }
   };
 
