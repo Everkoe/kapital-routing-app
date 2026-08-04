@@ -473,8 +473,16 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes }) => { 
+const DashboardView = ({ routes, addLog, setRoutes }) => {
   const [selectedFile, setSelectedFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  
+  // Filtros de Smart Routing
+  const [filtroFecha, setFiltroFecha] = useState('');
+  const [filtroHora, setFiltroHora] = useState('00:00');
+  const [filtroSentido, setFiltroSentido] = useState('INGRESO');
+  const [filtroSede, setFiltroSede] = useState('BELLAVISTA');
   
   const handleDragStart = (e, fromRouteIndex, agenteId) => {
     e.dataTransfer.setData('fromRouteIndex', fromRouteIndex);
@@ -485,41 +493,179 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
     e.preventDefault();
     const fromRouteIndex = parseInt(e.dataTransfer.getData('fromRouteIndex'), 10);
     const agenteId = e.dataTransfer.getData('agenteId');
-    
     if (isNaN(fromRouteIndex) || fromRouteIndex === toRouteIndex) return;
-
     setRoutes(prevRoutes => {
       const newRoutes = [...prevRoutes];
       const fromRoute = { ...newRoutes[fromRouteIndex], agentes: [...newRoutes[fromRouteIndex].agentes] };
       const toRoute = { ...newRoutes[toRouteIndex], agentes: [...newRoutes[toRouteIndex].agentes] };
-      
       const agenteIndex = fromRoute.agentes.findIndex(a => a.id === agenteId);
       if(agenteIndex > -1) {
         if(toRoute.agentes.length >= 15) {
           alert('Esta unidad ya está llena (máx 15 pasajeros).');
-          return prevRoutes; // Cancelar si está lleno
+          return prevRoutes;
         }
         const [agente] = fromRoute.agentes.splice(agenteIndex, 1);
         toRoute.agentes.push(agente);
       }
-      
       newRoutes[fromRouteIndex] = fromRoute;
       newRoutes[toRouteIndex] = toRoute;
       return newRoutes;
     });
     addLog(`Pasajero ${agenteId} reasignado manualmente por Drag & Drop.`);
-  }; const [isLoading, setIsLoading] = useState(false); const [error, setError] = useState(null); const handleFileChange = (event) => { setSelectedFile(event.target.files[0]); setRoutes([]); setError(null); }; const handleGenerateRoutes = async () => { if (!selectedFile) { setError("Por favor, seleccione un archivo Excel para procesar."); return; } setIsLoading(true); setError(null); const formData = new FormData(); formData.append('file', selectedFile); try { const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData }); if (!response.ok) throw new Error((await response.json()).detail || 'Ocurrió un error.'); const result = await response.json(); setRoutes(result); addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos.`); } catch (err) { setError(err.message); addLog(`ERROR al generar rutas: ${err.message}`); } finally { setIsLoading(false); } }; const handleEmergencyAction = async (emergencyData) => { const { conductor_id, tipo_emergencia, horario } = emergencyData; if (tipo_emergencia === 'Retraso por Tráfico') { const message = `ALERTA DE TRÁFICO: La ruta del conductor ${conductor_id} presenta retrasos. Se notificará a los pasajeros.`; alert(message); addLog(message); return; } setIsLoading(true); setError(null); try { const response = await fetch(`/api/emergency-reassign/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emergencyData) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Error en la reasignación.'); alert(data.message); setRoutes(data.rutas_actualizadas); addLog(`🚨 URGENTE: Ruta de ${conductor_id} (${horario}) reasignada a la unidad ${data.rescatista_id}.`); } catch (err) { alert(`Error: ${err.message}`); setError(err.message); addLog(`ERROR en emergencia para ${conductor_id}: ${err.message}`); } finally { setIsLoading(false); } }; const handleManualAssign = (routeToAssign) => { const newDriverId = prompt(`Ingrese el ID de la unidad externa o retén (ej. TAXI-001) para la ruta de ${routeToAssign.micro_zona} a las ${routeToAssign.horario}:`); if (newDriverId) { setRoutes(prevRoutes => prevRoutes.map(route => route === routeToAssign ? { ...route, conductor: newDriverId } : route)); addLog(`✅ RESOLUCIÓN: Ruta de desborde en ${routeToAssign.micro_zona} (${routeToAssign.horario}) asignada manualmente a la unidad ${newDriverId}.`); } }; const handleExportToExcel = async () => { if (routes.length === 0) return; const flatData = routes.flatMap(route => route.agentes.map(agente => ({ 'Conductor': route.conductor, 'Micro-Zona': route.micro_zona, 'Horario': route.horario, 'ID Agente': agente.id, 'Dirección': agente.direccion }))); const worksheet = XLSX.utils.json_to_sheet(flatData); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, "Rutas Kapital"); XLSX.writeFile(workbook, "Rutas_Kapital_Export.xlsx"); addLog("Exportación a Excel generada."); try { await fetch("/api/save-history", { method: "POST" }); addLog("Rutas archivadas en el historial de reportes."); } catch (err) { console.error("Error archivando rutas", err); } };  const handleClearBoard = async () => {
-    if(!window.confirm("¿Archivar rutas y limpiar tablero?")) return;
+  };
+
+  const handleFileChange = (event) => { 
+    setSelectedFile(event.target.files[0]); 
+    setRoutes([]); 
+    setError(null); 
+  };
+
+  const handleGenerateRoutes = async () => {
+    if (!selectedFile) {
+      setError("Por favor, seleccione un archivo Excel para procesar.");
+      return;
+    }
+    if (!filtroFecha || !filtroHora || !filtroSentido || !filtroSede) {
+      setError("Por favor complete los 4 filtros de Ruteo (Fecha, Hora, Sentido, Sede).");
+      return;
+    }
     setIsLoading(true);
+    setError(null);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('fecha', filtroFecha);
+    formData.append('hora', filtroHora);
+    formData.append('sentido', filtroSentido);
+    formData.append('sede', filtroSede);
+
     try {
-      const res = await fetch("/api/clear-routes", {method:"POST"});
-      if(!res.ok) throw new Error("Error archiving");
-      setRoutes([]);
-      localStorage.removeItem('kapital_current_routes');
-      setSelectedFile(null);
-      setError(null);
-      addLog("Tablero reiniciado y rutas archivadas.");
-    } catch(err) { setError(err.message); addLog("ERROR: "+err.message); } finally { setIsLoading(false); } }; return ( <> <KPIDashboard routes={routes} /> <div className="card"> <div className="card-header"><h2>Panel de Operaciones Logísticas</h2></div> <div className="controls-container"> <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} /> <button className="btn-primary" onClick={handleGenerateRoutes} disabled={isLoading || !selectedFile}>{isLoading ? 'Procesando...' : 'Generar Rutas'}</button> {routes.length > 0 && (<><button className="btn-secondary" onClick={handleExportToExcel}>Exportar a Excel</button><button className="btn-clear" onClick={handleClearBoard}>Limpiar Tablero</button></>)} </div> </div> {isLoading && <div className="loading-indicator">Procesando...</div>} {error && <div className="error-message">Error: {error}</div>} {routes.length > 0 && <LiveMap routes={routes} />} {routes.length > 0 && <div className="routes-grid">{routes.map((route, index) => <DriverCard key={`${route.conductor}-${index}`} route={route} routeIndex={index} onManualAssign={handleManualAssign} onDragStart={handleDragStart} onDrop={handleDrop} />)}</div>} <EmergencyCenter onEmergencyAction={handleEmergencyAction} isLoading={isLoading} /> </> ); };
+      const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
+      if (!response.ok) throw new Error((await response.json()).detail || 'Ocurrió un error.');
+      const result = await response.json();
+      setRoutes(result);
+      addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos usando Smart Routing.`);
+    } catch (err) {
+      setError(err.message);
+      addLog(`ERROR al generar rutas: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmergencyAction = async (emergencyData) => {
+    const { conductor_id, tipo_emergencia, horario } = emergencyData;
+    if (tipo_emergencia === 'Retraso por Tráfico') {
+      const message = `ALERTA DE TRÁFICO: La ruta de ${conductor_id} presenta retrasos.`;
+      alert(message);
+      addLog(message);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/emergency-reassign/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emergencyData) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Error en la reasignación.');
+      alert(data.message);
+      setRoutes(data.rutas_actualizadas);
+      addLog(`🚨 URGENTE: Ruta de ${conductor_id} (${horario}) reasignada a ${data.rescatista_id}.`);
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleManualAssign = (routeToAssign) => {
+    const newDriverId = prompt(`Ingrese el ID de la unidad (ej. TAXI-001) para la zona ${routeToAssign.micro_zona}:`);
+    if (newDriverId) {
+      setRoutes(prevRoutes => prevRoutes.map(route => route === routeToAssign ? { ...route, conductor: newDriverId } : route));
+      addLog(`✅ Ruta en ${routeToAssign.micro_zona} asignada a unidad ${newDriverId}.`);
+    }
+  };
+
+  const handleExportToExcel = async () => {
+    if (routes.length === 0) return;
+    const flatData = routes.flatMap(route => route.agentes.map(agente => ({ 'Conductor': route.conductor, 'Micro-Zona': route.micro_zona, 'Horario': route.horario, 'DNI': agente.id, 'Nombre': agente.nombre, 'Dirección': agente.direccion })));
+    const worksheet = XLSX.utils.json_to_sheet(flatData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Rutas");
+    XLSX.writeFile(workbook, "Rutas_Export.xlsx");
+    addLog("Exportación a Excel generada.");
+  };
+
+  const handleClearBoard = async () => {
+    if(!window.confirm("¿Limpiar tablero?")) return;
+    setRoutes([]);
+    localStorage.removeItem('kapital_current_routes');
+    setSelectedFile(null);
+    setError(null);
+  };
+
+  return (
+    <>
+      <KPIDashboard routes={routes} />
+      
+      <div className="card">
+        <div className="card-header">
+          <h2>Motor de Ruteo Automático (Smart Routing)</h2>
+          <p style={{marginTop: '5px', opacity: 0.8, fontSize: '0.9rem'}}>Ingresa los datos del turno que deseas enrutar. El algoritmo agrupará a los pasajeros automáticamente en vehículos de 15.</p>
+        </div>
+        
+        <div className="filters-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', padding: '15px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '20px'}}>
+          <div className="filter-group">
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Fecha (Ej: 3/08/2026)</label>
+            <input className="form-input" type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="DD/MM/YYYY" />
+          </div>
+          <div className="filter-group">
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Hora</label>
+            <input className="form-input" type="time" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} />
+          </div>
+          <div className="filter-group">
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Sentido</label>
+            <select className="form-select" value={filtroSentido} onChange={e => setFiltroSentido(e.target.value)}>
+              <option value="INGRESO">INGRESO</option>
+              <option value="SALIDA">SALIDA</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            <label style={{display: 'block', marginBottom: '5px', fontSize: '0.85rem'}}>Sede</label>
+            <select className="form-select" value={filtroSede} onChange={e => setFiltroSede(e.target.value)}>
+              <option value="BELLAVISTA">BELLAVISTA</option>
+              <option value="OTRA">OTRA</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="controls-container" style={{display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center'}}>
+          <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} />
+          <button className="btn-primary" onClick={handleGenerateRoutes} disabled={isLoading || !selectedFile} style={{padding: '10px 20px', fontWeight: 'bold'}}>
+            {isLoading ? 'Procesando (AI)...' : 'Generar Rutas Inteligentes 🚀'}
+          </button>
+          {routes.length > 0 && (
+            <>
+              <button className="btn-secondary" onClick={handleExportToExcel}>Exportar a Excel</button>
+              <button className="btn-clear" onClick={handleClearBoard}>Limpiar Tablero</button>
+            </>
+          )}
+        </div>
+      </div>
+      
+      {isLoading && <div className="loading-indicator">Ejecutando algoritmo K-Means. Agrupando cientos de pasajeros...</div>}
+      {error && <div className="error-message">Error: {error}</div>}
+      {routes.length > 0 && <LiveMap routes={routes} />}
+      {routes.length > 0 && (
+        <div className="routes-grid">
+          {routes.map((route, index) => (
+            <DriverCard key={`${route.conductor}-${index}`} route={route} routeIndex={index} onManualAssign={handleManualAssign} onDragStart={handleDragStart} onDrop={handleDrop} />
+          ))}
+        </div>
+      )}
+      <EmergencyCenter onEmergencyAction={handleEmergencyAction} isLoading={isLoading} />
+    </>
+  );
+};
 
 
 // --- Componente Raíz ---

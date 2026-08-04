@@ -1,6 +1,9 @@
 # api/index.py
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+import math
+import numpy as np
+from sklearn.cluster import KMeans
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Dict, Any, List, Optional
@@ -306,56 +309,136 @@ def get_coordenadas_simuladas(zona: str):
     return base_lat + random.uniform(-0.005, 0.005), base_lng + random.uniform(-0.005, 0.005)
 
 @app.post("/api/assign-routes/")
-async def assign_routes_from_excel(file: UploadFile = File(...)):
+async def assign_routes_from_excel(
+    file: UploadFile = File(...),
+    fecha: str = Form(...),
+    hora: str = Form(...),
+    sentido: str = Form(...),
+    sede: str = Form(...)
+):
     await ensure_db_loaded()
     global rutas_estado_actual
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
         df = pd.read_excel(file.file)
-        df["Micro-Zona"] = df["Dirección/Distrito"].apply(get_micro_zona)
+        
+        # Limpiar nombres de columnas
+        df.columns = df.columns.str.strip()
+        
+        # Filtrar el DataFrame según los parámetros
+        # En el excel las columnas suelen tener un punto al final "FECHA.", "HORA.", "SENTIDO.", "SEDE."
+        # Nos aseguramos de manejar si tienen el punto o no.
+        def col_name(name):
+            return name + "." if name + "." in df.columns else name
+            
+        c_fecha = col_name("FECHA")
+        c_hora = col_name("HORA")
+        c_sentido = col_name("SENTIDO")
+        c_sede = col_name("SEDE")
+        
+        # Filtrar (convertimos a str para asegurar la comparacion correcta, quitando .0 de horas como 00:00:00)
+        df[c_fecha] = df[c_fecha].astype(str).str.strip()
+        df[c_hora] = df[c_hora].astype(str).str.strip()
+        df[c_sentido] = df[c_sentido].astype(str).str.strip()
+        df[c_sede] = df[c_sede].astype(str).str.strip()
+        
+        # Hacemos match parcial o exacto
+        df_filtered = df[
+            (df[c_fecha].str.contains(fecha, na=False, case=False)) &
+            (df[c_hora].str.contains(hora, na=False, case=False)) &
+            (df[c_sentido].str.contains(sentido, na=False, case=False)) &
+            (df[c_sede].str.contains(sede, na=False, case=False))
+        ].copy()
+        
+        if df_filtered.empty:
+            raise HTTPException(status_code=400, detail="No se encontraron pasajeros para estos filtros en el Excel.")
+            
+        # Parsear coordenadas
+        # Ej: "-11.976813,-77.0943"
+        c_coord = col_name("COORDENADAS")
+        df_filtered[['lat', 'lng']] = df_filtered[c_coord].str.split(',', expand=True).astype(float)
+        
         rutas_generadas = []
-        for (zona, horario), grupo in df.groupby(["Micro-Zona", "Horario Turno"]):
-            agentes_grupo = grupo.to_dict('records')
-            while agentes_grupo:
-                conductor_encontrado = False
-                for conductor_id, horarios_ocupados in disponibilidad_conductores.items():
-                    capacidad_actual = sum(len(r['agentes']) for r in rutas_generadas if r['conductor'] == conductor_id)
-                    if horario not in horarios_ocupados and capacidad_actual < conductores_db[conductor_id]["capacidad"]:
-                        espacio_disponible = conductores_db[conductor_id]["capacidad"] - capacidad_actual
-                        agentes_a_asignar = agentes_grupo[:espacio_disponible]
+        c_distrito = col_name("DISTRITO")
+        
+        # Agrupar por distrito para aplicar KMeans
+        for distrito, grupo in df_filtered.groupby(c_distrito):
+            n_pasajeros = len(grupo)
+            k_clusters = math.ceil(n_pasajeros / 15.0)
+            
+            # KMeans clustering
+            coords = grupo[['lat', 'lng']].values
+            if k_clusters > 1 and len(coords) >= k_clusters:
+                kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(coords)
+                grupo['cluster'] = labels
+            else:
+                grupo['cluster'] = 0
+                
+            # Por cada cluster dentro del distrito, intentamos buscar un vehiculo
+            for cluster_id, subgrupo in grupo.groupby('cluster'):
+                agentes_grupo = subgrupo.to_dict('records')
+                
+                while agentes_grupo:
+                    conductor_encontrado = False
+                    
+                    # Intentar buscar un conductor disponible
+                    for conductor_id, horarios_ocupados in disponibilidad_conductores.items():
+                        capacidad_actual = sum(len(r['agentes']) for r in rutas_generadas if r['conductor'] == conductor_id)
                         
-                        agentes_format = []
-                        for ag in agentes_a_asignar:
-                            lat, lng = get_coordenadas_simuladas(zona)
-                            agentes_format.append({
-                                "id": ag["ID Agente"], 
-                                "direccion": ag["Dirección/Distrito"],
-                                "lat": lat,
-                                "lng": lng,
-                                "empresa": random.choice(["GLOBO_AZUL", "BANCO_ANDINO"])
-                            })
+                        if hora not in horarios_ocupados and capacidad_actual < conductores_db[conductor_id]["capacidad"]:
+                            espacio_disponible = conductores_db[conductor_id]["capacidad"] - capacidad_actual
+                            agentes_a_asignar = agentes_grupo[:espacio_disponible]
+                            
+                            agentes_format = []
+                            for ag in agentes_a_asignar:
+                                c_dni = col_name("DNI")
+                                c_nombres = col_name("NOMBRES")
+                                c_dir = col_name("DIRECCION")
+                                c_emp = col_name("PROVEEDOR") # o campana
+                                
+                                agentes_format.append({
+                                    "id": str(ag[c_dni]), 
+                                    "nombre": str(ag.get(c_nombres, "Desconocido")),
+                                    "direccion": str(ag.get(c_dir, "")),
+                                    "lat": float(ag['lat']),
+                                    "lng": float(ag['lng']),
+                                    "empresa": str(ag.get(c_emp, "KAPITAL"))
+                                })
 
-                        ruta_existente = next((r for r in rutas_generadas if r["conductor"] == conductor_id and r["micro_zona"] == zona and r["horario"] == horario), None)
-                        if ruta_existente:
-                            ruta_existente["agentes"].extend(agentes_format)
-                        else:
-                            rutas_generadas.append({"conductor": conductor_id, "micro_zona": zona, "horario": horario, "agentes": agentes_format})
-                        disponibilidad_conductores[conductor_id].append(horario)
-                        agentes_grupo = agentes_grupo[len(agentes_a_asignar):]
-                        conductor_encontrado = True
+                            ruta_existente = next((r for r in rutas_generadas if r["conductor"] == conductor_id and r["micro_zona"] == distrito and r["horario"] == hora), None)
+                            if ruta_existente:
+                                ruta_existente["agentes"].extend(agentes_format)
+                            else:
+                                rutas_generadas.append({"conductor": conductor_id, "micro_zona": distrito, "horario": hora, "agentes": agentes_format})
+                                
+                            disponibilidad_conductores[conductor_id].append(hora)
+                            agentes_grupo = agentes_grupo[len(agentes_a_asignar):]
+                            conductor_encontrado = True
+                            break
+                            
+                    # Si no hay vehiculos, ponerlos en reten
+                    if not conductor_encontrado:
+                        agentes_format = []
+                        for ag in agentes_grupo:
+                            agentes_format.append({
+                                "id": str(ag[c_dni]), 
+                                "nombre": str(ag.get(c_nombres, "Desconocido")),
+                                "direccion": str(ag.get(c_dir, "")),
+                                "lat": float(ag['lat']),
+                                "lng": float(ag['lng']),
+                                "empresa": str(ag.get(c_emp, "KAPITAL"))
+                            })
+                        rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": distrito, "horario": hora, "agentes": agentes_format})
                         break
-                if not conductor_encontrado:
-                    agentes_format = []
-                    for ag in agentes_grupo:
-                        lat, lng = get_coordenadas_simuladas(zona)
-                        agentes_format.append({"id": ag["ID Agente"], "direccion": ag["Dirección/Distrito"], "lat": lat, "lng": lng, "empresa": random.choice(["GLOBO_AZUL", "BANCO_ANDINO"])})
-                    rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": zona, "horario": horario, "agentes": agentes_format})
-                    break
+                        
         rutas_estado_actual = rutas_generadas
         await persist()
         return rutas_estado_actual
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en el procesamiento del backend: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error en el procesamiento AI del backend: {str(e)}")
 
 @app.post("/api/emergency-reassign/")
 async def emergency_reassign(request: EmergencyRequest):
