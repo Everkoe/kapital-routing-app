@@ -396,10 +396,20 @@ async def assign_routes_from_excel(
             debug_info = f"Columnas: {list(df.columns)}. Fechas detectadas: {fechas_demo}. Horas detectadas: {horas_demo}. Sentidos detectadas: {sentidos_demo}. Sedes detectadas: {sedes_demo}."
             raise HTTPException(status_code=400, detail=f"No se encontraron pasajeros para estos filtros. INFO DEL EXCEL: {debug_info}")
             
-        # Parsear coordenadas
-        # Ej: "-11.976813,-77.0943"
+        # Parsear coordenadas de forma segura
         c_coord = col_name("COORDENADAS")
-        df_filtered[['lat', 'lng']] = df_filtered[c_coord].str.split(',', expand=True).astype(float)
+        def parse_coord(val):
+            try:
+                parts = str(val).split(',')
+                if len(parts) >= 2:
+                    return float(parts[0].strip()), float(parts[1].strip())
+            except:
+                pass
+            return -12.046374, -77.042793 # Default to Lima Center if dirty data
+
+        parsed = df_filtered[c_coord].apply(parse_coord)
+        df_filtered['lat'] = [p[0] for p in parsed]
+        df_filtered['lng'] = [p[1] for p in parsed]
         
         rutas_generadas = []
         c_distrito = col_name("DISTRITO")
