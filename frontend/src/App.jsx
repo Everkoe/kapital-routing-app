@@ -633,11 +633,11 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <div className="filter-group">
                 <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>📅 Fecha Exacta</label>
-                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} placeholder="Ej: 3/08/2026" />
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="date" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} />
               </div>
               <div className="filter-group">
                 <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>⏰ Hora</label>
-                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="text" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} placeholder="Ej: 00:00" />
+                <input className="form-input" style={{ width: '100%', padding: '10px' }} type="time" value={filtroHora} onChange={e => setFiltroHora(e.target.value)} />
               </div>
               <div className="filter-group">
                 <label style={{display: 'block', marginBottom: '8px', fontSize: '0.85rem', fontWeight: 'bold'}}>🔄 Sentido</label>
