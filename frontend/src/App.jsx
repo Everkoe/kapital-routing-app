@@ -687,7 +687,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
             >
               {isLoading ? '🧠 Analizando Coordenadas...' : '🚀 Generar Rutas con Inteligencia Espacial'}
            </button>
-        </div></div>
+        </div>
       </div>
       
       {isLoading && <div className="loading-indicator">Ejecutando algoritmo K-Means. Agrupando cientos de pasajeros...</div>}
