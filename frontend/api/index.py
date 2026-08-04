@@ -167,7 +167,7 @@ class UsuarioUpdate(BaseModel):
 
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
-    await ensure_db_loaded()
+    await reload_db()
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
@@ -199,7 +199,7 @@ async def register_user(usuario: UsuarioRegistro):
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
-    await ensure_db_loaded()
+    await reload_db()
     user_in_db = usuarios_db.get(usuario.email)
     if not user_in_db or user_in_db["password"] != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
@@ -220,7 +220,7 @@ async def login_user(usuario: UsuarioLogin):
 
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate):
-    await ensure_db_loaded()
+    await reload_db()
     user = usuarios_db.get(update_data.email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -242,7 +242,7 @@ async def update_profile(update_data: UsuarioUpdate):
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
 async def get_all_users(email: str):
-    await ensure_db_loaded()
+    await reload_db()
     req_user = usuarios_db.get(email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Admin.")
@@ -260,7 +260,7 @@ async def get_all_users(email: str):
 
 @app.put("/api/admin/users/approve/{target_email}")
 async def approve_user(target_email: str, admin_email: str):
-    await ensure_db_loaded()
+    await reload_db()
     req_user = usuarios_db.get(admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
@@ -274,7 +274,7 @@ async def approve_user(target_email: str, admin_email: str):
 
 @app.delete("/api/admin/users/reject/{target_email}")
 async def reject_user(target_email: str, admin_email: str):
-    await ensure_db_loaded()
+    await reload_db()
     req_user = usuarios_db.get(admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
@@ -380,7 +380,7 @@ async def assign_routes_from_excel(
     sentido: str = Form(""),
     sede: str = Form("")
 ):
-    await ensure_db_loaded()
+    await reload_db()
     global rutas_estado_actual
     try:
         disponibilidad_conductores = {conductor_id: [] for conductor_id in conductores_db.keys()}
@@ -522,7 +522,7 @@ async def assign_routes_from_excel(
 
 @app.post("/api/emergency-reassign/")
 async def emergency_reassign(request: EmergencyRequest):
-    await ensure_db_loaded()
+    await reload_db()
     global rutas_estado_actual
     if request.horario == "Todos los turnos" or request.tipo_emergencia == "Baja Total (Siniestro)":
         rutas_afectadas = [r for r in rutas_estado_actual if r["conductor"] == request.conductor_id]
@@ -554,13 +554,13 @@ class EstadoPasajeroUpdate(BaseModel):
 
 @app.get("/api/mis-rutas/{conductor_id}")
 async def mis_rutas(conductor_id: str):
-    await ensure_db_loaded()
+    await reload_db()
     mis_rutas_asignadas = [r for r in rutas_estado_actual if r["conductor"] == conductor_id]
     return mis_rutas_asignadas
 
 @app.post("/api/actualizar-pasajero")
 async def actualizar_pasajero(data: EstadoPasajeroUpdate):
-    await ensure_db_loaded()
+    await reload_db()
     ruta = next((r for r in rutas_estado_actual if r["conductor"] == data.conductor_id and r["horario"] == data.horario), None)
     if ruta:
         agente = next((a for a in ruta["agentes"] if a["id"] == data.agente_id), None)
@@ -572,7 +572,7 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
 
 @app.get("/api/cliente/rutas/{empresa_id}")
 async def get_rutas_cliente(empresa_id: str):
-    await ensure_db_loaded()
+    await reload_db()
     global rutas_estado_actual
     try:
         rutas_filtradas = []
@@ -588,7 +588,7 @@ async def get_rutas_cliente(empresa_id: str):
 
 @app.post("/api/flota")
 async def add_flota(flota: FlotaRegistro):
-    await ensure_db_loaded()
+    await reload_db()
     global conductores_db
     conductores_db[flota.placa] = {
         "capacidad": flota.capacidad,
@@ -604,7 +604,7 @@ async def add_flota(flota: FlotaRegistro):
 
 @app.put("/api/flota/{placa}")
 async def update_flota(placa: str, flota: FlotaRegistro):
-    await ensure_db_loaded()
+    await reload_db()
     global conductores_db
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
@@ -622,7 +622,7 @@ async def update_flota(placa: str, flota: FlotaRegistro):
 
 @app.delete("/api/flota/{placa}")
 async def delete_flota(placa: str):
-    await ensure_db_loaded()
+    await reload_db()
     global conductores_db
     if placa in conductores_db:
         del conductores_db[placa]
@@ -632,7 +632,7 @@ async def delete_flota(placa: str):
 
 @app.post("/api/clear-routes")
 async def clear_routes():
-    await ensure_db_loaded()
+    await reload_db()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
     if rutas_estado_actual:
@@ -648,7 +648,7 @@ async def clear_routes():
 
 @app.post("/api/save-history")
 async def save_history():
-    await ensure_db_loaded()
+    await reload_db()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
     if rutas_estado_actual:
@@ -665,14 +665,14 @@ async def save_history():
 
 @app.get("/api/reportes")
 async def get_reportes():
-    await ensure_db_loaded()
+    await reload_db()
     global historial_rutas
     return {"historial": historial_rutas}
 
 # --- AI Copilot Chat Route (REST API) ---
 @app.post("/api/chat")
 async def chat_with_copilot(req: ChatRequest):
-    await ensure_db_loaded()
+    await reload_db()
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
         
