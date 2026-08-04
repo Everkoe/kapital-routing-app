@@ -721,28 +721,7 @@ const DashboardView = ({ routes, addLog, setRoutes }) => {
 
 // --- Componente Raíz ---
 function App() {
-  // Sincronización en Tiempo Real
-  useEffect(() => {
-    if (!usuario) return;
-    const syncRoutes = async () => {
-      try {
-        const res = await fetch('/api/routes');
-        if (res.ok) {
-          const data = await res.json();
-          // Comparación simple por longitud y contenido para evitar re-renders ciegos
-          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data) ? data : prev);
-        }
-      } catch (err) {
-        console.error("Error en sincronización en tiempo real:", err);
-      }
-    };
-    
-    // Polling cada 3 segundos
-    const intervalId = setInterval(syncRoutes, 3000);
-    syncRoutes(); // Sincronización inicial
-    
-    return () => clearInterval(intervalId);
-  }, [usuario]);
+
 
   const [usuarioActual, setUsuarioActual] = useState(null);
   const [vistaActual, setVistaActual] = useState('dashboard');
@@ -764,6 +743,27 @@ function App() {
   useEffect(() => {
     localStorage.setItem('kapital_current_routes', JSON.stringify(routes));
   }, [routes]);
+
+  // Sincronización en Tiempo Real
+  useEffect(() => {
+    if (!usuarioActual) return;
+    const syncRoutes = async () => {
+      try {
+        const res = await fetch('/api/routes');
+        if (res.ok) {
+          const data = await res.json();
+          setRoutes(prev => JSON.stringify(prev) !== JSON.stringify(data) ? data : prev);
+        }
+      } catch (err) {
+        console.error("Error en sincronización en tiempo real:", err);
+      }
+    };
+    
+    const intervalId = setInterval(syncRoutes, 3000);
+    syncRoutes();
+    
+    return () => clearInterval(intervalId);
+  }, [usuarioActual]);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
