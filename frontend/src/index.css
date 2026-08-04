@@ -133,19 +133,20 @@ code {
 }
 
 .premium-card-header {
-  background: linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   padding: 30px;
-  color: white;
+  color: var(--text-primary);
   position: relative;
   overflow: hidden;
 }
 
-.premium-card-header::after {
+.premium-card-header::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: url('data:image/svg+xml;utf8,<svg opacity="0.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="10" cy="10" r="2" fill="white"/></svg>') repeat;
-  pointer-events: none;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--primary-color), #8b5cf6);
 }
 
 .file-dropzone {
@@ -202,8 +203,8 @@ code {
 }
 
 .badge-step {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary-color);
   width: 28px;
   height: 28px;
   display: inline-flex;
@@ -212,28 +213,27 @@ code {
   border-radius: 50%;
   font-size: 0.9rem;
   font-weight: 700;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .btn-generate-ai {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: var(--primary-color);
   color: white;
   border: none;
-  padding: 15px 30px;
-  border-radius: 12px;
-  font-size: 1.1rem;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 1.05rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+  transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 10px;
 }
 
 .btn-generate-ai:hover:not(:disabled) {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+  background: #2563eb; /* un azul un poco más oscuro o vibrante, asumiendo primary es un azul base */
+  transform: translateY(-1px);
 }
 
 .btn-generate-ai:disabled {
