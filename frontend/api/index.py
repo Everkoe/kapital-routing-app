@@ -94,12 +94,25 @@ async def persist():
             "flota": conductores_db,
             "lock": board_lock
         }
+        hdrs = {**HEADERS, "Prefer": "return=minimal"}
         async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS, json=payload)
+            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
             if res.status_code not in [200, 204]:
                 print(f"Supabase persist FAILED: {res.status_code} - {res.text[:200]}")
     except Exception as e:
         print(f"Error saving to Supabase: {e}")
+
+async def persist_users_only():
+    """Lightweight persist — only saves the usuarios dict. Use for user management actions."""
+    try:
+        payload = {"id": 1, "usuarios": usuarios_db}
+        hdrs = {**HEADERS, "Prefer": "return=minimal"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
+            if res.status_code not in [200, 204]:
+                print(f"Supabase persist_users FAILED: {res.status_code} - {res.text[:200]}")
+    except Exception as e:
+        print(f"Error saving users to Supabase: {e}")
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
@@ -200,8 +213,8 @@ async def register_user(usuario: UsuarioRegistro):
                 "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre, 
                 "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
             }
-    await persist()
-    return {"message": "Usuario registrado exitosamente."}
+    await persist_users_only()
+    return {"message": "Usuario registrado exitosamente.", "estado": estado}
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
@@ -242,7 +255,7 @@ async def update_profile(update_data: UsuarioUpdate):
     if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
     if update_data.rol: user["rol"] = update_data.rol
 
-    await persist()
+    await persist_users_only()
     return {"message": "Perfil actualizado exitosamente."}
 
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
@@ -275,7 +288,7 @@ async def approve_user(target_email: str, admin_email: str):
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     usuarios_db[target_email]["estado"] = "Activo"
-    await persist()
+    await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
 
 @app.delete("/api/admin/users/reject/{target_email}")
@@ -289,7 +302,7 @@ async def reject_user(target_email: str, admin_email: str):
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     del usuarios_db[target_email]
-    await persist()
+    await persist_users_only()
     return {"message": f"Usuario {target_email} rechazado y eliminado."}
 
 
