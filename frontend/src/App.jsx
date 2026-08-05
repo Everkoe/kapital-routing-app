@@ -140,9 +140,121 @@ const PantallaAuth = ({ onLogin }) => {
 
 
 // --- Componentes de Vistas ---
+// --- Confirmation Modal ---
+const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
+  if (!isOpen) return null;
+  const isDanger = config?.type === 'danger';
+  const isSuccess = config?.type === 'success';
+  const accentColor = isDanger ? '#ef4444' : isSuccess ? '#10b981' : 'var(--primary-color)';
+  const accentBg = isDanger ? 'rgba(239,68,68,0.12)' : isSuccess ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.12)';
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.65)',
+      backdropFilter: 'blur(8px)',
+      animation: 'fadeInOverlay 0.2s ease',
+    }}>
+      <style>{`
+        @keyframes fadeInOverlay { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes slideUpModal { from { opacity:0; transform:translateY(24px) scale(0.97) } to { opacity:1; transform:translateY(0) scale(1) } }
+        .confirm-modal-card { animation: slideUpModal 0.25s cubic-bezier(0.34,1.56,0.64,1) both; }
+        .confirm-btn { transition: all 0.18s ease; }
+        .confirm-btn:hover { transform: translateY(-2px); filter: brightness(1.12); }
+        .confirm-btn:active { transform: translateY(0px); }
+      `}</style>
+      <div className="confirm-modal-card" style={{
+        background: 'var(--bg-secondary, #1a1d2e)',
+        border: `1px solid ${accentColor}44`,
+        borderRadius: '20px',
+        padding: '40px',
+        width: '100%', maxWidth: '420px',
+        boxShadow: `0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px ${accentColor}22`,
+        textAlign: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Glow accent top bar */}
+        <div style={{ position:'absolute', top:0, left:0, right:0, height:'3px', background:`linear-gradient(90deg, transparent, ${accentColor}, transparent)` }} />
+
+        {/* Icon */}
+        <div style={{
+          width: '72px', height: '72px', borderRadius: '50%',
+          background: accentBg, border: `2px solid ${accentColor}55`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 20px', fontSize: '2rem',
+          boxShadow: `0 0 24px ${accentColor}33`,
+        }}>
+          {config?.icon || '⚠️'}
+        </div>
+
+        <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary, #f3f4f6)', fontSize: '1.2rem', fontWeight: 700 }}>
+          {config?.title || '¿Confirmar acción?'}
+        </h3>
+        <p style={{ margin: '0 0 10px', color: 'var(--text-secondary, #9ca3af)', fontSize: '0.92rem', lineHeight: 1.6 }}>
+          {config?.message}
+        </p>
+        {config?.userEmail && (
+          <div style={{
+            display: 'inline-block', padding: '6px 14px', borderRadius: '30px',
+            background: accentBg, border: `1px solid ${accentColor}44`,
+            color: accentColor, fontSize: '0.82rem', fontWeight: 600, marginBottom: '24px',
+            wordBreak: 'break-all',
+          }}>
+            {config.userEmail}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+          <button className="confirm-btn" onClick={onCancel} style={{
+            flex: 1, padding: '12px', borderRadius: '10px', cursor: 'pointer',
+            background: 'transparent', border: '1px solid var(--border-color, #2e303a)',
+            color: 'var(--text-secondary, #9ca3af)', fontWeight: 600, fontSize: '0.9rem',
+          }}>
+            Cancelar
+          </button>
+          <button className="confirm-btn" onClick={onConfirm} style={{
+            flex: 1, padding: '12px', borderRadius: '10px', cursor: 'pointer',
+            background: `linear-gradient(135deg, ${accentColor}, ${accentColor}cc)`,
+            border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.9rem',
+            boxShadow: `0 4px 16px ${accentColor}44`,
+          }}>
+            {config?.confirmText || 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Roles and Status Badges ---
+const RoleBadge = ({ rol }) => {
+  const colors = { Administrador: ['#6366f1','rgba(99,102,241,0.15)'], Conductor: ['#f59e0b','rgba(245,158,11,0.15)'], Cliente: ['#06b6d4','rgba(6,182,212,0.15)'] };
+  const [c, bg] = colors[rol] || ['#9ca3af','rgba(156,163,175,0.15)'];
+  return <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', color:c, background:bg, border:`1px solid ${c}44` }}>{rol}</span>;
+};
+const StatusBadge = ({ estado }) => {
+  const isPending = estado === 'Pendiente';
+  return (
+    <span style={{
+      display:'inline-flex', alignItems:'center', gap:'5px',
+      padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700,
+      color: isPending ? '#f59e0b' : '#10b981',
+      background: isPending ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
+      border: `1px solid ${isPending ? '#f59e0b44' : '#10b98144'}`,
+    }}>
+      <span style={{ width:'6px', height:'6px', borderRadius:'50%', background: isPending ? '#f59e0b' : '#10b981', display:'inline-block', boxShadow: isPending ? '0 0 6px #f59e0b' : '0 0 6px #10b981' }} />
+      {estado}
+    </span>
+  );
+};
+
+// --- Users Management Tab ---
 const UsersManagementTab = ({ usuarioActual }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
 
   const fetchUsers = async () => {
     try {
@@ -152,77 +264,174 @@ const UsersManagementTab = ({ usuarioActual }) => {
         const data = text ? JSON.parse(text) : {};
         setUsers(data.usuarios || []);
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
-  const handleAction = async (targetEmail, action) => {
-    try {
-      const res = await fetch(`/api/admin/users/${action}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, {
-        method: action === 'approve' ? 'PUT' : 'DELETE'
-      });
-      if (res.ok) fetchUsers();
-      else alert("Error al realizar la acción");
-    } catch (e) {
-      console.error(e);
-    }
+  const closeModal = () => setModal({ isOpen: false, config: null, onConfirm: null });
+
+  const requestAction = (targetEmail, action, userName) => {
+    const configs = {
+      approve: {
+        type: 'success', icon: '✅', title: 'Aprobar Acceso',
+        message: `¿Confirmas que deseas otorgar acceso a la plataforma a este usuario? Podrá iniciar sesión de inmediato.`,
+        userEmail: targetEmail, confirmText: `Aprobar a ${userName}`,
+      },
+      reject_pending: {
+        type: 'danger', icon: '🚫', title: 'Denegar Solicitud',
+        message: `Esta acción rechazará la solicitud de acceso y eliminará la cuenta pendiente del sistema.`,
+        userEmail: targetEmail, confirmText: 'Sí, denegar acceso',
+      },
+      deactivate: {
+        type: 'danger', icon: '⛔', title: 'Desactivar Usuario Activo',
+        message: `¿Estás seguro? Este usuario perderá acceso inmediato a la plataforma. Esta acción no se puede deshacer fácilmente.`,
+        userEmail: targetEmail, confirmText: 'Sí, desactivar cuenta',
+      },
+    };
+    const cfg = configs[action];
+    setModal({
+      isOpen: true,
+      config: cfg,
+      onConfirm: async () => {
+        closeModal();
+        setActionLoading(targetEmail);
+        try {
+          const apiAction = action === 'approve' ? 'approve' : 'reject';
+          const method = action === 'approve' ? 'PUT' : 'DELETE';
+          const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
+          if (res.ok) await fetchUsers();
+          else alert('Error al realizar la acción');
+        } catch (e) { console.error(e); }
+        finally { setActionLoading(null); }
+      },
+    });
   };
+
+  const pendingCount = users.filter(u => u.estado === 'Pendiente').length;
 
   return (
-    <div className="card">
-      <h2>Gestión de Accesos (B2B)</h2>
-      <p>Administra las solicitudes de ingreso a la plataforma Kapital Routing.</p>
-      
-      {loading ? <p>Cargando...</p> : (
-        <table className="rt-table" style={{width: '100%', marginTop: '20px'}}>
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Correo</th>
-              <th>Rol</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(u => (
-              <tr key={u.email}>
-                <td>{u.nombre}</td>
-                <td>{u.email}</td>
-                <td>{u.rol}</td>
-                <td>
-                  <span style={{ 
-                    padding: '4px 8px', borderRadius: '4px', fontSize: '12px',
-                    backgroundColor: u.estado === 'Activo' ? '#28a745' : '#ffc107',
-                    color: u.estado === 'Activo' ? 'white' : 'black'
-                  }}>{u.estado}</span>
-                </td>
-                <td>
-                  {u.estado === 'Pendiente' && (
-                    <>
-                      <button onClick={() => handleAction(u.email, 'approve')} style={{marginRight: '8px', backgroundColor: '#28a745', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>✅ Aprobar</button>
-                      <button onClick={() => handleAction(u.email, 'reject')} style={{backgroundColor: '#dc3545', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>❌ Denegar</button>
-                    </>
-                  )}
-                  {u.estado === 'Activo' && u.email !== usuarioActual.email && (
-                    <button onClick={() => handleAction(u.email, 'reject')} style={{backgroundColor: '#dc3545', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer'}}>Desactivar</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+    <>
+      <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
+      <div className="card" style={{ padding: '30px' }}>
+        {/* Header */}
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'28px', flexWrap:'wrap', gap:'12px' }}>
+          <div>
+            <h2 style={{ margin:0, fontSize:'1.4rem', fontWeight:700, color:'var(--text-primary)' }}>🛡️ Gestión de Accesos B2B</h2>
+            <p style={{ margin:'6px 0 0', color:'var(--text-secondary)', fontSize:'0.9rem' }}>Administra solicitudes de ingreso a la plataforma Kapital Routing.</p>
+          </div>
+          {pendingCount > 0 && (
+            <div style={{
+              display:'inline-flex', alignItems:'center', gap:'8px', padding:'8px 16px',
+              borderRadius:'30px', background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.4)',
+              color:'#f59e0b', fontWeight:700, fontSize:'0.85rem', animation:'pulse 2s infinite',
+            }}>
+              <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }`}</style>
+              ⏳ {pendingCount} solicitud{pendingCount > 1 ? 'es' : ''} pendiente{pendingCount > 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign:'center', padding:'40px', color:'var(--text-secondary)' }}>
+            <div style={{ fontSize:'2rem', marginBottom:'12px', animation:'spin 1s linear infinite' }}>⚙️</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            Cargando usuarios...
+          </div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:'0 8px' }}>
+              <thead>
+                <tr style={{ textAlign:'left' }}>
+                  {['Usuario', 'Correo Electrónico', 'Rol', 'Estado', 'Acciones'].map(h => (
+                    <th key={h} style={{
+                      padding:'10px 16px', fontSize:'11px', fontWeight:700, letterSpacing:'1px',
+                      textTransform:'uppercase', color:'var(--text-secondary)',
+                      borderBottom:'1px solid var(--border-color)',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.email} style={{ transition:'background 0.15s' }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                    <td style={{ padding:'14px 16px', borderRadius:'10px 0 0 10px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                        <div style={{
+                          width:'36px', height:'36px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
+                          background:'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)',
+                          color:'white', fontWeight:700, fontSize:'0.9rem', flexShrink:0,
+                        }}>{u.nombre?.charAt(0)?.toUpperCase() || '?'}</div>
+                        <span style={{ fontWeight:600, color:'var(--text-primary)', fontSize:'0.92rem' }}>{u.nombre}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:'14px 16px', color:'var(--text-secondary)', fontSize:'0.88rem' }}>{u.email}</td>
+                    <td style={{ padding:'14px 16px' }}><RoleBadge rol={u.rol} /></td>
+                    <td style={{ padding:'14px 16px' }}><StatusBadge estado={u.estado} /></td>
+                    <td style={{ padding:'14px 16px', borderRadius:'0 10px 10px 0' }}>
+                      {actionLoading === u.email ? (
+                        <span style={{ color:'var(--text-secondary)', fontSize:'0.85rem' }}>Procesando…</span>
+                      ) : (
+                        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                          {u.estado === 'Pendiente' && (
+                            <>
+                              <button onClick={() => requestAction(u.email, 'approve', u.nombre)} style={{
+                                padding:'7px 14px', borderRadius:'8px', border:'1px solid #10b98155',
+                                background:'rgba(16,185,129,0.1)', color:'#10b981', cursor:'pointer',
+                                fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
+                              }}
+                              onMouseEnter={e => { e.target.style.background='#10b981'; e.target.style.color='#fff'; }}
+                              onMouseLeave={e => { e.target.style.background='rgba(16,185,129,0.1)'; e.target.style.color='#10b981'; }}>
+                                ✅ Aprobar
+                              </button>
+                              <button onClick={() => requestAction(u.email, 'reject_pending', u.nombre)} style={{
+                                padding:'7px 14px', borderRadius:'8px', border:'1px solid #ef444455',
+                                background:'rgba(239,68,68,0.1)', color:'#ef4444', cursor:'pointer',
+                                fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
+                              }}
+                              onMouseEnter={e => { e.target.style.background='#ef4444'; e.target.style.color='#fff'; }}
+                              onMouseLeave={e => { e.target.style.background='rgba(239,68,68,0.1)'; e.target.style.color='#ef4444'; }}>
+                                ❌ Denegar
+                              </button>
+                            </>
+                          )}
+                          {u.estado === 'Activo' && u.email !== usuarioActual.email && (
+                            <button onClick={() => requestAction(u.email, 'deactivate', u.nombre)} style={{
+                              padding:'7px 14px', borderRadius:'8px', border:'1px solid #ef444455',
+                              background:'rgba(239,68,68,0.08)', color:'#ef4444', cursor:'pointer',
+                              fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
+                            }}
+                            onMouseEnter={e => { e.target.style.background='#ef4444'; e.target.style.color='#fff'; }}
+                            onMouseLeave={e => { e.target.style.background='rgba(239,68,68,0.08)'; e.target.style.color='#ef4444'; }}>
+                              ⛔ Desactivar
+                            </button>
+                          )}
+                          {u.email === usuarioActual.email && (
+                            <span style={{ fontSize:'0.78rem', color:'var(--text-secondary)', fontStyle:'italic', padding:'7px 0' }}>Tu cuenta</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {users.length === 0 && (
+              <div style={{ textAlign:'center', padding:'48px', color:'var(--text-secondary)' }}>
+                <div style={{ fontSize:'2.5rem', marginBottom:'12px' }}>👥</div>
+                <p style={{ margin:0 }}>No hay usuarios registrados aún.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 };
+
 
 const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usuarioActual }) => {
   const [isOpen, setIsOpen] = useState(false);
