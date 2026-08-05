@@ -484,7 +484,7 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
 const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes, usuarioActual }) => {
+const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved, onSaveSession, onUnsaveSession, onSessionDirty }) => {
   const syncToBackend = async (newRoutes) => {
     try {
       await fetch('/api/routes', {
@@ -574,6 +574,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual }) => {
       }
       const result = await response.json();
       setRoutes(result);
+      if (onSessionDirty) onSessionDirty(); // Mark session as unsaved after new generation
       addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos usando Smart Routing.`);
     } catch (err) {
       setError(err.message);
@@ -633,8 +634,10 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual }) => {
     setSelectedFile(null);
     setFileInputKey(prev => prev + 1);
     setError(null);
-    localStorage.removeItem('kapital_current_routes');
-    // Save empty state to backend so next login also starts clean
+    // Clear saved session too
+    localStorage.removeItem('kapital_saved_session');
+    if (onUnsaveSession) onUnsaveSession();
+    // Clear on backend
     try {
       await fetch('/api/routes', {
         method: 'POST',
@@ -720,6 +723,22 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual }) => {
            <div style={{ display: 'flex', gap: '10px' }}>
              {routes.length > 0 && (
                 <>
+                  {/* Session Lock Button */}
+                  <button
+                    onClick={sessionSaved ? onUnsaveSession : onSaveSession}
+                    title={sessionSaved ? 'Sesión guardada - Clic para desbloquear' : 'Guardar sesión para que persista al recargar'}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px',
+                      borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '0.9rem',
+                      transition: 'all 0.2s ease',
+                      background: sessionSaved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.12)',
+                      color: sessionSaved ? '#10b981' : 'var(--primary-color)',
+                      border: sessionSaved ? '1px solid #10b981' : '1px solid var(--primary-color)',
+                    }}
+                  >
+                    <span style={{ fontSize: '1.1rem' }}>{sessionSaved ? '🔒' : '🔓'}</span>
+                    {sessionSaved ? 'Sesión Guardada' : 'Guardar Sesión'}
+                  </button>
                   <button className="btn-secondary" onClick={handleExportToExcel} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '8px' }}>
                     <span style={{ fontSize: '1.2rem' }}>📥</span> Exportar Excel
                   </button>
@@ -770,7 +789,18 @@ function App() {
   const [usuarioActual, setUsuarioActual] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
-  const [routes, setRoutes] = useState([]);
+  const [routes, setRoutes] = useState(() => {
+    // Restore saved session if it exists
+    try {
+      const saved = localStorage.getItem('kapital_saved_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch(e) {}
+    return [];
+  });
+  const [sessionSaved, setSessionSaved] = useState(() => !!localStorage.getItem('kapital_saved_session'));
   const [logs, setLogs] = useState(() => {
     const savedLogs = localStorage.getItem('kapital_audit_logs');
     return savedLogs ? JSON.parse(savedLogs) : [];
@@ -783,6 +813,19 @@ function App() {
   }, [theme]);
 
 
+
+  const handleSaveSession = () => {
+    if (routes.length === 0) return;
+    localStorage.setItem('kapital_saved_session', JSON.stringify(routes));
+    setSessionSaved(true);
+    addLog('Sesión guardada. Los datos persisten al recargar.');
+  };
+
+  const handleUnsaveSession = () => {
+    localStorage.removeItem('kapital_saved_session');
+    setSessionSaved(false);
+    addLog('Sesión desbloqueada. El tablero no persistirá al recargar.');
+  };
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -823,7 +866,7 @@ function App() {
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
-        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} />;
+        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }
   };
 
