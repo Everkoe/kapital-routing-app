@@ -314,119 +314,141 @@ const UsersManagementTab = ({ usuarioActual }) => {
   return (
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
-      <div className="card" style={{ padding: '30px' }}>
-        {/* Header */}
-        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'28px', flexWrap:'wrap', gap:'12px' }}>
-          <div>
-            <h2 style={{ margin:0, fontSize:'1.4rem', fontWeight:700, color:'var(--text-primary)' }}>🛡️ Gestión de Accesos B2B</h2>
-            <p style={{ margin:'6px 0 0', color:'var(--text-secondary)', fontSize:'0.9rem' }}>Administra solicitudes de ingreso a la plataforma Kapital Routing.</p>
-          </div>
-          {pendingCount > 0 && (
-            <div style={{
-              display:'inline-flex', alignItems:'center', gap:'8px', padding:'8px 16px',
-              borderRadius:'30px', background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.4)',
-              color:'#f59e0b', fontWeight:700, fontSize:'0.85rem', animation:'pulse 2s infinite',
-            }}>
-              <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }`}</style>
-              ⏳ {pendingCount} solicitud{pendingCount > 1 ? 'es' : ''} pendiente{pendingCount > 1 ? 's' : ''}
-            </div>
-          )}
-        </div>
+      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
 
-        {loading ? (
-          <div style={{ textAlign:'center', padding:'40px', color:'var(--text-secondary)' }}>
-            <div style={{ fontSize:'2rem', marginBottom:'12px', animation:'spin 1s linear infinite' }}>⚙️</div>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-            Cargando usuarios...
-          </div>
-        ) : (
-          <div style={{ overflowX:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:'0 8px' }}>
-              <thead>
-                <tr style={{ textAlign:'left' }}>
-                  {['Usuario', 'Correo Electrónico', 'Rol', 'Estado', 'Acciones'].map(h => (
-                    <th key={h} style={{
-                      padding:'10px 16px', fontSize:'11px', fontWeight:700, letterSpacing:'1px',
-                      textTransform:'uppercase', color:'var(--text-secondary)',
-                      borderBottom:'1px solid var(--border-color)',
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.email} style={{ transition:'background 0.15s' }}
-                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-secondary)'}
-                    onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                    <td style={{ padding:'14px 16px', borderRadius:'10px 0 0 10px' }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                        <div style={{
-                          width:'36px', height:'36px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
-                          background:'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)',
-                          color:'white', fontWeight:700, fontSize:'0.9rem', flexShrink:0,
-                        }}>{u.nombre?.charAt(0)?.toUpperCase() || '?'}</div>
-                        <span style={{ fontWeight:600, color:'var(--text-primary)', fontSize:'0.92rem' }}>{u.nombre}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding:'14px 16px', color:'var(--text-secondary)', fontSize:'0.88rem' }}>{u.email}</td>
-                    <td style={{ padding:'14px 16px' }}><RoleBadge rol={u.rol} /></td>
-                    <td style={{ padding:'14px 16px' }}><StatusBadge estado={u.estado} /></td>
-                    <td style={{ padding:'14px 16px', borderRadius:'0 10px 10px 0' }}>
-                      {actionLoading === u.email ? (
-                        <span style={{ color:'var(--text-secondary)', fontSize:'0.85rem' }}>Procesando…</span>
-                      ) : (
-                        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-                          {u.estado === 'Pendiente' && (
-                            <>
-                              <button onClick={() => requestAction(u.email, 'approve', u.nombre)} style={{
-                                padding:'7px 14px', borderRadius:'8px', border:'1px solid #10b98155',
-                                background:'rgba(16,185,129,0.1)', color:'#10b981', cursor:'pointer',
-                                fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
-                              }}
-                              onMouseEnter={e => { e.target.style.background='#10b981'; e.target.style.color='#fff'; }}
-                              onMouseLeave={e => { e.target.style.background='rgba(16,185,129,0.1)'; e.target.style.color='#10b981'; }}>
-                                ✅ Aprobar
-                              </button>
-                              <button onClick={() => requestAction(u.email, 'reject_pending', u.nombre)} style={{
-                                padding:'7px 14px', borderRadius:'8px', border:'1px solid #ef444455',
-                                background:'rgba(239,68,68,0.1)', color:'#ef4444', cursor:'pointer',
-                                fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
-                              }}
-                              onMouseEnter={e => { e.target.style.background='#ef4444'; e.target.style.color='#fff'; }}
-                              onMouseLeave={e => { e.target.style.background='rgba(239,68,68,0.1)'; e.target.style.color='#ef4444'; }}>
-                                ❌ Denegar
-                              </button>
-                            </>
-                          )}
-                          {u.estado === 'Activo' && u.email !== usuarioActual.email && (
-                            <button onClick={() => requestAction(u.email, 'deactivate', u.nombre)} style={{
-                              padding:'7px 14px', borderRadius:'8px', border:'1px solid #ef444455',
-                              background:'rgba(239,68,68,0.08)', color:'#ef4444', cursor:'pointer',
-                              fontWeight:600, fontSize:'0.82rem', transition:'all 0.18s',
-                            }}
-                            onMouseEnter={e => { e.target.style.background='#ef4444'; e.target.style.color='#fff'; }}
-                            onMouseLeave={e => { e.target.style.background='rgba(239,68,68,0.08)'; e.target.style.color='#ef4444'; }}>
-                              ⛔ Desactivar
-                            </button>
-                          )}
-                          {u.email === usuarioActual.email && (
-                            <span style={{ fontSize:'0.78rem', color:'var(--text-secondary)', fontStyle:'italic', padding:'7px 0' }}>Tu cuenta</span>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {users.length === 0 && (
-              <div style={{ textAlign:'center', padding:'48px', color:'var(--text-secondary)' }}>
-                <div style={{ fontSize:'2.5rem', marginBottom:'12px' }}>👥</div>
-                <p style={{ margin:0 }}>No hay usuarios registrados aún.</p>
+        {/* Premium Header — consistent with rest of app */}
+        <div className="premium-card-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                <div style={{
+                  width: '34px', height: '34px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)', fontSize: '1.1rem',
+                  boxShadow: '0 4px 12px rgba(99,102,241,0.35)',
+                }}>🛡️</div>
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Gestión de Accesos B2B
+                </h2>
+              </div>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.87rem', paddingLeft: '44px' }}>
+                Administra solicitudes de ingreso a la plataforma Kapital Routing.
+              </p>
+            </div>
+            {pendingCount > 0 && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 18px',
+                borderRadius: '30px', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.45)',
+                color: '#f59e0b', fontWeight: 700, fontSize: '0.85rem', animation: 'pulse 2s infinite',
+                boxShadow: '0 0 16px rgba(245,158,11,0.15)',
+              }}>
+                <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }`}</style>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 8px #f59e0b', display: 'inline-block' }} />
+                {pendingCount} solicitud{pendingCount > 1 ? 'es' : ''} pendiente{pendingCount > 1 ? 's' : ''}
               </div>
             )}
           </div>
-        )}
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: '24px 28px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '12px', animation: 'spin 1s linear infinite' }}>⚙️</div>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              <p style={{ margin: 0 }}>Cargando usuarios...</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 6px' }}>
+                <thead>
+                  <tr>
+                    {['Usuario', 'Correo Electrónico', 'Rol', 'Estado', 'Acciones'].map(h => (
+                      <th key={h} style={{
+                        padding: '8px 14px', fontSize: '10px', fontWeight: 700, letterSpacing: '1.2px',
+                        textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'left',
+                        borderBottom: '2px solid var(--border-color)',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.email}
+                      style={{ borderRadius: '10px', transition: 'background 0.15s', cursor: 'default' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ padding: '13px 14px', borderRadius: '10px 0 0 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)',
+                            color: 'white', fontWeight: 700, fontSize: '0.88rem',
+                            boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
+                          }}>{u.nombre?.charAt(0)?.toUpperCase() || '?'}</div>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{u.nombre}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.86rem' }}>{u.email}</td>
+                      <td style={{ padding: '13px 14px' }}><RoleBadge rol={u.rol} /></td>
+                      <td style={{ padding: '13px 14px' }}><StatusBadge estado={u.estado} /></td>
+                      <td style={{ padding: '13px 14px', borderRadius: '0 10px 10px 0' }}>
+                        {actionLoading === u.email ? (
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.83rem' }}>Procesando…</span>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {u.estado === 'Pendiente' && (
+                              <>
+                                <button onClick={() => requestAction(u.email, 'approve', u.nombre)} style={{
+                                  padding: '6px 13px', borderRadius: '8px', border: '1px solid #10b98166',
+                                  background: 'rgba(16,185,129,0.1)', color: '#10b981', cursor: 'pointer',
+                                  fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                }}
+                                  onMouseEnter={e => { e.target.style.background = '#10b981'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(16,185,129,0.4)'; }}
+                                  onMouseLeave={e => { e.target.style.background = 'rgba(16,185,129,0.1)'; e.target.style.color = '#10b981'; e.target.style.boxShadow = 'none'; }}>
+                                  ✅ Aprobar
+                                </button>
+                                <button onClick={() => requestAction(u.email, 'reject_pending', u.nombre)} style={{
+                                  padding: '6px 13px', borderRadius: '8px', border: '1px solid #ef444466',
+                                  background: 'rgba(239,68,68,0.1)', color: '#ef4444', cursor: 'pointer',
+                                  fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                }}
+                                  onMouseEnter={e => { e.target.style.background = '#ef4444'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
+                                  onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.1)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
+                                  ❌ Denegar
+                                </button>
+                              </>
+                            )}
+                            {u.estado === 'Activo' && u.email !== usuarioActual.email && (
+                              <button onClick={() => requestAction(u.email, 'deactivate', u.nombre)} style={{
+                                padding: '6px 13px', borderRadius: '8px', border: '1px solid #ef444455',
+                                background: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer',
+                                fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                              }}
+                                onMouseEnter={e => { e.target.style.background = '#ef4444'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
+                                onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.08)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
+                                ⛔ Desactivar
+                              </button>
+                            )}
+                            {u.email === usuarioActual.email && (
+                              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>Tu cuenta</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {users.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '56px 24px', color: 'var(--text-secondary)' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>👥</div>
+                  <p style={{ margin: 0, fontSize: '0.95rem' }}>No hay usuarios registrados aún.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
