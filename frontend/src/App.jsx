@@ -1050,17 +1050,21 @@ function App() {
     if (routes.length === 0) return;
     localStorage.setItem('kapital_saved_session', JSON.stringify(routes));
     setSessionSaved(true);
-    addLog('Sesión guardada. Sincronizando con la nube...');
-    // Also push to backend so GerentePortal and other devices see current routes
+    addLog('Sesión guardada. Publicando al Gerente de Operaciones...');
     try {
-      await fetch('/api/routes', {
+      const res = await fetch('/api/routes/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(routes),
       });
-      addLog('✅ Rutas sincronizadas con la nube. El Gerente de Operaciones ya puede verlas.');
+      if (res.ok) {
+        const data = await res.json();
+        addLog(`✅ ${data.message || 'Datos publicados al Gerente.'}`);
+      } else {
+        addLog('⚠️ Sesión guardada localmente. Error al publicar al Gerente.');
+      }
     } catch (e) {
-      addLog('⚠️ Sesión guardada localmente (sin conexión a la nube).');
+      addLog('⚠️ Sesión guardada localmente (sin conexión al servidor).');
     }
   };
 

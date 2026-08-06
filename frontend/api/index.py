@@ -39,11 +39,24 @@ usuarios_db: Dict[str, Dict[str, Any]] = {}
 conductores_db: Dict[str, Dict[str, Any]] = {}
 historial_rutas: List[Dict[str, Any]] = []
 board_lock: Dict[str, Any] = {}
+routes_summary: List[Dict[str, Any]] = []  # Compact summary for GerentePortal
 
 db_loaded = False
 
+def _build_routes_summary(routes: list) -> list:
+    """Build a compact route summary (no agent details) for GerentePortal."""
+    return [
+        {
+            "conductor": r.get("conductor", "SIN ASIGNAR"),
+            "micro_zona": r.get("micro_zona", ""),
+            "horario": r.get("horario", ""),
+            "count": len(r.get("agentes", [])),
+        }
+        for r in routes
+    ]
+
 async def ensure_db_loaded():
-    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, board_lock
+    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, board_lock, routes_summary
     if db_loaded:
         return
     try:
@@ -54,7 +67,8 @@ async def ensure_db_loaded():
                 usuarios_db = data.get("usuarios", {})
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
-                board_lock = data.get("lock", {})
+                board_lock = data.get("lock", {}) or {}
+                routes_summary = board_lock.get("routes_summary", [])
                 flota = data.get("flota", {})
                 if not flota:
                     flota = {
@@ -70,7 +84,7 @@ async def ensure_db_loaded():
 
 
 async def reload_db():
-    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock
+    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock, routes_summary
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
@@ -79,7 +93,8 @@ async def reload_db():
                 usuarios_db = data.get("usuarios", {})
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
-                board_lock = data.get("lock", {})
+                board_lock = data.get("lock", {}) or {}
+                routes_summary = board_lock.get("routes_summary", [])
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
@@ -113,6 +128,24 @@ async def persist_users_only():
                 print(f"Supabase persist_users FAILED: {res.status_code} - {res.text[:200]}")
     except Exception as e:
         print(f"Error saving users to Supabase: {e}")
+
+async def persist_routes_summary(summary: list):
+    """Persist ONLY the compact routes summary inside the lock column.
+    Very small payload (~30KB) — always succeeds even with 2000+ agents."""
+    global board_lock, routes_summary
+    routes_summary = summary
+    board_lock["routes_summary"] = summary
+    try:
+        payload = {"id": 1, "lock": board_lock}
+        hdrs = {**HEADERS, "Prefer": "return=minimal"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
+            if res.status_code not in [200, 204]:
+                print(f"Supabase persist_routes_summary FAILED: {res.status_code} - {res.text[:200]}")
+            else:
+                print(f"Routes summary saved: {len(summary)} routes")
+    except Exception as e:
+        print(f"Error saving routes summary: {e}")
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
@@ -387,6 +420,26 @@ def native_kmeans(points, k, max_iters=10):
 async def get_routes():
     await reload_db()
     return rutas_estado_actual
+
+@app.get("/api/routes/summary")
+async def get_routes_summary():
+    """Returns compact route summary for GerentePortal (no agent details, just counts)."""
+    await reload_db()
+    if routes_summary:
+        return routes_summary
+    # Fallback: build summary from full routes if available
+    if rutas_estado_actual:
+        return _build_routes_summary(rutas_estado_actual)
+    return []
+
+@app.post("/api/routes/publish")
+async def publish_routes_summary(rutas: list = Body(...)):
+    """Accept full routes from Admin frontend, build compact summary, save to Supabase.
+    Small payload (~30KB) so it always succeeds regardless of agent count."""
+    summary = _build_routes_summary(rutas)
+    await persist_routes_summary(summary)
+    return {"message": f"Publicado: {len(summary)} rutas al panel del Gerente.", "total_routes": len(summary)}
+
 
 @app.post("/api/routes")
 async def update_routes(rutas: list = Body(...)):
