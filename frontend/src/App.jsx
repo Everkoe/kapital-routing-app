@@ -162,17 +162,17 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
       `}</style>
       <div className="confirm-modal-card" style={{
         background: 'var(--bg-secondary, #1a1d2e)',
-        border: `1px solid ${accentColor}44`,
+        border: '1px solid var(--border-color, #2e303a)',
         borderRadius: '20px',
         padding: '40px',
         width: '100%', maxWidth: '420px',
-        boxShadow: `0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px ${accentColor}22`,
+        boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
         textAlign: 'center',
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* Glow accent top bar */}
-        <div style={{ position:'absolute', top:0, left:0, right:0, height:'3px', background:`linear-gradient(90deg, transparent, ${accentColor}, transparent)` }} />
+        {/* Solid accent top bar instead of glow */}
+        <div style={{ position:'absolute', top:0, left:0, right:0, height:'4px', background: accentColor }} />
 
         {/* Icon */}
         <div style={{
@@ -180,7 +180,6 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
           background: accentBg, border: `2px solid ${accentColor}55`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           margin: '0 auto 20px', fontSize: '2rem',
-          boxShadow: `0 0 24px ${accentColor}33`,
         }}>
           {config?.icon || '⚠️'}
         </div>
@@ -212,9 +211,8 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
           </button>
           <button className="confirm-btn" onClick={onConfirm} style={{
             flex: 1, padding: '12px', borderRadius: '10px', cursor: 'pointer',
-            background: `linear-gradient(135deg, ${accentColor}, ${accentColor}cc)`,
+            background: accentColor,
             border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.9rem',
-            boxShadow: `0 4px 16px ${accentColor}44`,
           }}>
             {config?.confirmText || 'Confirmar'}
           </button>
