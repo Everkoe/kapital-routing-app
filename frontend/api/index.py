@@ -434,8 +434,7 @@ async def get_routes_summary():
 
 @app.post("/api/routes/publish")
 async def publish_routes_summary(rutas: list = Body(...)):
-    """Accept full routes from Admin frontend, build compact summary, save to Supabase.
-    Small payload (~30KB) so it always succeeds regardless of agent count."""
+    await ensure_db_loaded()
     summary = _build_routes_summary(rutas)
     await persist_routes_summary(summary)
     return {"message": f"Publicado: {len(summary)} rutas al panel del Gerente.", "total_routes": len(summary)}
