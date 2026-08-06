@@ -436,7 +436,21 @@ async def get_routes_summary():
 async def publish_routes_summary(rutas: list = Body(...)):
     await ensure_db_loaded()
     summary = _build_routes_summary(rutas)
-    await persist_routes_summary(summary)
+    
+    # Inline the persist logic to catch the exact error and return it
+    global usuarios_db
+    usuarios_to_save = dict(usuarios_db)
+    usuarios_to_save["__routes_summary__"] = summary
+    payload = {"usuarios": usuarios_to_save}
+    try:
+        async with httpx.AsyncClient() as client:
+            hdrs = dict(HEADERS)
+            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
+            if res.status_code not in (200, 204):
+                return {"message": f"Error Supabase: {res.text}", "total_routes": 0}
+    except Exception as e:
+        return {"message": f"Exception: {str(e)}", "total_routes": 0}
+
     return {"message": f"Publicado: {len(summary)} rutas al panel del Gerente.", "total_routes": len(summary)}
 
 
