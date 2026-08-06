@@ -71,6 +71,7 @@ const GerentePortal = ({ usuario, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [conductorPage, setConductorPage] = useState(0);
+  const [timeFilter, setTimeFilter] = useState("Día");
   const COND_PER_PAGE = 20;
 
   const loadData = async () => {
@@ -97,13 +98,12 @@ const GerentePortal = ({ usuario, onLogout }) => {
     const flotaActiva = conductoresSet.length;
     const capacidadTotal = flotaActiva * 15;
     const tasaOpt = capacidadTotal > 0 ? ((totalAgentes / capacidadTotal) * 100).toFixed(1) : 0;
-    const sinAsignar = summary.filter(r => r.conductor === "SIN ASIGNAR").reduce((s, r) => s + (r.count || 0), 0);
     const zonasUnicas = new Set(summary.map(r => r.micro_zona)).size;
     const turnosUnicos = new Set(summary.map(r => r.horario)).size;
     const promPorRuta = summary.length > 0 ? (totalAgentes / summary.length).toFixed(1) : 0;
     const rutasFull = summary.filter(r => (r.count || 0) >= 15).length;
     const rutasBajas = summary.filter(r => (r.count || 0) < 8 && r.conductor !== "SIN ASIGNAR").length;
-    return { totalAgentes, flotaActiva, tasaOpt, rutasProg: summary.length, sinAsignar, capacidadTotal, zonasUnicas, turnosUnicos, promPorRuta, rutasFull, rutasBajas };
+    return { totalAgentes, flotaActiva, tasaOpt, rutasProg: summary.length, capacidadTotal, zonasUnicas, turnosUnicos, promPorRuta, rutasFull, rutasBajas };
   }, [summary]);
 
   // ── Pasajeros por conductor (aggregated, paginated) ──
@@ -174,20 +174,39 @@ const GerentePortal = ({ usuario, onLogout }) => {
       </nav>
 
       <main style={{ maxWidth:"1440px", margin:"0 auto", padding:"28px 24px" }}>
-        {/* Title */}
+        {/* Title & Filters */}
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:"12px", marginBottom:"28px", animation:"fadeSlideUp 0.4s ease both" }}>
           <div>
             <h1 style={{ margin:"0 0 4px", fontSize:"1.55rem", fontWeight:800, color:"var(--text-primary)" }}>Panel de Operaciones Ejecutivo 📊</h1>
             <p style={{ margin:0, color:"var(--text-secondary)", fontSize:"0.88rem" }}>Vista de alto nivel — Información en tiempo real de todas las operaciones de transporte</p>
           </div>
-          {summary.length > 0 && (
-            <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-              <InfoBadge label="Zonas" value={kpis.zonasUnicas} color={PALETTE.cyan} />
-              <InfoBadge label="Turnos" value={kpis.turnosUnicos} color={PALETTE.amber} />
-              <InfoBadge label="Prom/Ruta" value={kpis.promPorRuta} color={PALETTE.purple} />
-              <InfoBadge label="Conductores" value={conductorData.length} color={PALETTE.green} />
+          <div style={{ display:"flex", flexDirection:"column", gap:"12px", alignItems:"flex-end" }}>
+            <div style={{ display:"flex", background:"var(--bg-secondary)", border:"1px solid var(--border-color)", padding:"4px", borderRadius:"12px" }}>
+              {["Día", "Semana", "Quincena", "Mes"].map(f => (
+                <button
+                  key={f}
+                  onClick={() => setTimeFilter(f)}
+                  style={{
+                    padding:"6px 14px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"0.8rem", fontWeight:600,
+                    background: timeFilter === f ? "var(--bg-primary)" : "transparent",
+                    color: timeFilter === f ? "var(--text-primary)" : "var(--text-secondary)",
+                    boxShadow: timeFilter === f ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                    transition: "all 0.2s ease"
+                  }}
+                >
+                  {f}
+                </button>
+              ))}
             </div>
-          )}
+            {summary.length > 0 && (
+              <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+                <InfoBadge label="Zonas" value={kpis.zonasUnicas} color={PALETTE.cyan} />
+                <InfoBadge label="Turnos" value={kpis.turnosUnicos} color={PALETTE.amber} />
+                <InfoBadge label="Prom/Ruta" value={kpis.promPorRuta} color={PALETTE.purple} />
+                <InfoBadge label="Conductores" value={conductorData.length} color={PALETTE.green} />
+              </div>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -218,7 +237,6 @@ const GerentePortal = ({ usuario, onLogout }) => {
               <StatCard title="Rutas Completas" value={kpis.rutasFull} subtitle="Con 15 pasajeros (máx.)" icon="✅" color={PALETTE.green} delay={0.2} />
               <StatCard title="Zonas Cubiertas" value={kpis.zonasUnicas} subtitle="Micro-zonas operativas" icon="📍" color={PALETTE.pink} delay={0.25} />
               {kpis.rutasBajas > 0 && <StatCard title="Rutas con Baja Carga" value={kpis.rutasBajas} subtitle="Menos de 8 pasajeros" icon="📉" color={PALETTE.red} delay={0.3} />}
-              {kpis.sinAsignar > 0 && <StatCard title="Sin Conductor" value={kpis.sinAsignar} subtitle="Pax sin asignar" icon="⚠️" color={PALETTE.red} delay={0.35} />}
             </div>
 
             {/* Row 1: Pasajeros por Conductor + Eficiencia + Zonas Pie */}
