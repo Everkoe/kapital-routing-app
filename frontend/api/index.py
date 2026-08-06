@@ -190,6 +190,9 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
+    ROLES_VALIDOS = ["Administrador", "Conductor", "Gerente de Operaciones"]
+    rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Administrador"
+    
     # Si es el primer usuario, se aprueba automáticamente como Admin
     estado = "Activo" if len(usuarios_db) == 0 else "Pendiente"
     
@@ -197,24 +200,24 @@ async def register_user(usuario: UsuarioRegistro):
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": "Administrador" if len(usuarios_db) == 0 else usuario.rol, # El primero siempre es Admin
+        "rol": "Administrador" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
-        "empresa_id": usuario.empresa_id,
         "avatar": usuario.avatar,
         "estado": estado
     }
     usuarios_db[usuario.email] = nuevo_usuario
     
-    # Generate mock schedule if role is Conductor
-    if usuario.rol == "Conductor" and usuario.unidad_id:
+    # Generate fleet record if role is Conductor
+    if rol_solicitado == "Conductor" and usuario.unidad_id:
         if usuario.unidad_id not in conductores_db:
             conductores_db[usuario.unidad_id] = {
-                "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre, 
+                "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre,
                 "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
             }
     await persist_users_only()
     return {"message": "Usuario registrado exitosamente.", "estado": estado}
+
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):

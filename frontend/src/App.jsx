@@ -8,7 +8,7 @@ import './App.css';
 import LiveMap from './LiveMap';
 import FlotaView from './FlotaView';
 import DriverPortal from './DriverPortal';
-import ClientPortal from './ClientPortal';
+import GerentePortal from './GerentePortal';
 import CopilotChat from './CopilotChat';
 import VistaReportes from './VistaReportes';
 
@@ -106,13 +106,10 @@ const PantallaAuth = ({ onLogin }) => {
                     <select className="auth-input" name="rol" onChange={handleInputChange}>
                       <option>Administrador</option>
                       <option>Conductor</option>
-                      <option>Cliente</option>
+                      <option>Gerente de Operaciones</option>
                     </select>
                     {formData.rol === 'Conductor' && (
                       <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
-                    )}
-                    {formData.rol === 'Cliente' && (
-                      <input className="auth-input" name="empresa_id" type="text" placeholder="Código de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
                     )}
                   </>
                 )}
@@ -229,7 +226,11 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
 
 // --- Roles and Status Badges ---
 const RoleBadge = ({ rol }) => {
-  const colors = { Administrador: ['#6366f1','rgba(99,102,241,0.15)'], Conductor: ['#f59e0b','rgba(245,158,11,0.15)'], Cliente: ['#06b6d4','rgba(6,182,212,0.15)'] };
+  const colors = {
+    Administrador: ['#6366f1','rgba(99,102,241,0.15)'],
+    Conductor: ['#f59e0b','rgba(245,158,11,0.15)'],
+    'Gerente de Operaciones': ['#10b981','rgba(16,185,129,0.15)'],
+  };
   const [c, bg] = colors[rol] || ['#9ca3af','rgba(156,163,175,0.15)'];
   return <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', color:c, background:bg, border:`1px solid ${c}44` }}>{rol}</span>;
 };
@@ -1109,8 +1110,8 @@ function App() {
     return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
   }
 
-  if (usuarioActual.rol === 'Cliente') {
-    return <ClientPortal usuario={usuarioActual} onLogout={handleLogout} />;
+  if (usuarioActual.rol === 'Gerente de Operaciones') {
+    return <GerentePortal usuario={usuarioActual} onLogout={handleLogout} />;
   }
 
   return (
