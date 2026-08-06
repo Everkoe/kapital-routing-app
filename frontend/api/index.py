@@ -65,10 +65,10 @@ async def ensure_db_loaded():
             if res.status_code == 200 and len(res.json()) > 0:
                 data = res.json()[0]
                 usuarios_db = data.get("usuarios", {})
+                routes_summary = usuarios_db.pop("__routes_summary__", [])
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
                 board_lock = data.get("lock", {}) or {}
-                routes_summary = board_lock.get("routes_summary", [])
                 flota = data.get("flota", {})
                 if not flota:
                     flota = {
@@ -91,10 +91,10 @@ async def reload_db():
             if res.status_code == 200 and len(res.json()) > 0:
                 data = res.json()[0]
                 usuarios_db = data.get("usuarios", {})
+                routes_summary = usuarios_db.pop("__routes_summary__", [])
                 rutas_estado_actual = data.get("rutas", [])
                 historial_rutas = data.get("historial", [])
                 board_lock = data.get("lock", {}) or {}
-                routes_summary = board_lock.get("routes_summary", [])
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
