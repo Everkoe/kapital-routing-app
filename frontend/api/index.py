@@ -590,6 +590,12 @@ async def assign_routes_from_excel(
                         break
                         
         rutas_estado_actual = rutas_generadas
+        
+        # Guardar automáticamente el resumen para que el Gerente vea la nueva data al instante
+        # sin importar si persist() completo falla por tamaño.
+        summary = _build_routes_summary(rutas_estado_actual)
+        await persist_routes_summary(summary)
+        
         await persist()
         return rutas_estado_actual
     except Exception as e:

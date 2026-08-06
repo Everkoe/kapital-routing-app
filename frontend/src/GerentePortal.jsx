@@ -77,7 +77,7 @@ const GerentePortal = ({ usuario, onLogout }) => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/routes/summary");
+      const res = await fetch(`/api/routes/summary?t=${Date.now()}`);
       if (res.ok) {
         const text = await res.text();
         if (text) {
