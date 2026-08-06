@@ -219,7 +219,7 @@ const GerentePortal = ({ usuario, onLogout }) => {
             <div style={{ fontSize:"3.5rem", marginBottom:"16px" }}>📊</div>
             <h3 style={{ margin:"0 0 8px", color:"var(--text-primary)", fontWeight:700 }}>Sin datos disponibles</h3>
             <p style={{ margin:"0 auto", fontSize:"0.88rem", color:"var(--text-secondary)", maxWidth:"400px", lineHeight:"1.6" }}>
-              El Administrador debe:<br/>
+              El Programador de rutas debe:<br/>
               <strong>1.</strong> Cargar el Excel con los pasajeros<br/>
               <strong>2.</strong> Generar las rutas<br/>
               <strong>3.</strong> Hacer clic en <strong style={{color:PALETTE.primary}}>"🔒 Guardar Sesión"</strong><br/>

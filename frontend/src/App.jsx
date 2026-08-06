@@ -19,7 +19,7 @@ const PantallaAuth = ({ onLogin }) => {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isVerificationStep, setIsVerificationStep] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
-  const [formData, setFormData] = useState({ email: '', password: '', confirmar_password: '', telefono: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
+  const [formData, setFormData] = useState({ email: '', password: '', confirmar_password: '', telefono: '', nombre: '', rol: 'Programador de rutas', unidad_id: '', empresa_id: '' });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -62,7 +62,7 @@ const PantallaAuth = ({ onLogin }) => {
       if (isLogin) {
         onLogin(data);
       } else {
-        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por un Administrador.');
+        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por un Programador de rutas.');
         setIsLogin(true);
       }
     } catch (err) {
@@ -104,7 +104,7 @@ const PantallaAuth = ({ onLogin }) => {
                 {!isLogin && (
                   <>
                     <select className="auth-input" name="rol" onChange={handleInputChange}>
-                      <option>Administrador</option>
+                      <option>Programador de rutas</option>
                       <option>Conductor</option>
                       <option>Gerente de Operaciones</option>
                     </select>
@@ -227,6 +227,7 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
 // --- Roles and Status Badges ---
 const RoleBadge = ({ rol }) => {
   const colors = {
+    "Programador de rutas": ['#6366f1','rgba(99,102,241,0.15)'],
     Administrador: ['#6366f1','rgba(99,102,241,0.15)'],
     Conductor: ['#f59e0b','rgba(245,158,11,0.15)'],
     'Gerente de Operaciones': ['#10b981','rgba(16,185,129,0.15)'],
@@ -476,7 +477,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
         <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
         
-        {usuarioActual?.rol === 'Administrador' && (
+        {['Administrador', 'Programador de rutas'].includes(usuarioActual?.rol) && (
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={{color: '#007aff'}}>🛡️ Usuarios</a>
         )}
         

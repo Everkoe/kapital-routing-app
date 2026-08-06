@@ -17,7 +17,7 @@ import os
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 SYSTEM_PROMPT = """Eres 'Kapital Copilot', el asistente virtual experto en logística de la aplicación B2B 'Kapital Routing'.
-Tu objetivo es ayudar al usuario (el administrador o despachador logístico) a utilizar la plataforma
+Tu objetivo es ayudar al usuario (el Programador de rutas o despachador logístico) a utilizar la plataforma
 Reglas del negocio que debes conocer:
 - Las unidades (Vans o Sprinters) tienen una capacidad MÁXIMA de 15 pasajeros.
 - Los usuarios pueden subir un Excel con la base de datos de los pasajeros a enrutar (ID, Nombres, Turno, Dirección, Zona).
@@ -223,8 +223,8 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
-    ROLES_VALIDOS = ["Administrador", "Conductor", "Gerente de Operaciones"]
-    rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Administrador"
+    ROLES_VALIDOS = ["Programador de rutas", "Administrador", "Conductor", "Gerente de Operaciones"]
+    rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Programador de rutas"
     
     # Si es el primer usuario, se aprueba automáticamente como Admin
     estado = "Activo" if len(usuarios_db) == 0 else "Pendiente"
@@ -233,7 +233,7 @@ async def register_user(usuario: UsuarioRegistro):
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": "Administrador" if len(usuarios_db) == 0 else rol_solicitado,
+        "rol": "Programador de rutas" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
         "avatar": usuario.avatar,
@@ -261,7 +261,7 @@ async def login_user(usuario: UsuarioLogin):
     
     # Verificar si está pendiente de aprobación
     if user_in_db.get("estado", "Activo") == "Pendiente":
-        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por un Administrador.")
+        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por un Programador de rutas.")
 
     
     return {
@@ -299,7 +299,7 @@ async def update_profile(update_data: UsuarioUpdate):
 async def get_all_users(email: str):
     await reload_db()
     req_user = usuarios_db.get(email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Admin.")
     
     # Devolver lista de usuarios sin contraseñas
@@ -317,7 +317,7 @@ async def get_all_users(email: str):
 async def approve_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
@@ -331,7 +331,7 @@ async def approve_user(target_email: str, admin_email: str):
 async def reject_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
