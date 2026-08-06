@@ -1046,11 +1046,22 @@ function App() {
 
 
 
-  const handleSaveSession = () => {
+  const handleSaveSession = async () => {
     if (routes.length === 0) return;
     localStorage.setItem('kapital_saved_session', JSON.stringify(routes));
     setSessionSaved(true);
-    addLog('Sesión guardada. Los datos persisten al recargar.');
+    addLog('Sesión guardada. Sincronizando con la nube...');
+    // Also push to backend so GerentePortal and other devices see current routes
+    try {
+      await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(routes),
+      });
+      addLog('✅ Rutas sincronizadas con la nube. El Gerente de Operaciones ya puede verlas.');
+    } catch (e) {
+      addLog('⚠️ Sesión guardada localmente (sin conexión a la nube).');
+    }
   };
 
   const handleUnsaveSession = () => {
