@@ -1,4 +1,4 @@
-﻿// GerentePortal.jsx — Panel Ejecutivo para Gerente de Operaciones (Dueño)
+// GerentePortal.jsx — Panel Ejecutivo para Gerente de Operaciones (Dueño)
 import React, { useState, useEffect, useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
@@ -265,18 +265,6 @@ const GerentePortal = ({ usuario, onLogout }) => {
                       <div style={{ fontSize:"0.75rem", color:"var(--text-secondary)" }}>Ocupación de Flota</div>
                     </div>
                   </div>
-                </ChartCard>
-
-                <ChartCard title="Distribución por Zonas" subtitle={`${kpis.zonasUnicas} micro-zonas`}>
-                  <ResponsiveContainer width="100%" height={155}>
-                    <PieChart>
-                      <Pie data={zonaPieData} dataKey="Agentes" nameKey="zona" cx="50%" cy="50%" outerRadius={58} strokeWidth={0}>
-                        {zonaPieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend iconSize={7} wrapperStyle={{fontSize:"9px"}} formatter={v => <span style={{color:"var(--text-secondary)"}}>{v}</span>} />
-                    </PieChart>
-                  </ResponsiveContainer>
                 </ChartCard>
               </div>
             </div>
