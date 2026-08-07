@@ -234,13 +234,18 @@ const FlotaView = () => {
           backdrop-filter: blur(4px);
         }
         .modal-content {
-          background: var(--bg-card);
+          background: var(--kapital-card-bg);
           padding: 30px;
           border-radius: 12px;
           width: 90%;
           max-width: 500px;
           box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--kapital-border);
+        }
+        .modal-content h3 {
+          margin-top: 0;
+          color: var(--kapital-text-primary);
+          font-weight: 700;
         }
         .flota-form {
           display: flex;
@@ -251,24 +256,31 @@ const FlotaView = () => {
         .form-row {
           display: flex;
           flex-direction: column;
-          gap: 5px;
+          gap: 6px;
         }
         .form-row label {
           font-size: 0.9rem;
-          color: var(--text-secondary);
+          font-weight: 600;
+          color: var(--kapital-text-secondary);
         }
         .form-row input, .form-row select {
-          padding: 10px;
-          border-radius: 6px;
-          border: 1px solid var(--border-color);
-          background: var(--bg-main);
-          color: var(--text-primary);
+          padding: 10px 12px;
+          border-radius: 8px;
+          border: 1px solid var(--kapital-border);
+          background: var(--kapital-bg);
+          color: var(--kapital-text-primary);
+          font-size: 0.95rem;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .form-row input:focus, .form-row select:focus {
+          border-color: var(--kapital-nav-link-active);
         }
         .modal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 10px;
-          margin-top: 20px;
+          gap: 12px;
+          margin-top: 25px;
         }
       `}</style>
     </div>
