@@ -92,9 +92,12 @@ async def reload_db():
                 data = res.json()[0]
                 usuarios_db = data.get("usuarios", {})
                 routes_summary = usuarios_db.pop("__routes_summary__", [])
+                historial_rutas = usuarios_db.pop("__historial_rutas__", [])
+                board_lock = usuarios_db.pop("__lock__", {})
+                flota_db = usuarios_db.pop("__flota__", None)
+                if flota_db is not None:
+                    conductores_db = flota_db
                 rutas_estado_actual = data.get("rutas", [])
-                historial_rutas = data.get("historial", [])
-                board_lock = data.get("lock", {}) or {}
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
@@ -103,11 +106,14 @@ async def persist():
     try:
         payload = {
             "id": 1,
-            "usuarios": usuarios_db,
-            "rutas": rutas_estado_actual,
-            "historial": historial_rutas,
-            "flota": conductores_db,
-            "lock": board_lock
+            "usuarios": {
+                **usuarios_db,
+                "__routes_summary__": routes_summary,
+                "__historial_rutas__": historial_rutas,
+                "__lock__": board_lock,
+                "__flota__": conductores_db
+            },
+            "rutas": rutas_estado_actual
         }
         hdrs = {**HEADERS, "Prefer": "return=minimal"}
         async with httpx.AsyncClient(timeout=30.0) as client:
