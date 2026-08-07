@@ -13,7 +13,7 @@ const PIE_COLORS = [PALETTE.green, PALETTE.primary, PALETTE.amber, PALETTE.cyan,
 
 const StatCard = ({ title, value, subtitle, icon, color, delay = 0 }) => (
   <div style={{
-    background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
+    background: "var(--kapital-card-bg)", border: "1px solid var(--kapital-border)",
     borderRadius: "16px", padding: "20px 22px", flex: "1 1 175px", minWidth: "165px",
     position: "relative", overflow: "hidden", transition: "transform 0.2s, box-shadow 0.2s",
     animation: `fadeSlideUp 0.5s ease ${delay}s both`,
@@ -22,18 +22,18 @@ const StatCard = ({ title, value, subtitle, icon, color, delay = 0 }) => (
     onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: color }} />
     <div style={{ width: "40px", height: "40px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", background: `${color}18`, border: `1px solid ${color}33`, fontSize: "1.2rem", marginBottom: "14px" }}>{icon}</div>
-    <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--text-primary)", lineHeight: 1, marginBottom: "5px", letterSpacing: "-1px" }}>{value}</div>
-    <div style={{ fontSize: "0.83rem", fontWeight: 600, color: "var(--text-primary)", marginBottom: "2px" }}>{title}</div>
-    {subtitle && <div style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>{subtitle}</div>}
+    <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--kapital-text-primary)", lineHeight: 1, marginBottom: "5px", letterSpacing: "-1px" }}>{value}</div>
+    <div style={{ fontSize: "0.83rem", fontWeight: 600, color: "var(--kapital-text-primary)", marginBottom: "2px" }}>{title}</div>
+    {subtitle && <div style={{ fontSize: "0.72rem", color: "var(--kapital-text-secondary)" }}>{subtitle}</div>}
   </div>
 );
 
 const ChartCard = ({ title, subtitle, children, action, style = {} }) => (
-  <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border-color)", borderRadius: "16px", overflow: "hidden", ...style }}>
-    <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  <div style={{ background: "var(--kapital-card-bg)", border: "1px solid var(--kapital-border)", borderRadius: "16px", overflow: "hidden", ...style }}>
+    <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--kapital-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
       <div>
-        <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-primary)" }}>{title}</div>
-        {subtitle && <div style={{ fontSize: "0.76rem", color: "var(--text-secondary)", marginTop: "2px" }}>{subtitle}</div>}
+        <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--kapital-text-primary)" }}>{title}</div>
+        {subtitle && <div style={{ fontSize: "0.76rem", color: "var(--kapital-text-secondary)", marginTop: "2px" }}>{subtitle}</div>}
       </div>
       {action}
     </div>
@@ -44,8 +44,8 @@ const ChartCard = ({ title, subtitle, children, action, style = {} }) => (
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{ background: "var(--bg-primary,#0f1117)", border: "1px solid var(--border-color)", borderRadius: "10px", padding: "10px 14px", fontSize: "0.82rem" }}>
-      <div style={{ fontWeight: 700, marginBottom: "4px", color: "var(--text-primary)" }}>{label}</div>
+    <div style={{ background: "var(--kapital-bg)", border: "1px solid var(--kapital-border)", borderRadius: "10px", padding: "10px 14px", fontSize: "0.82rem" }}>
+      <div style={{ fontWeight: 700, marginBottom: "4px", color: "var(--kapital-text-primary)" }}>{label}</div>
       {payload.map((p, i) => <div key={i} style={{ color: p.color }}>{p.name}: <strong>{p.value}</strong></div>)}
     </div>
   );
@@ -59,7 +59,7 @@ const ProgressBar = ({ value, max, color }) => (
 
 const InfoBadge = ({ label, value, color }) => (
   <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 12px", borderRadius: "30px", background: `${color}14`, border: `1px solid ${color}33`, marginRight: "8px", marginBottom: "8px" }}>
-    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{label}</span>
+    <span style={{ fontSize: "0.75rem", color: "var(--kapital-text-secondary)" }}>{label}</span>
     <span style={{ fontSize: "0.82rem", fontWeight: 700, color }}>{value}</span>
   </div>
 );
@@ -144,7 +144,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
   const maxPax = topConductores[0]?.Pasajeros || 1;
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg-primary,#0f1117)" }}>
+    <div style={{ minHeight: "100vh", background: "var(--kapital-bg)" }}>
       <style>{`
         @keyframes fadeSlideUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
         @keyframes spin { to{transform:rotate(360deg)} }
@@ -156,17 +156,17 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
           <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{fontWeight:700,fontSize:"0.95rem",color:"var(--text-primary)"}}>Panel Ejecutivo</div>
+            <div style={{fontWeight:700,fontSize:"0.95rem",color:"var(--kapital-text-primary)"}}>Panel Ejecutivo</div>
             <div style={{fontSize:"0.7rem",color:PALETTE.amber,fontWeight:700,letterSpacing:"0.6px"}}>GERENTE DE OPERACIONES</div>
           </div>
         </div>
         <div className="nav-links open" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {lastUpdated && <span style={{fontSize:"0.73rem",color:"var(--text-secondary)", marginRight:"10px"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
+          {lastUpdated && <span style={{fontSize:"0.73rem",color:"var(--kapital-text-secondary)", marginRight:"10px"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
           <a onClick={loadData} className="nav-link" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" }}>🔄 Actualizar</a>
           <span className="nav-separator">|</span>
           <div style={{ display:"flex", alignItems:"center", gap:"10px", padding: "0 10px" }}>
             <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`linear-gradient(135deg, ${PALETTE.amber}, #f97316)`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:"0.9rem" }}>{usuario?.nombre?.charAt(0)?.toUpperCase()||"G"}</div>
-            <div style={{fontSize:"0.85rem",fontWeight:600,color:"var(--text-primary)"}}>{usuario?.nombre}</div>
+            <div style={{fontSize:"0.85rem",fontWeight:600,color:"var(--kapital-text-primary)"}}>{usuario?.nombre}</div>
           </div>
           <a onClick={onLogout} className="nav-link" style={{cursor: "pointer"}}>Cerrar Sesión</a>
           <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
@@ -179,19 +179,19 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
         {/* Title & Filters */}
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:"12px", marginBottom:"28px", animation:"fadeSlideUp 0.4s ease both" }}>
           <div>
-            <h1 style={{ margin:"0 0 4px", fontSize:"1.55rem", fontWeight:800, color:"var(--text-primary)" }}>Panel de Operaciones Ejecutivo 📊</h1>
-            <p style={{ margin:0, color:"var(--text-secondary)", fontSize:"0.88rem" }}>Vista de alto nivel — Información en tiempo real de todas las operaciones de transporte</p>
+            <h1 style={{ margin:"0 0 4px", fontSize:"1.55rem", fontWeight:800, color:"var(--kapital-text-primary)" }}>Panel de Operaciones Ejecutivo 📊</h1>
+            <p style={{ margin:0, color:"var(--kapital-text-secondary)", fontSize:"0.88rem" }}>Vista de alto nivel — Información en tiempo real de todas las operaciones de transporte</p>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:"12px", alignItems:"flex-end" }}>
-            <div style={{ display:"flex", background:"var(--bg-secondary)", border:"1px solid var(--border-color)", padding:"4px", borderRadius:"12px" }}>
+            <div style={{ display:"flex", background:"var(--kapital-card-bg)", border:"1px solid var(--kapital-border)", padding:"4px", borderRadius:"12px" }}>
               {["Día", "Semana", "Quincena", "Mes"].map(f => (
                 <button
                   key={f}
                   onClick={() => setTimeFilter(f)}
                   style={{
                     padding:"6px 14px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"0.8rem", fontWeight:600,
-                    background: timeFilter === f ? "var(--bg-primary)" : "transparent",
-                    color: timeFilter === f ? "var(--text-primary)" : "var(--text-secondary)",
+                    background: timeFilter === f ? "var(--kapital-bg)" : "transparent",
+                    color: timeFilter === f ? "var(--kapital-text-primary)" : "var(--kapital-text-secondary)",
                     boxShadow: timeFilter === f ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
                     transition: "all 0.2s ease"
                   }}
@@ -214,13 +214,13 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
         {loading ? (
           <div style={{ textAlign:"center", padding:"80px 24px" }}>
             <div style={{ fontSize:"2.5rem", animation:"spin 1s linear infinite", display:"inline-block" }}>⚙️</div>
-            <p style={{ color:"var(--text-secondary)", marginTop:"16px" }}>Cargando datos de operaciones…</p>
+            <p style={{ color:"var(--kapital-text-secondary)", marginTop:"16px" }}>Cargando datos de operaciones…</p>
           </div>
         ) : summary.length === 0 ? (
-          <div style={{ background:"var(--bg-secondary)", border:"1px solid var(--border-color)", borderRadius:"16px", textAlign:"center", padding:"80px 24px" }}>
+          <div style={{ background:"var(--kapital-card-bg)", border:"1px solid var(--kapital-border)", borderRadius:"16px", textAlign:"center", padding:"80px 24px" }}>
             <div style={{ fontSize:"3.5rem", marginBottom:"16px" }}>📊</div>
-            <h3 style={{ margin:"0 0 8px", color:"var(--text-primary)", fontWeight:700 }}>Sin datos disponibles</h3>
-            <p style={{ margin:"0 auto", fontSize:"0.88rem", color:"var(--text-secondary)", maxWidth:"400px", lineHeight:"1.6" }}>
+            <h3 style={{ margin:"0 0 8px", color:"var(--kapital-text-primary)", fontWeight:700 }}>Sin datos disponibles</h3>
+            <p style={{ margin:"0 auto", fontSize:"0.88rem", color:"var(--kapital-text-secondary)", maxWidth:"400px", lineHeight:"1.6" }}>
               El Programador de rutas debe:<br/>
               <strong>1.</strong> Cargar el Excel con los pasajeros<br/>
               <strong>2.</strong> Generar las rutas<br/>
@@ -250,16 +250,16 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                 action={
                   <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                     <button onClick={() => setConductorPage(p => Math.max(0, p - 1))} disabled={conductorPage === 0}
-                      style={{ width:"28px", height:"28px", borderRadius:"6px", border:"1px solid var(--border-color)", background:"transparent", color:conductorPage===0?"var(--text-secondary)":"var(--text-primary)", cursor:conductorPage===0?"not-allowed":"pointer", fontSize:"0.95rem", lineHeight:1 }}>‹</button>
-                    <span style={{ fontSize:"0.75rem", color:"var(--text-secondary)", minWidth:"40px", textAlign:"center" }}>{conductorPage + 1} / {totalPages}</span>
+                      style={{ width:"28px", height:"28px", borderRadius:"6px", border:"1px solid var(--kapital-border)", background:"transparent", color:conductorPage===0?"var(--kapital-text-secondary)":"var(--kapital-text-primary)", cursor:conductorPage===0?"not-allowed":"pointer", fontSize:"0.95rem", lineHeight:1 }}>‹</button>
+                    <span style={{ fontSize:"0.75rem", color:"var(--kapital-text-secondary)", minWidth:"40px", textAlign:"center" }}>{conductorPage + 1} / {totalPages}</span>
                     <button onClick={() => setConductorPage(p => Math.min(totalPages - 1, p + 1))} disabled={conductorPage >= totalPages - 1}
-                      style={{ width:"28px", height:"28px", borderRadius:"6px", border:"1px solid var(--border-color)", background:"transparent", color:conductorPage>=totalPages-1?"var(--text-secondary)":"var(--text-primary)", cursor:conductorPage>=totalPages-1?"not-allowed":"pointer", fontSize:"0.95rem", lineHeight:1 }}>›</button>
+                      style={{ width:"28px", height:"28px", borderRadius:"6px", border:"1px solid var(--kapital-border)", background:"transparent", color:conductorPage>=totalPages-1?"var(--kapital-text-secondary)":"var(--kapital-text-primary)", cursor:conductorPage>=totalPages-1?"not-allowed":"pointer", fontSize:"0.95rem", lineHeight:1 }}>›</button>
                   </div>
                 }>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={conductorPageData} margin={{ top:4, right:16, left:-10, bottom:36 }}>
-                    <XAxis dataKey="name" tick={{ fontSize:9, fill:"var(--text-secondary)" }} angle={-40} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fontSize:10, fill:"var(--text-secondary)" }} />
+                    <XAxis dataKey="name" tick={{ fontSize:9, fill:"var(--kapital-text-secondary)" }} angle={-40} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend wrapperStyle={{fontSize:"11px"}} />
                     <Bar dataKey="Pasajeros" fill={PALETTE.primary} radius={[4,4,0,0]} />
@@ -282,7 +282,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                     </ResponsiveContainer>
                     <div style={{ textAlign:"center", marginTop:"-4px" }}>
                       <div style={{ fontSize:"1.9rem", fontWeight:800, color: parseFloat(kpis.tasaOpt) >= 80 ? PALETTE.green : parseFloat(kpis.tasaOpt) >= 50 ? PALETTE.amber : PALETTE.red }}>{kpis.tasaOpt}%</div>
-                      <div style={{ fontSize:"0.75rem", color:"var(--text-secondary)" }}>Ocupación de Flota</div>
+                      <div style={{ fontSize:"0.75rem", color:"var(--kapital-text-secondary)" }}>Ocupación de Flota</div>
                     </div>
                   </div>
                 </ChartCard>
@@ -295,8 +295,8 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                 <div style={{ overflowY:"auto", maxHeight:"260px" }}>
                   <ResponsiveContainer width="100%" height={Math.max(220, zonaData.length * 28)}>
                     <BarChart data={zonaData} layout="vertical" margin={{ top:0, right:20, left:110, bottom:0 }}>
-                      <XAxis type="number" tick={{fontSize:10,fill:"var(--text-secondary)"}} />
-                      <YAxis type="category" dataKey="zona" tick={{fontSize:10,fill:"var(--text-secondary)"}} width={110} />
+                      <XAxis type="number" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
+                      <YAxis type="category" dataKey="zona" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} width={110} />
                       <Tooltip content={<CustomTooltip />} />
                       <Bar dataKey="Agentes" fill={PALETTE.cyan} radius={[0,4,4,0]} />
                     </BarChart>
@@ -307,8 +307,8 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
               <ChartCard title="Pasajeros por Turno Horario" subtitle="Total de pasajeros asignados por turno" style={{ flex:"1 1 280px", minWidth:"240px" }}>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={horarioData} margin={{ top:4, right:16, left:-10, bottom:0 }}>
-                    <XAxis dataKey="horario" tick={{fontSize:10,fill:"var(--text-secondary)"}} />
-                    <YAxis tick={{fontSize:10,fill:"var(--text-secondary)"}} />
+                    <XAxis dataKey="horario" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
+                    <YAxis tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
                     <Tooltip content={<CustomTooltip />} />
                     <Bar dataKey="Agentes" radius={[4,4,0,0]}>
                       {horarioData.map((_, i) => <Cell key={i} fill={[PALETTE.amber, PALETTE.primary, PALETTE.cyan, PALETTE.pink, PALETTE.green][i % 5]} />)}
@@ -330,19 +330,19 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                   <div key={c.name} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
                     <div style={{
                       width:"30px", height:"30px", borderRadius:"8px", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
-                      background: i < 3 ? `${[PALETTE.amber,"#9ca3af","#cd7f32"][i]}20` : "var(--bg-primary)",
-                      border: `1px solid ${i < 3 ? [PALETTE.amber,"#9ca3af","#cd7f32"][i] : "var(--border-color)"}44`,
-                      color: i < 3 ? [PALETTE.amber,"#9ca3af","#cd7f32"][i] : "var(--text-secondary)",
+                      background: i < 3 ? `${[PALETTE.amber,"#9ca3af","#cd7f32"][i]}20` : "var(--kapital-bg)",
+                      border: `1px solid ${i < 3 ? [PALETTE.amber,"#9ca3af","#cd7f32"][i] : "var(--kapital-border)"}44`,
+                      color: i < 3 ? [PALETTE.amber,"#9ca3af","#cd7f32"][i] : "var(--kapital-text-secondary)",
                       fontSize:"0.72rem", fontWeight:700,
                     }}>#{i+1}</div>
                     <div style={{ width:"130px", flexShrink:0 }}>
-                      <div style={{ fontWeight:600, fontSize:"0.85rem", color:"var(--text-primary)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.name}</div>
-                      <div style={{ fontSize:"0.7rem", color:"var(--text-secondary)" }}>{c.Rutas} ruta{c.Rutas!==1?"s":""}</div>
+                      <div style={{ fontWeight:600, fontSize:"0.85rem", color:"var(--kapital-text-primary)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.name}</div>
+                      <div style={{ fontSize:"0.7rem", color:"var(--kapital-text-secondary)" }}>{c.Rutas} ruta{c.Rutas!==1?"s":""}</div>
                     </div>
                     <ProgressBar value={c.Pasajeros} max={maxPax} color={i<3?[PALETTE.amber,"#9ca3af","#cd7f32"][i]:PALETTE.primary} />
                     <div style={{ width:"60px", flexShrink:0, textAlign:"right" }}>
-                      <span style={{ fontWeight:700, fontSize:"0.9rem", color:"var(--text-primary)" }}>{c.Pasajeros.toLocaleString()}</span>
-                      <span style={{ fontSize:"0.67rem", color:"var(--text-secondary)", fontWeight:400 }}> pax</span>
+                      <span style={{ fontWeight:700, fontSize:"0.9rem", color:"var(--kapital-text-primary)" }}>{c.Pasajeros.toLocaleString()}</span>
+                      <span style={{ fontSize:"0.67rem", color:"var(--kapital-text-secondary)", fontWeight:400 }}> pax</span>
                     </div>
                   </div>
                 ))}
@@ -353,10 +353,10 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
             <ChartCard title="📋 Resumen Operativo Completo" subtitle={`${summary.length} rutas · ${kpis.totalAgentes.toLocaleString()} pasajeros`} style={{ marginBottom:"18px" }}>
               <div style={{ overflowX:"auto", maxHeight:"420px", overflowY:"auto" }}>
                 <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:"0 4px" }}>
-                  <thead style={{ position:"sticky", top:0, background:"var(--bg-secondary)", zIndex:1 }}>
+                  <thead style={{ position:"sticky", top:0, background:"var(--kapital-card-bg)", zIndex:1 }}>
                     <tr>
                       {["#","Conductor","Micro-Zona","Horario","Pasajeros","Ocupación","Estado"].map(h => (
-                        <th key={h} style={{ padding:"8px 12px", fontSize:"10px", fontWeight:700, letterSpacing:"1px", textTransform:"uppercase", color:"var(--text-secondary)", textAlign:"left", borderBottom:"2px solid var(--border-color)", whiteSpace:"nowrap" }}>{h}</th>
+                        <th key={h} style={{ padding:"8px 12px", fontSize:"10px", fontWeight:700, letterSpacing:"1px", textTransform:"uppercase", color:"var(--kapital-text-secondary)", textAlign:"left", borderBottom:"2px solid var(--kapital-border)", whiteSpace:"nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -368,13 +368,13 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                       return (
                         <tr key={i}
                           style={{ transition:"background 0.12s" }}
-                          onMouseEnter={e => e.currentTarget.style.background="var(--bg-primary)"}
+                          onMouseEnter={e => e.currentTarget.style.background="var(--kapital-bg)"}
                           onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                          <td style={{ padding:"9px 12px", fontSize:"0.78rem", color:"var(--text-secondary)", borderRadius:"8px 0 0 8px" }}>{i+1}</td>
-                          <td style={{ padding:"9px 12px", fontSize:"0.83rem", color:"var(--text-primary)", fontWeight:600, whiteSpace:"nowrap" }}>{r.conductor}</td>
-                          <td style={{ padding:"9px 12px", fontSize:"0.82rem", color:"var(--text-secondary)" }}>{r.micro_zona}</td>
+                          <td style={{ padding:"9px 12px", fontSize:"0.78rem", color:"var(--kapital-text-secondary)", borderRadius:"8px 0 0 8px" }}>{i+1}</td>
+                          <td style={{ padding:"9px 12px", fontSize:"0.83rem", color:"var(--kapital-text-primary)", fontWeight:600, whiteSpace:"nowrap" }}>{r.conductor}</td>
+                          <td style={{ padding:"9px 12px", fontSize:"0.82rem", color:"var(--kapital-text-secondary)" }}>{r.micro_zona}</td>
                           <td style={{ padding:"9px 12px" }}><span style={{ padding:"3px 8px", borderRadius:"20px", fontSize:"11px", fontWeight:600, color:PALETTE.amber, background:"rgba(245,158,11,0.12)", border:"1px solid rgba(245,158,11,0.3)", whiteSpace:"nowrap" }}>{r.horario}</span></td>
-                          <td style={{ padding:"9px 12px", fontSize:"0.88rem", fontWeight:700, color:"var(--text-primary)" }}>{r.count||0}<span style={{fontSize:"0.7rem",color:"var(--text-secondary)",fontWeight:400}}>/15</span></td>
+                          <td style={{ padding:"9px 12px", fontSize:"0.88rem", fontWeight:700, color:"var(--kapital-text-primary)" }}>{r.count||0}<span style={{fontSize:"0.7rem",color:"var(--kapital-text-secondary)",fontWeight:400}}>/15</span></td>
                           <td style={{ padding:"9px 12px" }}>
                             <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                               <ProgressBar value={r.count||0} max={15} color={statusColor} />
@@ -393,9 +393,9 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
             </ChartCard>
 
             {/* Status footer */}
-            <div style={{ padding:"14px 20px", borderRadius:"12px", background:"rgba(16,185,129,0.06)", border:"1px solid rgba(16,185,129,0.2)", display:"flex", alignItems:"center", gap:"10px", fontSize:"0.82rem", color:"var(--text-secondary)", flexWrap:"wrap" }}>
+            <div style={{ padding:"14px 20px", borderRadius:"12px", background:"rgba(16,185,129,0.06)", border:"1px solid rgba(16,185,129,0.2)", display:"flex", alignItems:"center", gap:"10px", fontSize:"0.82rem", color:"var(--kapital-text-secondary)", flexWrap:"wrap" }}>
               <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:PALETTE.green, boxShadow:`0 0 8px ${PALETTE.green}`, flexShrink:0, animation:"pulseGreen 2s infinite" }} />
-              <span>Sistema operativo — <strong style={{color:"var(--text-primary)"}}>{kpis.rutasProg.toLocaleString()}</strong> rutas · <strong style={{color:"var(--text-primary)"}}>{kpis.totalAgentes.toLocaleString()}</strong> pasajeros · <strong style={{color:"var(--text-primary)"}}>{kpis.flotaActiva}</strong> conductores activos.</span>
+              <span>Sistema operativo — <strong style={{color:"var(--kapital-text-primary)"}}>{kpis.rutasProg.toLocaleString()}</strong> rutas · <strong style={{color:"var(--kapital-text-primary)"}}>{kpis.totalAgentes.toLocaleString()}</strong> pasajeros · <strong style={{color:"var(--kapital-text-primary)"}}>{kpis.flotaActiva}</strong> conductores activos.</span>
               {lastUpdated && <span style={{marginLeft:"auto",fontSize:"0.73rem"}}>{lastUpdated.toLocaleString()}</span>}
             </div>
           </>
