@@ -560,42 +560,81 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         {message.text && <div className={`profile-alert ${message.type}`}>{message.text}</div>}
         
         {activeTab === 'personal' && (
-          <form className="config-form" onSubmit={handleSave}>
-            <div className="avatar-section">
-              <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''}`}>
+          <div className="profile-layout-grid">
+            <div className="profile-avatar-column">
+              <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''} profile-dropzone`}>
                 <input {...getInputProps()} />
-                {avatar ? (
-                  <img src={avatar} alt="Avatar" className="profile-avatar-img" />
-                ) : (
-                  <div className="profile-avatar">{usuario.nombre.charAt(0)}</div>
-                )}
-                <p>{isDragActive ? 'Suelta la imagen aquí...' : 'Arrastra una nueva foto de perfil o haz clic'}</p>
+                <div className="avatar-preview-container">
+                  {avatar ? (
+                    <img src={avatar} alt="Avatar" className="profile-avatar-img" />
+                  ) : (
+                    <div className="profile-avatar">{usuario.nombre.charAt(0)}</div>
+                  )}
+                  <div className="avatar-overlay">
+                    <span className="camera-icon">📷</span>
+                  </div>
+                </div>
+                <p className="dropzone-text">{isDragActive ? 'Suelta aquí' : 'Cambiar Foto'}</p>
               </div>
+              <p className="avatar-hint">Formatos: JPG, PNG (Max 2MB)</p>
             </div>
-            <label>Nombre Completo</label>
-            <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} className="form-input" required />
-            <label>Correo Electrónico</label>
-            <input type="email" value={usuario.email} className="form-input disabled-input" disabled />
-            <label>Rol de Usuario</label>
-            <input type="text" value={usuario.rol} className="form-input disabled-input" disabled />
             
-            <button type="submit" className="btn-primary profile-save-btn" disabled={loading}>
-              {loading ? 'Guardando...' : 'Guardar Cambios'}
-            </button>
-          </form>
+            <div className="profile-form-column">
+              <h3 className="profile-section-title">Información Básica</h3>
+              <form className="profile-form" onSubmit={handleSave}>
+                <div className="form-group">
+                  <label>Nombre Completo</label>
+                  <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} className="form-input" required />
+                </div>
+                <div className="form-group">
+                  <label>Correo Electrónico</label>
+                  <input type="email" value={usuario.email} className="form-input disabled-input" disabled />
+                  <span className="input-hint">El correo no puede modificarse por seguridad.</span>
+                </div>
+                <div className="form-group">
+                  <label>Rol de Usuario</label>
+                  <input type="text" value={usuario.rol} className="form-input disabled-input" disabled />
+                </div>
+                
+                <div className="profile-actions">
+                  <button type="submit" className="btn-primary profile-save-btn" disabled={loading}>
+                    {loading ? 'Guardando...' : 'Guardar Cambios'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
 
         {activeTab === 'security' && (
-          <form className="config-form" onSubmit={handleSave}>
-            <label>Contraseña Actual</label>
-            <input type="password" name="current_password" value={formData.current_password} onChange={handleChange} className="form-input" required />
-            <label>Nueva Contraseña</label>
-            <input type="password" name="new_password" value={formData.new_password} onChange={handleChange} className="form-input" required />
-            
-            <button type="submit" className="btn-primary profile-save-btn" disabled={loading || !formData.new_password}>
-              {loading ? 'Actualizando...' : 'Actualizar Contraseña'}
-            </button>
-          </form>
+          <div className="profile-layout-grid">
+            <div className="profile-avatar-column">
+               <div className="security-icon-wrapper">
+                 <span className="security-icon">🔒</span>
+               </div>
+               <h4 className="security-title">Seguridad de la Cuenta</h4>
+               <p className="security-desc">Usa una contraseña segura de al menos 6 caracteres que no uses en otros sitios web.</p>
+            </div>
+            <div className="profile-form-column">
+              <h3 className="profile-section-title">Cambiar Contraseña</h3>
+              <form className="profile-form" onSubmit={handleSave}>
+                <div className="form-group">
+                  <label>Contraseña Actual</label>
+                  <input type="password" name="current_password" value={formData.current_password} onChange={handleChange} className="form-input" required />
+                </div>
+                <div className="form-group">
+                  <label>Nueva Contraseña</label>
+                  <input type="password" name="new_password" value={formData.new_password} onChange={handleChange} className="form-input" required />
+                </div>
+                
+                <div className="profile-actions">
+                  <button type="submit" className="btn-primary profile-save-btn" disabled={loading || !formData.new_password}>
+                    {loading ? 'Actualizando...' : 'Actualizar Contraseña'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
       </div>
     </div>
