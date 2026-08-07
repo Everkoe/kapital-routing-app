@@ -126,7 +126,16 @@ async def persist():
 async def persist_users_only():
     """Lightweight persist — only saves the usuarios dict. Use for user management actions."""
     try:
-        payload = {"id": 1, "usuarios": usuarios_db}
+        payload = {
+            "id": 1,
+            "usuarios": {
+                **usuarios_db,
+                "__routes_summary__": routes_summary,
+                "__historial_rutas__": historial_rutas,
+                "__lock__": board_lock,
+                "__flota__": conductores_db
+            }
+        }
         hdrs = {**HEADERS, "Prefer": "return=minimal"}
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
@@ -142,7 +151,16 @@ async def persist_routes_summary(summary: list):
     routes_summary = summary
     board_lock["routes_summary"] = summary
     try:
-        payload = {"id": 1, "lock": board_lock}
+        payload = {
+            "id": 1, 
+            "usuarios": {
+                **usuarios_db,
+                "__routes_summary__": routes_summary,
+                "__historial_rutas__": historial_rutas,
+                "__lock__": board_lock,
+                "__flota__": conductores_db
+            }
+        }
         hdrs = {**HEADERS, "Prefer": "return=minimal"}
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
