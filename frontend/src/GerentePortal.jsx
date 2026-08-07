@@ -13,15 +13,14 @@ const PIE_COLORS = [PALETTE.green, PALETTE.primary, PALETTE.amber, PALETTE.cyan,
 
 const StatCard = ({ title, value, subtitle, icon, color, delay = 0 }) => (
   <div style={{
-    background: "var(--bg-secondary)", border: `1px solid ${color}33`,
+    background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
     borderRadius: "16px", padding: "20px 22px", flex: "1 1 175px", minWidth: "165px",
     position: "relative", overflow: "hidden", transition: "transform 0.2s, box-shadow 0.2s",
     animation: `fadeSlideUp 0.5s ease ${delay}s both`,
   }}
-    onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = `0 16px 40px ${color}22`; }}
+    onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 10px 25px rgba(0,0,0,0.15)"; }}
     onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
-    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: `linear-gradient(90deg, ${color}, ${color}55)` }} />
-    <div style={{ position: "absolute", top: "-20px", right: "-20px", width: "80px", height: "80px", borderRadius: "50%", background: `${color}12`, filter: "blur(20px)" }} />
+    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: color }} />
     <div style={{ width: "40px", height: "40px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", background: `${color}18`, border: `1px solid ${color}33`, fontSize: "1.2rem", marginBottom: "14px" }}>{icon}</div>
     <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--text-primary)", lineHeight: 1, marginBottom: "5px", letterSpacing: "-1px" }}>{value}</div>
     <div style={{ fontSize: "0.83rem", fontWeight: 600, color: "var(--text-primary)", marginBottom: "2px" }}>{title}</div>
