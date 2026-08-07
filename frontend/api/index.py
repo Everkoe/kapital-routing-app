@@ -371,6 +371,7 @@ async def reject_user(target_email: str, admin_email: str):
 
 @app.get("/api/flota")
 async def get_flota_status():
+    await reload_db()
     # Convertimos el diccionario a una lista de objetos para el frontend
     flota_list = []
     for placa, data in conductores_db.items():
