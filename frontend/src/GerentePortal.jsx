@@ -65,7 +65,7 @@ const InfoBadge = ({ label, value, color }) => (
 );
 
 // Summary route format: { conductor, micro_zona, horario, count }
-const GerentePortal = ({ usuario, onLogout }) => {
+const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
   const [summary, setSummary] = useState([]);  // compact routes summary
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -152,23 +152,26 @@ const GerentePortal = ({ usuario, onLogout }) => {
       `}</style>
 
       {/* Navbar */}
-      <nav style={{ position:"sticky", top:0, zIndex:100, background:"var(--bg-secondary)", borderBottom:"1px solid var(--border-color)", padding:"0 28px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"60px", backdropFilter:"blur(10px)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-          <img src="/logo.png" alt="Kapital" style={{height:"32px"}} onError={e=>e.target.style.display="none"} />
-          <div>
+      <nav className="navbar">
+        <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+          <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
+          <div style={{ display: "flex", flexDirection: "column" }}>
             <div style={{fontWeight:700,fontSize:"0.95rem",color:"var(--text-primary)"}}>Panel Ejecutivo</div>
             <div style={{fontSize:"0.7rem",color:PALETTE.amber,fontWeight:700,letterSpacing:"0.6px"}}>GERENTE DE OPERACIONES</div>
           </div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-          {lastUpdated && <span style={{fontSize:"0.73rem",color:"var(--text-secondary)"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
-          <button onClick={loadData} style={{ padding:"7px 14px", borderRadius:"8px", border:"1px solid var(--border-color)", background:"transparent", color:"var(--text-secondary)", cursor:"pointer", fontSize:"0.82rem", fontWeight:600 }}>🔄 Actualizar</button>
-          <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`linear-gradient(135deg, ${PALETTE.amber}, #f97316)`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:"0.9rem" }}>{usuario?.nombre?.charAt(0)?.toUpperCase()||"G"}</div>
-          <div>
+        <div className="nav-links open" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {lastUpdated && <span style={{fontSize:"0.73rem",color:"var(--text-secondary)", marginRight:"10px"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
+          <a onClick={loadData} className="nav-link" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" }}>🔄 Actualizar</a>
+          <span className="nav-separator">|</span>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", padding: "0 10px" }}>
+            <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`linear-gradient(135deg, ${PALETTE.amber}, #f97316)`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:"0.9rem" }}>{usuario?.nombre?.charAt(0)?.toUpperCase()||"G"}</div>
             <div style={{fontSize:"0.85rem",fontWeight:600,color:"var(--text-primary)"}}>{usuario?.nombre}</div>
-            <div style={{fontSize:"0.7rem",color:"var(--text-secondary)"}}>{usuario?.email}</div>
           </div>
-          <button onClick={onLogout} style={{ marginLeft:"8px", padding:"7px 14px", borderRadius:"8px", border:"1px solid #ef444444", background:"rgba(239,68,68,0.08)", color:"#ef4444", cursor:"pointer", fontSize:"0.82rem", fontWeight:600 }}>Cerrar Sesión</button>
+          <a onClick={onLogout} className="nav-link" style={{cursor: "pointer"}}>Cerrar Sesión</a>
+          <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
       </nav>
 

@@ -1125,7 +1125,7 @@ function App() {
   }
 
   if (usuarioActual.rol === 'Gerente de Operaciones') {
-    return <GerentePortal usuario={usuarioActual} onLogout={handleLogout} />;
+    return <GerentePortal usuario={usuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
   return (
