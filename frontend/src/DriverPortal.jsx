@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import './App.css';
 
 const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  
+  // Simulación de estado de perfil para el demo
+  // En producción esto vendría en el objeto 'usuario' desde el backend
+  const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || false);
 
   const conductorId = usuario.unidad_id || 'KAP-001'; // Fallback por si acaso
 
@@ -72,6 +77,31 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
     alert("Central Notificada. Te estamos contactando a la brevedad.");
     // Aquí podríamos hacer un fetch al backend a un endpoint de SOS si quisiéramos.
   };
+
+  const handleProfileComplete = (data) => {
+    console.log("Datos del conductor recibidos:", data);
+    alert("¡Perfil enviado para revisión exitosamente!");
+    setProfileComplete(true);
+  };
+
+  if (!profileComplete) {
+    return (
+      <div className="driver-portal">
+        <header className="driver-header no-print">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>¡Hola, {usuario.nombre}!</h2>
+              <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>Completar Registro</p>
+            </div>
+            <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}>Salir</button>
+          </div>
+        </header>
+        <main style={{ padding: '20px' }}>
+          <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
+        </main>
+      </div>
+    );
+  }
 
   if (isLoading) return <div className="loading-indicator" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Cargando tus rutas...</div>;
 

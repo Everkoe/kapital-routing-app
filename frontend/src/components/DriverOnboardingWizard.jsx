@@ -1,0 +1,346 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronDown, Save, Send, AlertCircle, CheckCircle } from 'lucide-react';
+import FileUploadZone from './FileUploadZone';
+
+const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
+  return (
+    <div className={`accordion-item ${isOpen ? 'open' : ''}`}>
+      <button className="accordion-header" onClick={onToggle}>
+        <div className="accordion-title-area">
+          <span className="accordion-title">{title}</span>
+          {status === 'complete' && <CheckCircle size={18} className="status-icon success" />}
+          {status === 'incomplete' && <AlertCircle size={18} className="status-icon warning" />}
+        </div>
+        <motion.div
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <ChevronDown size={24} />
+        </motion.div>
+      </button>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="accordion-content"
+          >
+            <div className="accordion-inner">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const DriverOnboardingWizard = ({ usuario, onComplete }) => {
+  const [openSection, setOpenSection] = useState('personales'); // 'personales', 'vehiculares', 'requisitos'
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Form State
+  const [formData, setFormData] = useState({
+    // Datos Personales
+    nombres: usuario?.nombre || '',
+    tipoDoc: 'DNI',
+    numDoc: '',
+    fechaNacimiento: '',
+    edad: '',
+    direccion: '',
+    telefonoDirecto: '',
+    telefonoEmergencia: '',
+    correo: usuario?.email || '',
+    
+    // Archivos (Files)
+    comprobanteDomicilio: null,
+    licenciaConducir: null,
+    recordConductor: null,
+    antecedentesPenales: null,
+    cv: null,
+    certificadosTrabajo: null,
+    referenciasLaborales: null,
+    examenMedico: null,
+    examenToxicologico: null,
+    evaluacionPsicologica: null,
+  });
+
+  // Calculate age automatically
+  useEffect(() => {
+    if (formData.fechaNacimiento) {
+      const birthDate = new Date(formData.fechaNacimiento);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      setFormData(prev => ({ ...prev, edad: age > 0 ? age.toString() : '' }));
+    }
+  }, [formData.fechaNacimiento]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (name, file) => {
+    setFormData(prev => ({ ...prev, [name]: file }));
+  };
+
+  const toggleSection = (section) => {
+    setOpenSection(openSection === section ? null : section);
+  };
+
+  const calculateProgress = () => {
+    const totalFields = 16; // Adjust based on required fields
+    let filled = 0;
+    
+    if (formData.nombres) filled++;
+    if (formData.numDoc && formData.numDoc.length >= 8) filled++;
+    if (formData.fechaNacimiento) filled++;
+    if (formData.direccion) filled++;
+    if (formData.telefonoDirecto) filled++;
+    if (formData.comprobanteDomicilio) filled++;
+    if (formData.licenciaConducir) filled++;
+    if (formData.recordConductor) filled++;
+    if (formData.antecedentesPenales) filled++;
+    if (formData.cv) filled++;
+    if (formData.examenMedico) filled++;
+    if (formData.examenToxicologico) filled++;
+    if (formData.evaluacionPsicologica) filled++;
+    // Add vehicle and requirements later
+
+    return Math.round((filled / 13) * 100); // Using 13 as base for current implemented fields
+  };
+
+  const handleSaveDraft = () => {
+    setIsSaving(true);
+    // Simulate API call
+    setTimeout(() => {
+      setIsSaving(false);
+      alert('Progreso guardado correctamente. Puedes volver más tarde.');
+    }, 1000);
+  };
+
+  const progress = Math.min(calculateProgress(), 100);
+
+  return (
+    <div className="onboarding-wizard">
+      <div className="wizard-header">
+        <h2>Completa tu Perfil de Conductor</h2>
+        <p>Para activar tu cuenta, necesitamos validar tu información y documentos.</p>
+        
+        <div className="progress-container">
+          <div className="progress-header">
+            <span>Progreso del Perfil</span>
+            <span className="progress-percentage">{progress}%</span>
+          </div>
+          <div className="progress-bar-bg">
+            <motion.div 
+              className="progress-bar-fill"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="accordion-container">
+        <AccordionItem 
+          title="1. Identificación y Datos Personales" 
+          isOpen={openSection === 'personales'} 
+          onToggle={() => toggleSection('personales')}
+          status={progress >= 30 ? 'complete' : 'incomplete'}
+        >
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <label>Nombres y Apellidos Completos</label>
+              <input type="text" name="nombres" value={formData.nombres} onChange={handleChange} placeholder="Ej. Juan Pérez" />
+            </div>
+
+            <div className="form-group">
+              <label>Tipo de Documento</label>
+              <select name="tipoDoc" value={formData.tipoDoc} onChange={handleChange}>
+                <option value="DNI">DNI</option>
+                <option value="CE">Carnet de Extranjería (CE)</option>
+                <option value="Pasaporte">Pasaporte</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Número de Documento</label>
+              <input type="text" name="numDoc" value={formData.numDoc} onChange={handleChange} placeholder="Ej. 12345678" maxLength={formData.tipoDoc === 'DNI' ? 8 : 12} />
+            </div>
+
+            <div className="form-group">
+              <label>Fecha de Nacimiento</label>
+              <input type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} />
+            </div>
+
+            <div className="form-group">
+              <label>Edad</label>
+              <input type="text" name="edad" value={formData.edad} readOnly className="readonly-input" placeholder="Se calcula auto." />
+            </div>
+
+            <div className="form-group full-width">
+              <label>Dirección de Residencia Actual</label>
+              <input type="text" name="direccion" value={formData.direccion} onChange={handleChange} placeholder="Ej. Av. Siempre Viva 123" />
+            </div>
+
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Comprobante de Domicilio (Agua/Luz)" 
+                file={formData.comprobanteDomicilio} 
+                onFileSelect={(f) => handleFileChange('comprobanteDomicilio', f)} 
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Teléfono Directo</label>
+              <input type="tel" name="telefonoDirecto" value={formData.telefonoDirecto} onChange={handleChange} placeholder="Ej. 987654321" />
+            </div>
+
+            <div className="form-group">
+              <label>Teléfono de Emergencia</label>
+              <input type="tel" name="telefonoEmergencia" value={formData.telefonoEmergencia} onChange={handleChange} placeholder="Ej. 912345678" />
+            </div>
+
+            <div className="form-group full-width">
+              <label>Correo Electrónico</label>
+              <input type="email" name="correo" value={formData.correo} readOnly className="readonly-input" />
+            </div>
+          </div>
+
+          <div className="section-divider">
+            <h3>Documentación y Conducción</h3>
+          </div>
+          
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Licencia de Conducir (Vigente)" 
+                file={formData.licenciaConducir} 
+                onFileSelect={(f) => handleFileChange('licenciaConducir', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Récord o Historial del Conductor (MTC)" 
+                file={formData.recordConductor} 
+                onFileSelect={(f) => handleFileChange('recordConductor', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Certificado de Antecedentes (Penales, Policiales, Judiciales)" 
+                file={formData.antecedentesPenales} 
+                onFileSelect={(f) => handleFileChange('antecedentesPenales', f)} 
+              />
+            </div>
+          </div>
+
+          <div className="section-divider">
+            <h3>Experiencia y Perfil Profesional</h3>
+          </div>
+
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Curriculum Vitae (CV) Actualizado" 
+                file={formData.cv} 
+                onFileSelect={(f) => handleFileChange('cv', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Certificados de Trabajo" 
+                file={formData.certificadosTrabajo} 
+                onFileSelect={(f) => handleFileChange('certificadosTrabajo', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Referencias Laborales (Opcional)" 
+                file={formData.referenciasLaborales} 
+                onFileSelect={(f) => handleFileChange('referenciasLaborales', f)} 
+              />
+            </div>
+          </div>
+
+          <div className="section-divider">
+            <h3>Evaluación Médica y Salud</h3>
+          </div>
+
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Examen Médico Ocupacional" 
+                file={formData.examenMedico} 
+                onFileSelect={(f) => handleFileChange('examenMedico', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Examen Toxicológico" 
+                file={formData.examenToxicologico} 
+                onFileSelect={(f) => handleFileChange('examenToxicologico', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Evaluación Psicológica y Psicosomática" 
+                file={formData.evaluacionPsicologica} 
+                onFileSelect={(f) => handleFileChange('evaluacionPsicologica', f)} 
+              />
+            </div>
+          </div>
+          
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={() => toggleSection('vehiculares')}>Siguiente Sección</button>
+          </div>
+        </AccordionItem>
+
+        <AccordionItem 
+          title="2. Datos Vehiculares" 
+          isOpen={openSection === 'vehiculares'} 
+          onToggle={() => toggleSection('vehiculares')}
+          status="incomplete"
+        >
+          <div className="placeholder-content">
+            <p>Sección en construcción. Aquí irán los datos del vehículo (Placa, Tarjeta de Propiedad, SOAT, Revisiones Técnicas).</p>
+          </div>
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={() => toggleSection('requisitos')}>Siguiente Sección</button>
+          </div>
+        </AccordionItem>
+
+        <AccordionItem 
+          title="3. Requisitos de Empresa" 
+          isOpen={openSection === 'requisitos'} 
+          onToggle={() => toggleSection('requisitos')}
+          status="incomplete"
+        >
+           <div className="placeholder-content">
+            <p>Sección en construcción. Aquí irán otros requisitos específicos de la empresa contratante.</p>
+          </div>
+        </AccordionItem>
+      </div>
+
+      <div className="wizard-footer">
+        <button className="btn-draft" onClick={handleSaveDraft} disabled={isSaving}>
+          <Save size={18} /> {isSaving ? 'Guardando...' : 'Guardar Progreso (Borrador)'}
+        </button>
+        <button className="btn-primary" onClick={() => onComplete && onComplete(formData)} disabled={progress < 100}>
+          <Send size={18} /> Enviar para Revisión
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default DriverOnboardingWizard;
