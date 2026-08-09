@@ -104,9 +104,10 @@ const PantallaAuth = ({ onLogin }) => {
                 {!isLogin && (
                   <>
                     <select className="auth-input" name="rol" onChange={handleInputChange}>
-                      <option>Programador de rutas</option>
-                      <option>Conductor</option>
-                      <option>Gerente de Operaciones</option>
+                    <option>Programador de rutas</option>
+                    <option>Administración</option>
+                    <option>Conductor</option>
+                    <option>Gerente de Operaciones</option>
                     </select>
                     {formData.rol === 'Conductor' && (
                       <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
@@ -225,10 +226,11 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
 // --- Roles and Status Badges ---
 const RoleBadge = ({ rol }) => {
   const colors = {
+    "Administrador": ['#3b82f6','#3b82f622'], // Legacy support
+    "Administración": ['#3b82f6','#3b82f622'],
     "Programador de rutas": ['#6366f1','rgba(99,102,241,0.15)'],
-    Administrador: ['#6366f1','rgba(99,102,241,0.15)'],
-    Conductor: ['#f59e0b','rgba(245,158,11,0.15)'],
-    'Gerente de Operaciones': ['#10b981','rgba(16,185,129,0.15)'],
+    "Conductor": ['#10b981','rgba(16,185,129,0.15)'],
+    "Gerente de Operaciones": ['#f59e0b','rgba(245,158,11,0.15)']
   };
   const [c, bg] = colors[rol] || ['#9ca3af','rgba(156,163,175,0.15)'];
   return <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', color:c, background:bg, border:`1px solid ${c}44` }}>{rol}</span>;
@@ -556,12 +558,16 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
       </button>
 
       <div className={`nav-links ${isOpen ? 'open' : ''}`}>
-        <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
-        <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
-        <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
-        <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+        {usuarioActual?.rol === 'Programador de rutas' && (
+          <>
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
+            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
+            <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
+            <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+          </>
+        )}
         
-        {['Administrador', 'Programador de rutas'].includes(usuarioActual?.rol) && (
+        {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
              <Shield size={18} style={{ marginRight: '6px' }} /> Accesos
            </a>
@@ -1235,6 +1241,11 @@ function App() {
   };
 
   const renderVista = () => {
+    // If the user is Administración and they don't have dashboard, force them to 'usuarios'
+    if (['Administración', 'Administrador'].includes(usuarioActual?.rol) && vistaActual === 'dashboard') {
+      return <UsersManagementTab usuarioActual={usuarioActual} />;
+    }
+
     switch (vistaActual) {
       case 'flota': return <FlotaView />;
       case 'reportes': return <VistaReportes />;

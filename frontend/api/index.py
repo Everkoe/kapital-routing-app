@@ -251,7 +251,7 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
-    ROLES_VALIDOS = ["Programador de rutas", "Administrador", "Conductor", "Gerente de Operaciones"]
+    ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones"]
     rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Programador de rutas"
     
     # Si es el primer usuario, se aprueba automáticamente como Admin
@@ -328,8 +328,8 @@ async def update_profile(update_data: UsuarioUpdate):
 async def get_all_users(email: str):
     await reload_db()
     req_user = usuarios_db.get(email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
-        raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Admin.")
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
     
     # Devolver lista de usuarios sin contraseñas
     lista_usuarios = []
@@ -347,7 +347,7 @@ async def get_all_users(email: str):
 async def approve_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
@@ -361,7 +361,7 @@ async def approve_user(target_email: str, admin_email: str):
 async def reject_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administrador", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
