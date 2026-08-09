@@ -40,6 +40,7 @@ conductores_db: Dict[str, Dict[str, Any]] = {}
 historial_rutas: List[Dict[str, Any]] = []
 board_lock: Dict[str, Any] = {}
 routes_summary: List[Dict[str, Any]] = []  # Compact summary for GerentePortal
+notifications_db: List[Dict[str, Any]] = [] # Real-time events
 
 db_loaded = False
 
@@ -84,7 +85,7 @@ async def ensure_db_loaded():
 
 
 async def reload_db():
-    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock, routes_summary
+    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock, routes_summary, notifications_db
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
@@ -98,6 +99,10 @@ async def reload_db():
                 if flota_db is not None:
                     conductores_db = flota_db
                 rutas_estado_actual = data.get("rutas", [])
+                
+                # Cargar notificaciones
+                notifications_db = usuarios_db.pop("__notifications__", [])
+                
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
@@ -111,9 +116,10 @@ async def persist():
                 "__routes_summary__": routes_summary,
                 "__historial_rutas__": historial_rutas,
                 "__lock__": board_lock,
-                "__flota__": conductores_db
+                "__flota__": conductores_db,
+                "__notifications__": notifications_db
             },
-            "rutas": rutas_estado_actual
+            "rutas": rutas_estado_actual,
         }
         hdrs = {**HEADERS, "Prefer": "return=minimal"}
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -243,6 +249,32 @@ class DriverProfilePayload(BaseModel):
 
 # --- Endpoints de Autenticación y Verificación ---
 
+@app.get("/api/notifications")
+async def get_notifications(last_id: int = 0):
+    await reload_db()
+    new_notifs = [n for n in notifications_db if n.get("id", 0) > last_id]
+    return new_notifs
+
+@app.post("/api/notifications")
+async def add_notification(notif: dict):
+    await reload_db()
+    new_id = len(notifications_db) + 1
+    new_notif = {
+        "id": new_id,
+        "title": notif.get("title", "Notificación"),
+        "message": notif.get("message", ""),
+        "type": notif.get("type", "info"),
+        "timestamp": datetime.now().isoformat()
+    }
+    notifications_db.append(new_notif)
+    
+    # Keep only the last 50 notifications
+    if len(notifications_db) > 50:
+        notifications_db.pop(0)
+        
+    await persist_users_only()
+    return new_notif
+
 
 
 @app.post("/api/auth/register")
@@ -269,13 +301,23 @@ async def register_user(usuario: UsuarioRegistro):
     }
     usuarios_db[usuario.email] = nuevo_usuario
     
-    # Generate fleet record if role is Conductor
     if rol_solicitado == "Conductor" and usuario.unidad_id:
         if usuario.unidad_id not in conductores_db:
             conductores_db[usuario.unidad_id] = {
                 "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre,
                 "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
             }
+            
+    # Add notification for new registration
+    if rol_solicitado == "Conductor":
+        notifications_db.append({
+            "id": len(notifications_db) + 1,
+            "title": "Nuevo Conductor",
+            "message": f"{usuario.nombre} se ha registrado y está en lista de espera.",
+            "type": "success",
+            "timestamp": datetime.now().isoformat()
+        })
+            
     await persist_users_only()
     return {"message": "Usuario registrado exitosamente.", "estado": estado}
 

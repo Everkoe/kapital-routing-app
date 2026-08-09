@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import { LogOut, Sun, Moon, Pencil } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import './App.css';
 
 const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme }) => {
@@ -12,7 +13,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   // En producción esto vendría en el objeto 'usuario' desde el backend
   const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || false);
 
-  const conductorId = usuario.unidad_id || 'KAP-001'; // Fallback por si acaso
+  const [conductorId, setConductorId] = useState(usuario.unidad_id || 'KAP-001');
 
   const fetchMisRutas = async () => {
     setIsLoading(true);
@@ -48,8 +49,10 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         if (setUsuarioActual) {
           setUsuarioActual(updatedUser);
         }
+        setConductorId(nuevoId.trim().toUpperCase());
+        toast.success("Unidad actualizada exitosamente");
       } catch (err) {
-        alert("Hubo un error al cambiar la unidad: " + err.message);
+        toast.error("Hubo un error al cambiar la unidad: " + err.message);
       }
     }
   };
@@ -67,16 +70,31 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         })
       });
       if (response.ok) {
-        fetchMisRutas(); // Refrescar para ver el cambio
+        fetchMisRutas();
+        toast.success("Pasajero marcado como recogido");
+      } else {
+        toast.error("Error al actualizar pasajero");
       }
     } catch (error) {
-      alert("Error al actualizar pasajero");
+      toast.error("Error al actualizar pasajero");
     }
   };
 
-  const enviarSOS = () => {
-    alert("Central Notificada. Te estamos contactando a la brevedad.");
-    // Aquí podríamos hacer un fetch al backend a un endpoint de SOS si quisiéramos.
+  const enviarSOS = async () => {
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '🚨 Alerta SOS',
+          message: `El conductor ${usuario.nombre} (Unidad: ${conductorId}) ha emitido una alerta SOS.`,
+          type: 'error'
+        })
+      });
+      toast.success("Central Notificada. Te estamos contactando a la brevedad.", { icon: '🚨' });
+    } catch (e) {
+      toast.error("No se pudo notificar a la central");
+    }
   };
 
   const handleProfileComplete = async (data) => {
@@ -94,8 +112,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         setUsuarioActual(updatedUser);
       }
       setProfileComplete(true);
+      toast.success("Perfil enviado para revisión.");
     } catch (error) {
-      alert("Ocurrió un error al enviar el perfil. Intenta de nuevo.");
+      toast.error("Ocurrió un error al enviar el perfil. Intenta de nuevo.");
       console.error(error);
     }
   };

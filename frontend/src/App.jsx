@@ -4,6 +4,7 @@ import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Shield, User, Moon, Sun } from 'lucide-react';
+import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
 import LiveMap from './LiveMap';
 import FlotaView from './FlotaView';
@@ -63,11 +64,12 @@ const PantallaAuth = ({ onLogin }) => {
       if (isLogin) {
         onLogin(data);
       } else {
-        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por Administración.');
+        toast.success('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por Administración.', { duration: 5000 });
         setIsLogin(true);
       }
     } catch (err) {
       setError(err.message);
+      toast.error(`Error: ${err.message}`);
     } finally {
       setIsAuthLoading(false);
     }
@@ -306,7 +308,7 @@ const UsersManagementTab = ({ usuarioActual }) => {
           const method = action === 'approve' ? 'PUT' : 'DELETE';
           const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
           if (res.ok) await fetchUsers();
-          else alert('Error al realizar la acción');
+          else toast.error('Error al realizar la acción');
         } catch (e) { console.error(e); }
         finally { setActionLoading(null); }
       },
@@ -328,9 +330,15 @@ const UsersManagementTab = ({ usuarioActual }) => {
       const apiAction = action === 'approve' ? 'approve' : 'reject';
       const method = action === 'approve' ? 'PUT' : 'DELETE';
       const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
-      if (res.ok) await fetchUsers();
-      else alert('Error al realizar la acción');
-    } catch (e) { console.error(e); }
+      if (res.ok) {
+        toast.success(action === 'approve' ? 'Conductor aprobado' : 'Conductor rechazado');
+        await fetchUsers();
+      }
+      else toast.error('Error al realizar la acción');
+    } catch (e) { 
+      console.error(e); 
+      toast.error('Error de conexión');
+    }
     finally { setActionLoading(null); }
   };
 
@@ -339,7 +347,7 @@ const UsersManagementTab = ({ usuarioActual }) => {
       <span>{label}: {docObj ? '✅ Subido' : '❌ Falta'}</span>
       {docObj && (
         <button 
-          onClick={() => alert(`En la versión de producción, esto abrirá el visor del documento (PDF o Imagen) para que lo verifiques antes de aprobar.`)}
+          onClick={() => toast.info(`En la versión de producción, esto abrirá el visor del documento.`)}
           style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
         >
           👁️ Ver Archivo
@@ -611,7 +619,6 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   const handleSave = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setMessage({ type: '', text: '' });
     
     try {
       const payload = {
@@ -630,7 +637,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 404) {
-          alert('Sesión expirada o usuario no encontrado. Por favor, inicia sesión nuevamente.');
+          toast.error('Sesión expirada. Inicia sesión nuevamente.');
           onLogout();
           return;
         }
@@ -639,10 +646,10 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
       
       setUsuarioActual(data);
       localStorage.setItem('kapital_user', JSON.stringify(data));
-      setMessage({ type: 'success', text: 'Perfil actualizado correctamente.' });
+      toast.success('Perfil actualizado correctamente.');
       setFormData(prev => ({ ...prev, current_password: '', new_password: '' }));
     } catch (err) {
-      setMessage({ type: 'error', text: err.message });
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -656,8 +663,6 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
       </div>
       
       <div className="profile-content">
-        {message.text && <div className={`profile-alert ${message.type}`}>{message.text}</div>}
-        
         {activeTab === 'personal' && (
           <div className="profile-layout-grid">
             <div className="profile-avatar-column">
@@ -894,7 +899,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
       const agenteIndex = fromRoute.agentes.findIndex(a => a.id === agenteId);
       if(agenteIndex > -1) {
         if(toRoute.agentes.length >= 15) {
-          alert('Esta unidad ya está llena (máx 15 pasajeros).');
+          toast.error('Esta unidad ya está llena (máx 15 pasajeros).');
           return prevRoutes;
         }
         const [agente] = fromRoute.agentes.splice(agenteIndex, 1);
@@ -919,7 +924,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
 
   const handleGenerateRoutes = async () => {
     if (!selectedFile) {
-      setError("Por favor, seleccione un archivo Excel para procesar.");
+      toast.error("Por favor, seleccione un archivo Excel para procesar.");
       return;
     }
     setIsLoading(true);
@@ -958,7 +963,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     const { conductor_id, tipo_emergencia, horario } = emergencyData;
     if (tipo_emergencia === 'Retraso por Tráfico') {
       const message = `ALERTA DE TRÁFICO: La ruta de ${conductor_id} presenta retrasos.`;
-      alert(message);
+      toast.info(message);
       addLog(message);
       return;
     }
@@ -968,11 +973,11 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
       const response = await fetch(`/api/emergency-reassign/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emergencyData) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Error en la reasignación.');
-      alert(data.message);
+      toast.success(data.message);
       setRoutes(data.rutas_actualizadas);
       addLog(`🚨 URGENTE: Ruta de ${conductor_id} (${horario}) reasignada a ${data.rescatista_id}.`);
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
       setError(err.message);
     } finally {
       setIsLoading(false);
@@ -1240,6 +1245,35 @@ function App() {
       return newLogs;
     });
   };
+  
+  const [lastNotifId, setLastNotifId] = useState(0);
+
+  useEffect(() => {
+    if (!usuarioActual || !['Administración', 'Administrador', 'Gerente de Operaciones'].includes(usuarioActual.rol)) return;
+    
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/notifications?last_id=${lastNotifId}`);
+        if (res.ok) {
+          const newNotifs = await res.json();
+          if (newNotifs.length > 0) {
+            const maxId = Math.max(...newNotifs.map(n => n.id));
+            setLastNotifId(maxId);
+            
+            newNotifs.forEach(n => {
+              // Play a small beep (using HTML5 Audio or silent if preferred)
+              // We will just use the toast visually
+              if (n.type === 'success') toast.success(n.message, { id: `notif-${n.id}` });
+              else if (n.type === 'error') toast.error(n.message, { id: `notif-${n.id}`, duration: 8000 });
+              else toast(n.message, { id: `notif-${n.id}`, icon: 'ℹ️' });
+            });
+          }
+        }
+      } catch (e) { }
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [usuarioActual, lastNotifId]);
 
   const renderVista = () => {
     // If the user is Administración and they don't have dashboard, force them to 'usuarios'
@@ -1259,20 +1293,53 @@ function App() {
     }
   };
 
+
   if (!usuarioActual) {
-    return <PantallaAuth onLogin={handleLogin} />;
+    return (
+      <>
+        <Toaster position="top-right" toastOptions={{
+          style: {
+            background: 'var(--bg-secondary)',
+            color: 'var(--text)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
+          }
+        }} />
+        <PantallaAuth onLogin={handleLogin} />
+      </>
+    );
   }
 
   if (usuarioActual.rol === 'Conductor') {
-    return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+    return (
+      <>
+        <Toaster position="top-right" />
+        <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
+      </>
+    );
   }
 
   if (usuarioActual.rol === 'Gerente de Operaciones') {
-    return <GerentePortal usuario={usuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+    return (
+      <>
+        <Toaster position="top-right" />
+        <GerentePortal usuario={usuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
+      </>
+    );
   }
 
   return (
     <div className="App">
+      <Toaster position="top-right" toastOptions={{
+          style: {
+            background: 'var(--bg-secondary)',
+            color: 'var(--text)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
+          }
+        }} />
       <Navbar vistaActual={vistaActual} setVistaActual={setVistaActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} usuarioActual={usuarioActual} />
       <main className="app-container">
         {renderVista()}

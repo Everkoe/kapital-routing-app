@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Save, Send, AlertCircle, CheckCircle } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
+import { toast } from 'react-hot-toast';
 
 const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
   return (
@@ -141,11 +142,9 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
   const handleSaveDraft = () => {
     setIsSaving(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsSaving(false);
-      alert('Progreso guardado correctamente. Puedes volver más tarde.');
-    }, 1000);
+    localStorage.setItem('driver_onboarding_progress', JSON.stringify(formData));
+    toast.success('Progreso guardado correctamente. Puedes volver más tarde.');
+    setIsSaving(false);
   };
 
   const progress = Math.min(calculateProgress(), 100);
