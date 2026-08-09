@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
+import { Shield, User, Moon, Sun } from 'lucide-react';
 import './App.css';
 import LiveMap from './LiveMap';
 import FlotaView from './FlotaView';
@@ -465,10 +465,14 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
 
   return (
     <nav className="navbar">
-      <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" onClick={() => handleNav('dashboard')} />
+      <div className="navbar-left">
+        <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" onClick={() => handleNav('dashboard')} />
+      </div>
+      
       <button className="hamburger-menu" onClick={() => setIsOpen(!isOpen)}>
         {isOpen ? '✕' : '☰'}
       </button>
+
       <div className={`nav-links ${isOpen ? 'open' : ''}`}>
         <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
         <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
@@ -476,14 +480,20 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
         
         {['Administrador', 'Programador de rutas'].includes(usuarioActual?.rol) && (
-           <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={{color: '#007aff'}}>🛡️ Usuarios</a>
+           <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
+             <Shield size={18} style={{ marginRight: '6px' }} /> Usuarios
+           </a>
         )}
         
         <span className="nav-separator">|</span>
-        <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>👤 Mi Perfil</a>
+        
+        <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'}>
+          <User size={18} style={{ marginRight: '6px' }} /> Mi Perfil
+        </a>
         <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link">Cerrar Sesión</a>
+        
         <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
-          {theme === 'dark' ? '☀️' : '🌙'}
+          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
         </button>
       </div>
     </nav>

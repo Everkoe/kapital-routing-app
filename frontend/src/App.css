@@ -108,7 +108,7 @@ body, #root {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--kapital-blue-deep);
+  background-color: #0f172a; /* Slate 900 */
   backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255,255,255,0.05);
   color: #ffffff;
@@ -119,48 +119,61 @@ body, #root {
   z-index: 1000;
   box-sizing: border-box;
 }
+.navbar-left {
+  display: flex;
+  align-items: center;
+}
 .navbar-logo {
   height: 40px;
   object-fit: contain;
   cursor: pointer;
+  transition: transform 0.2s;
+}
+.navbar-logo:hover {
+  transform: scale(1.05);
 }
 .theme-toggle {
-  background: rgba(255,255,255,0.1);
-  border: none;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   display: flex;
   justify-content: center;
   align-items: center;
-  font-size: 1.2rem;
   cursor: pointer;
   margin-left: 20px;
   transition: all 0.3s;
+  color: #fff;
 }
 .theme-toggle:hover {
-  background: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.15);
   transform: scale(1.1);
 }
 .navbar-title { font-size: 1.8rem; font-weight: 800; color: #ffffff; }
 .nav-links { display: flex; align-items: center; }
 .nav-links a {
-  color: #9CA3AF;
+  color: #94a3b8; /* Slate 400 */
   text-decoration: none;
   font-weight: 500;
   margin-left: 24px;
   transition: all 0.3s ease;
   cursor: pointer;
   padding-bottom: 5px;
+  font-size: 0.95rem;
 }
-.nav-links a:hover { color: #ffffff; }
+.nav-links a.nav-link-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.nav-links a:hover { color: #f8fafc; }
 .nav-links a.active {
-  color: #38BDF8 !important;
+  color: #38BDF8 !important; /* Sky 400 */
   border-bottom: 2px solid #38BDF8;
-  font-weight: bold;
+  font-weight: 600;
 }
 .nav-separator {
-  color: #4B5563;
+  color: #334155; /* Slate 700 */
   margin-left: 24px;
 }
 
