@@ -340,19 +340,25 @@ const UsersManagementTab = ({ usuarioActual }) => {
             <h3 style={{ marginTop: 0, borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>Revisión de Perfil: {driverModal.user.nombre}</h3>
             
             <div style={{ marginTop: '20px' }}>
-              <p><strong>DNI/Documento:</strong> {driverModal.user.perfil_conductor?.dni}</p>
-              <p><strong>Fecha de Nacimiento:</strong> {driverModal.user.perfil_conductor?.fechaNacimiento}</p>
+              <p><strong>DNI/Documento:</strong> {driverModal.user.perfil_conductor?.tipoDoc} {driverModal.user.perfil_conductor?.numDoc}</p>
+              <p><strong>Fecha de Nacimiento:</strong> {driverModal.user.perfil_conductor?.fechaNacimiento} ({driverModal.user.perfil_conductor?.edad} años)</p>
               <p><strong>Dirección:</strong> {driverModal.user.perfil_conductor?.direccion}</p>
+              <p><strong>Teléfonos:</strong> {driverModal.user.perfil_conductor?.telefonoDirecto} / {driverModal.user.perfil_conductor?.telefonoEmergencia}</p>
               
               <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Datos Vehiculares</h4>
-              <p><strong>Marca/Modelo:</strong> {driverModal.user.perfil_conductor?.vehiculoMarca}</p>
-              <p><strong>Año:</strong> {driverModal.user.perfil_conductor?.vehiculoAnio}</p>
+              <p><strong>Marca y Modelo:</strong> {driverModal.user.perfil_conductor?.vehiculoMarca} {driverModal.user.perfil_conductor?.vehiculoModelo}</p>
+              <p><strong>Año y Color:</strong> {driverModal.user.perfil_conductor?.vehiculoAnio} / {driverModal.user.perfil_conductor?.vehiculoColor}</p>
               <p><strong>Placa:</strong> {driverModal.user.perfil_conductor?.vehiculoPlaca}</p>
               <p><strong>Capacidad:</strong> {driverModal.user.perfil_conductor?.vehiculoCapacidad} pasajeros</p>
               
-              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Documentos (Demo)</h4>
-              <p>Comprobante de domicilio: {driverModal.user.perfil_conductor?.files?.comprobante ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Licencia de Conducir: {driverModal.user.perfil_conductor?.files?.licencia ? '✅ Subido' : '❌ Falta'}</p>
+              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Documentos</h4>
+              <p>Comprobante de domicilio: {driverModal.user.perfil_conductor?.comprobanteDomicilio ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Licencia de Conducir: {driverModal.user.perfil_conductor?.licenciaConducir ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Récord de Conductor: {driverModal.user.perfil_conductor?.recordConductor ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Antecedentes: {driverModal.user.perfil_conductor?.antecedentesPenales ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Tarjeta de Propiedad: {driverModal.user.perfil_conductor?.tarjetaPropiedad ? '✅ Subido' : '❌ Falta'}</p>
+              <p>SOAT: {driverModal.user.perfil_conductor?.soat ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Revisión Técnica: {driverModal.user.perfil_conductor?.revisionTecnica ? '✅ Subido' : '❌ Falta'}</p>
             </div>
             
             <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>

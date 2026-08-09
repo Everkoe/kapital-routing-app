@@ -66,6 +66,21 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     examenMedico: null,
     examenToxicologico: null,
     evaluacionPsicologica: null,
+
+    // Datos Vehiculares
+    vehiculoMarca: '',
+    vehiculoModelo: '',
+    vehiculoAnio: '',
+    vehiculoPlaca: '',
+    vehiculoColor: '',
+    vehiculoCapacidad: '',
+    tarjetaPropiedad: null,
+    soat: null,
+    revisionTecnica: null,
+
+    // Requisitos de Empresa
+    certificadoEps: null,
+    seguroSctr: null,
   });
 
   // Calculate age automatically
@@ -112,9 +127,16 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.examenMedico) filled++;
     if (formData.examenToxicologico) filled++;
     if (formData.evaluacionPsicologica) filled++;
-    // Add vehicle and requirements later
+    
+    // Vehiculares
+    if (formData.vehiculoMarca) filled++;
+    if (formData.vehiculoPlaca) filled++;
+    if (formData.vehiculoCapacidad) filled++;
+    if (formData.tarjetaPropiedad) filled++;
+    if (formData.soat) filled++;
+    if (formData.revisionTecnica) filled++;
 
-    return Math.round((filled / 13) * 100); // Using 13 as base for current implemented fields
+    return Math.round((filled / 19) * 100); // Updated total required fields to 19
   };
 
   const handleSaveDraft = () => {
@@ -309,10 +331,43 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="2. Datos Vehiculares" 
           isOpen={openSection === 'vehiculares'} 
           onToggle={() => toggleSection('vehiculares')}
-          status="incomplete"
+          status={progress >= 80 ? 'complete' : 'incomplete'}
         >
-          <div className="placeholder-content">
-            <p>Sección en construcción. Aquí irán los datos del vehículo (Placa, Tarjeta de Propiedad, SOAT, Revisiones Técnicas).</p>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>Marca del Vehículo</label>
+              <input type="text" name="vehiculoMarca" value={formData.vehiculoMarca} onChange={handleChange} placeholder="Ej. Mercedes-Benz" />
+            </div>
+            <div className="form-group">
+              <label>Modelo</label>
+              <input type="text" name="vehiculoModelo" value={formData.vehiculoModelo} onChange={handleChange} placeholder="Ej. Sprinter" />
+            </div>
+            <div className="form-group">
+              <label>Año de Fabricación</label>
+              <input type="number" name="vehiculoAnio" value={formData.vehiculoAnio} onChange={handleChange} placeholder="Ej. 2022" />
+            </div>
+            <div className="form-group">
+              <label>Placa del Vehículo</label>
+              <input type="text" name="vehiculoPlaca" value={formData.vehiculoPlaca} onChange={handleChange} placeholder="Ej. ABC-123" />
+            </div>
+            <div className="form-group">
+              <label>Color</label>
+              <input type="text" name="vehiculoColor" value={formData.vehiculoColor} onChange={handleChange} placeholder="Ej. Blanco" />
+            </div>
+            <div className="form-group">
+              <label>Capacidad de Pasajeros</label>
+              <input type="number" name="vehiculoCapacidad" value={formData.vehiculoCapacidad} onChange={handleChange} placeholder="Ej. 15" />
+            </div>
+
+            <div className="form-group full-width">
+              <FileUploadZone label="Tarjeta de Propiedad" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)} />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)} />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone label="Revisión Técnica (Vigente)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
+            </div>
           </div>
           <div className="wizard-actions">
             <button className="btn-secondary" onClick={() => toggleSection('requisitos')}>Siguiente Sección</button>
@@ -323,10 +378,15 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="3. Requisitos de Empresa" 
           isOpen={openSection === 'requisitos'} 
           onToggle={() => toggleSection('requisitos')}
-          status="incomplete"
+          status={progress >= 95 ? 'complete' : 'incomplete'}
         >
-           <div className="placeholder-content">
-            <p>Sección en construcción. Aquí irán otros requisitos específicos de la empresa contratante.</p>
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <FileUploadZone label="Certificado EPS (Opcional)" file={formData.certificadoEps} onFileSelect={(f) => handleFileChange('certificadoEps', f)} />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone label="Seguro SCTR (Salud y Pensión)" file={formData.seguroSctr} onFileSelect={(f) => handleFileChange('seguroSctr', f)} />
+            </div>
           </div>
         </AccordionItem>
       </div>
