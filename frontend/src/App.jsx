@@ -59,10 +59,11 @@ const PantallaAuth = ({ onLogin }) => {
       if (!response.ok) {
         throw new Error(data.detail || data.message || `Error ${response.status}: Error en el servidor.`);
       }
+      
       if (isLogin) {
         onLogin(data);
       } else {
-        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por un Programador de rutas.');
+        alert('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por Administración.');
         setIsLogin(true);
       }
     } catch (err) {

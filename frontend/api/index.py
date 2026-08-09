@@ -261,7 +261,7 @@ async def register_user(usuario: UsuarioRegistro):
         "email": usuario.email,
         "password": usuario.password,
         "nombre": usuario.nombre,
-        "rol": "Programador de rutas" if len(usuarios_db) == 0 else rol_solicitado,
+        "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
         "avatar": usuario.avatar,
