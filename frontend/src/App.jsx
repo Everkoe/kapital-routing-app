@@ -1170,7 +1170,7 @@ function App() {
   }
 
   if (usuarioActual.rol === 'Conductor') {
-    return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
+    return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
   }
 
   if (usuarioActual.rol === 'Gerente de Operaciones') {

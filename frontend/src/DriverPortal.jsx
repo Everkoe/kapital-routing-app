@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
+import { LogOut, Sun, Moon, Pencil } from 'lucide-react';
 import './App.css';
 
-const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
+const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme }) => {
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -87,15 +88,21 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
   if (!profileComplete) {
     return (
       <div className="driver-portal">
-        <header className="driver-header no-print">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>¡Hola, {usuario.nombre}!</h2>
-              <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>Completar Registro</p>
-            </div>
-            <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}>Salir</button>
+        <nav className="navbar no-print">
+          <div className="navbar-left">
+            <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
           </div>
-        </header>
+          <div className="nav-links">
+            <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '20px' }}>¡Hola, {usuario.nombre}!</span>
+            <span className="nav-separator">|</span>
+            <a onClick={onLogout} className="nav-link nav-link-icon">
+              <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
+            </a>
+            <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
+            </button>
+          </div>
+        </nav>
         <main style={{ padding: '20px' }}>
           <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
         </main>
@@ -107,18 +114,27 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout }) => {
 
   return (
     <div className="driver-portal">
-      <header className="driver-header no-print">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.2rem' }}>¡Hola, {usuario.nombre}!</h2>
-            <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              Unidad: {conductorId}
-              <button onClick={cambiarUnidad} style={{ marginLeft: '10px', background: 'transparent', border: '1px solid rgba(255,255,255,0.4)', color: 'white', cursor: 'pointer', fontSize: '0.8rem', padding: '2px 6px', borderRadius: '4px' }} title="Cambiar Unidad">✏️ Editar</button>
-            </p>
-          </div>
-          <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}>Salir</button>
+      <nav className="navbar no-print">
+        <div className="navbar-left">
+          <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
         </div>
-      </header>
+        <div className="nav-links">
+          <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '10px' }}>¡Hola, {usuario.nombre}!</span>
+          <span style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', marginRight: '20px' }}>
+            (Unidad: {conductorId})
+            <button onClick={cambiarUnidad} style={{ marginLeft: '6px', background: 'transparent', border: 'none', color: '#38BDF8', cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Cambiar Unidad">
+              <Pencil size={14} />
+            </button>
+          </span>
+          <span className="nav-separator">|</span>
+          <a onClick={onLogout} className="nav-link nav-link-icon">
+            <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
+          </a>
+          <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
+          </button>
+        </div>
+      </nav>
 
       <main className="driver-content">
         <button className="no-print" onClick={enviarSOS} style={{ width: '100%', background: '#dc2626', color: 'white', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '20px', boxShadow: '0 4px 6px rgba(220, 38, 38, 0.3)', cursor: 'pointer' }}>
