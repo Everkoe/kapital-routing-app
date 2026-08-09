@@ -298,7 +298,8 @@ async def login_user(usuario: UsuarioLogin):
         "rol": user_in_db["rol"],
         "unidad_id": user_in_db.get("unidad_id"),
         "empresa_id": user_in_db.get("empresa_id"),
-        "avatar": user_in_db.get("avatar")
+        "avatar": user_in_db.get("avatar"),
+        "estado": user_in_db.get("estado", "Activo")
     }
 
 @app.put("/api/user/profile")

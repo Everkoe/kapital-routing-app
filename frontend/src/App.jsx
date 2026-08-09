@@ -541,7 +541,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         
         {['Administrador', 'Programador de rutas'].includes(usuarioActual?.rol) && (
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
-             <Shield size={18} style={{ marginRight: '6px' }} /> Usuarios
+             <Shield size={18} style={{ marginRight: '6px' }} /> Accesos
            </a>
         )}
         
