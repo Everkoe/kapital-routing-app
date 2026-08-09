@@ -289,7 +289,7 @@ async def login_user(usuario: UsuarioLogin):
     
     # Verificar si está pendiente de aprobación
     if user_in_db.get("estado", "Activo") == "Pendiente":
-        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por un Programador de rutas.")
+        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por Administración.")
 
     
     return {
