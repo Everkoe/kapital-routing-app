@@ -341,7 +341,24 @@ async def login_user(usuario: UsuarioLogin):
         "unidad_id": user_in_db.get("unidad_id"),
         "empresa_id": user_in_db.get("empresa_id"),
         "avatar": user_in_db.get("avatar"),
-        "estado": user_in_db.get("estado", "Activo")
+        "estado": user_in_db.get("estado", "Activo"),
+        "profileComplete": "perfil_conductor" in user_in_db
+    }
+
+@app.get("/api/user/profile")
+async def get_profile(email: str):
+    await reload_db()
+    user = usuarios_db.get(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    return {
+        "email": user["email"],
+        "nombre": user["nombre"],
+        "rol": user["rol"],
+        "unidad_id": user.get("unidad_id"),
+        "avatar": user.get("avatar"),
+        "estado": user.get("estado", "Activo"),
+        "profileComplete": "perfil_conductor" in user
     }
 
 @app.put("/api/user/profile")

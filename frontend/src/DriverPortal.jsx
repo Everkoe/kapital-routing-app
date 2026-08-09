@@ -6,14 +6,36 @@ import './App.css';
 
 const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme }) => {
   const [rutas, setRutas] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   
-  // Simulación de estado de perfil para el demo
-  // En producción esto vendría en el objeto 'usuario' desde el backend
-  const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || false);
+  // Si el usuario ya está en revisión, su perfil está completo
+  const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || usuario.estado === 'Activo' || false);
 
   const [conductorId, setConductorId] = useState(usuario.unidad_id || 'KAP-001');
+
+  // Poll for status changes if pending
+  useEffect(() => {
+    if (usuario.estado !== 'Pendiente Revisión') return;
+    
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/user/profile?email=${encodeURIComponent(usuario.email)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.estado === 'Activo') {
+            toast.success("¡Tu perfil ha sido aprobado!");
+            const updatedUser = { ...usuario, ...data };
+            localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+            if (setUsuarioActual) setUsuarioActual(updatedUser);
+          }
+        }
+      } catch(e) {}
+    };
+    
+    const interval = setInterval(checkStatus, 5000);
+    return () => clearInterval(interval);
+  }, [usuario, setUsuarioActual]);
 
   const fetchMisRutas = async () => {
     setIsLoading(true);
