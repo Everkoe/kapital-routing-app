@@ -237,6 +237,10 @@ class UsuarioUpdate(BaseModel):
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
 
+class DriverProfilePayload(BaseModel):
+    email: EmailStr
+    perfilData: dict
+
 # --- Endpoints de Autenticación y Verificación ---
 
 
@@ -333,7 +337,8 @@ async def get_all_users(email: str):
             "email": v["email"],
             "nombre": v["nombre"],
             "rol": v["rol"],
-            "estado": v.get("estado", "Activo")
+            "estado": v.get("estado", "Activo"),
+            "perfil_conductor": v.get("perfil_conductor", None)
         })
     return {"usuarios": lista_usuarios}
 
@@ -365,6 +370,21 @@ async def reject_user(target_email: str, admin_email: str):
     await persist_users_only()
     return {"message": f"Usuario {target_email} rechazado y eliminado."}
 
+@app.post("/api/driver/onboarding")
+async def driver_onboarding(payload: DriverProfilePayload):
+    await reload_db()
+    user = usuarios_db.get(payload.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    
+    if user.get("rol") != "Conductor":
+        raise HTTPException(status_code=403, detail="El usuario no es un conductor.")
+        
+    user["perfil_conductor"] = payload.perfilData
+    user["estado"] = "Pendiente Revisión"
+    
+    await persist_users_only()
+    return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
 

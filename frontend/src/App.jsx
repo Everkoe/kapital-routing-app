@@ -255,6 +255,7 @@ const UsersManagementTab = ({ usuarioActual }) => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
+  const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
 
   const fetchUsers = async () => {
     try {
@@ -309,11 +310,59 @@ const UsersManagementTab = ({ usuarioActual }) => {
     });
   };
 
-  const pendingCount = users.filter(u => u.estado === 'Pendiente').length;
+  const pendingCount = users.filter(u => u.estado === 'Pendiente' || u.estado === 'Pendiente Revisión').length;
+
+  const handleReviewDriver = (user) => {
+    setDriverModal({ isOpen: true, user });
+  };
+
+  const closeDriverModal = () => setDriverModal({ isOpen: false, user: null });
+
+  const confirmReview = async (email, action) => {
+    closeDriverModal();
+    setActionLoading(email);
+    try {
+      const apiAction = action === 'approve' ? 'approve' : 'reject';
+      const method = action === 'approve' ? 'PUT' : 'DELETE';
+      const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
+      if (res.ok) await fetchUsers();
+      else alert('Error al realizar la acción');
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(null); }
+  };
 
   return (
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
+      {driverModal.isOpen && driverModal.user && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '600px', width: '90%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+            <h3 style={{ marginTop: 0, borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>Revisión de Perfil: {driverModal.user.nombre}</h3>
+            
+            <div style={{ marginTop: '20px' }}>
+              <p><strong>DNI/Documento:</strong> {driverModal.user.perfil_conductor?.dni}</p>
+              <p><strong>Fecha de Nacimiento:</strong> {driverModal.user.perfil_conductor?.fechaNacimiento}</p>
+              <p><strong>Dirección:</strong> {driverModal.user.perfil_conductor?.direccion}</p>
+              
+              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Datos Vehiculares</h4>
+              <p><strong>Marca/Modelo:</strong> {driverModal.user.perfil_conductor?.vehiculoMarca}</p>
+              <p><strong>Año:</strong> {driverModal.user.perfil_conductor?.vehiculoAnio}</p>
+              <p><strong>Placa:</strong> {driverModal.user.perfil_conductor?.vehiculoPlaca}</p>
+              <p><strong>Capacidad:</strong> {driverModal.user.perfil_conductor?.vehiculoCapacidad} pasajeros</p>
+              
+              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Documentos (Demo)</h4>
+              <p>Comprobante de domicilio: {driverModal.user.perfil_conductor?.files?.comprobante ? '✅ Subido' : '❌ Falta'}</p>
+              <p>Licencia de Conducir: {driverModal.user.perfil_conductor?.files?.licencia ? '✅ Subido' : '❌ Falta'}</p>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>
+              <button onClick={closeDriverModal} style={{ padding: '10px 20px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'transparent', cursor: 'pointer' }}>Cerrar</button>
+              <button onClick={() => confirmReview(driverModal.user.email, 'reject')} style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer' }}>Rechazar</button>
+              <button onClick={() => confirmReview(driverModal.user.email, 'approve')} style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', background: '#10b981', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}>Aprobar Conductor</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
 
         {/* Premium Header — consistent with rest of app */}
@@ -418,6 +467,17 @@ const UsersManagementTab = ({ usuarioActual }) => {
                                   ❌ Denegar
                                 </button>
                               </>
+                            )}
+                            {u.estado === 'Pendiente Revisión' && (
+                              <button onClick={() => handleReviewDriver(u)} style={{
+                                padding: '6px 13px', borderRadius: '8px', border: '1px solid #3b82f666',
+                                background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer',
+                                fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                              }}
+                                onMouseEnter={e => { e.target.style.background = '#3b82f6'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(59,130,246,0.4)'; }}
+                                onMouseLeave={e => { e.target.style.background = 'rgba(59,130,246,0.1)'; e.target.style.color = '#3b82f6'; e.target.style.boxShadow = 'none'; }}>
+                                🔍 Revisar Perfil
+                              </button>
                             )}
                             {u.estado === 'Activo' && u.email !== usuarioActual.email && (
                               <button onClick={() => requestAction(u.email, 'deactivate', u.nombre)} style={{

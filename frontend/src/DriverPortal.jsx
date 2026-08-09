@@ -79,10 +79,25 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     // Aquí podríamos hacer un fetch al backend a un endpoint de SOS si quisiéramos.
   };
 
-  const handleProfileComplete = (data) => {
-    console.log("Datos del conductor recibidos:", data);
-    alert("¡Perfil enviado para revisión exitosamente!");
-    setProfileComplete(true);
+  const handleProfileComplete = async (data) => {
+    try {
+      const response = await fetch('/api/driver/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: usuario.email, perfilData: data })
+      });
+      if (!response.ok) throw new Error('Error al enviar perfil');
+      
+      const updatedUser = { ...usuario, estado: 'Pendiente Revisión' };
+      localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+      if (setUsuarioActual) {
+        setUsuarioActual(updatedUser);
+      }
+      setProfileComplete(true);
+    } catch (error) {
+      alert("Ocurrió un error al enviar el perfil. Intenta de nuevo.");
+      console.error(error);
+    }
   };
 
   if (!profileComplete) {
@@ -105,6 +120,39 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         </nav>
         <main style={{ padding: '20px' }}>
           <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
+        </main>
+      </div>
+    );
+  }
+
+  if (usuario.estado === 'Pendiente Revisión') {
+    return (
+      <div className="driver-portal" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <nav className="navbar no-print">
+          <div className="navbar-left">
+            <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
+          </div>
+          <div className="nav-links">
+            <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '20px' }}>¡Hola, {usuario.nombre}!</span>
+            <span className="nav-separator">|</span>
+            <a onClick={onLogout} className="nav-link nav-link-icon">
+              <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
+            </a>
+            <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
+            </button>
+          </div>
+        </nav>
+        <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: 'var(--bg)', padding: '40px', borderRadius: '12px', boxShadow: 'var(--shadow)', textAlign: 'center', maxWidth: '500px' }}>
+            <h2 style={{ color: 'var(--kapital-blue-deep)', marginBottom: '15px' }}>⏳ Perfil en Revisión</h2>
+            <p style={{ color: 'var(--text)', lineHeight: '1.6' }}>
+              Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y documentos.
+            </p>
+            <p style={{ color: 'var(--text)', lineHeight: '1.6', marginTop: '10px' }}>
+              Por favor, regresa más tarde. Podrás acceder a tus rutas asignadas una vez que tu perfil sea aprobado.
+            </p>
+          </div>
         </main>
       </div>
     );
