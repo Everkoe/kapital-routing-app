@@ -331,6 +331,20 @@ const UsersManagementTab = ({ usuarioActual }) => {
     finally { setActionLoading(null); }
   };
 
+  const renderDocRow = (label, docObj) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <span>{label}: {docObj ? '✅ Subido' : '❌ Falta'}</span>
+      {docObj && (
+        <button 
+          onClick={() => alert(`En la versión de producción, esto abrirá el visor del documento (PDF o Imagen) para que lo verifiques antes de aprobar.`)}
+          style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+        >
+          👁️ Ver Archivo
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
@@ -351,14 +365,16 @@ const UsersManagementTab = ({ usuarioActual }) => {
               <p><strong>Placa:</strong> {driverModal.user.perfil_conductor?.vehiculoPlaca}</p>
               <p><strong>Capacidad:</strong> {driverModal.user.perfil_conductor?.vehiculoCapacidad} pasajeros</p>
               
-              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Documentos</h4>
-              <p>Comprobante de domicilio: {driverModal.user.perfil_conductor?.comprobanteDomicilio ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Licencia de Conducir: {driverModal.user.perfil_conductor?.licenciaConducir ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Récord de Conductor: {driverModal.user.perfil_conductor?.recordConductor ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Antecedentes: {driverModal.user.perfil_conductor?.antecedentesPenales ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Tarjeta de Propiedad: {driverModal.user.perfil_conductor?.tarjetaPropiedad ? '✅ Subido' : '❌ Falta'}</p>
-              <p>SOAT: {driverModal.user.perfil_conductor?.soat ? '✅ Subido' : '❌ Falta'}</p>
-              <p>Revisión Técnica: {driverModal.user.perfil_conductor?.revisionTecnica ? '✅ Subido' : '❌ Falta'}</p>
+              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '5px' }}>Documentos</h4>
+              <div style={{ marginTop: '10px' }}>
+                {renderDocRow('Comprobante de domicilio', driverModal.user.perfil_conductor?.comprobanteDomicilio)}
+                {renderDocRow('Licencia de Conducir', driverModal.user.perfil_conductor?.licenciaConducir)}
+                {renderDocRow('Récord de Conductor', driverModal.user.perfil_conductor?.recordConductor)}
+                {renderDocRow('Antecedentes', driverModal.user.perfil_conductor?.antecedentesPenales)}
+                {renderDocRow('Tarjeta de Propiedad', driverModal.user.perfil_conductor?.tarjetaPropiedad)}
+                {renderDocRow('SOAT', driverModal.user.perfil_conductor?.soat)}
+                {renderDocRow('Revisión Técnica', driverModal.user.perfil_conductor?.revisionTecnica)}
+              </div>
             </div>
             
             <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>
