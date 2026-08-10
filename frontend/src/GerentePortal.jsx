@@ -71,7 +71,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [conductorPage, setConductorPage] = useState(0);
   const [timeFilter, setTimeFilter] = useState("Día");
-  const COND_PER_PAGE = 20;
+  const COND_PER_PAGE = 10;
 
   const loadData = async () => {
     setLoading(true);
@@ -258,11 +258,11 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={conductorPageData} layout="vertical" margin={{ top:4, right:16, left:10, bottom:0 }}>
                     <XAxis type="number" tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} width={50} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} width={60} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend wrapperStyle={{fontSize:"11px"}} />
-                    <Bar dataKey="Pasajeros" fill={PALETTE.primary} radius={[0,4,4,0]} animationDuration={1500} animationEasing="ease-out" />
-                    <Bar dataKey="Disponible" fill="#1e2a3a" radius={[0,4,4,0]} animationDuration={1500} animationEasing="ease-out" />
+                    <Bar dataKey="Pasajeros" stackId="a" fill={PALETTE.primary} barSize={14} animationDuration={1500} animationEasing="ease-out" />
+                    <Bar dataKey="Disponible" stackId="a" fill="#1e2a3a" radius={[0,4,4,0]} barSize={14} animationDuration={1500} animationEasing="ease-out" />
                   </BarChart>
                 </ResponsiveContainer>
               </ChartCard>
@@ -298,7 +298,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                         <XAxis dataKey="zona" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} angle={-40} textAnchor="end" interval={0} />
                         <YAxis tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
                         <Tooltip content={<CustomTooltip />} />
-                        <Bar dataKey="Agentes" fill={PALETTE.cyan} radius={[4,4,0,0]} animationDuration={1500} animationEasing="ease-out" />
+                        <Bar dataKey="Agentes" fill={PALETTE.cyan} radius={[4,4,0,0]} barSize={28} animationDuration={1500} animationEasing="ease-out" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
