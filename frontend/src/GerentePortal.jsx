@@ -235,7 +235,6 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
               <StatCard title="Total Pasajeros" value={kpis.totalAgentes.toLocaleString()} subtitle="Asignados en todas las rutas" icon="👥" color={PALETTE.cyan} delay={0} />
               <StatCard title="Flota Activa" value={kpis.flotaActiva} subtitle={`Capacidad total: ${kpis.capacidadTotal.toLocaleString()} pax`} icon="🚐" color={PALETTE.green} delay={0.05} />
               <StatCard title="Rutas Totales" value={kpis.rutasProg} subtitle={`${kpis.turnosUnicos} turno(s) activo(s)`} icon="🗺️" color={PALETTE.amber} delay={0.1} />
-              <StatCard title="Optimización" value={`${kpis.tasaOpt}%`} subtitle="Capacidad total utilizada" icon="⚡" color={PALETTE.purple} delay={0.15} />
               <StatCard title="Rutas Completas" value={kpis.rutasFull} subtitle="Con 15 pasajeros (máx.)" icon="✅" color={PALETTE.green} delay={0.2} />
               <StatCard title="Zonas Cubiertas" value={kpis.zonasUnicas} subtitle="Micro-zonas operativas" icon="📍" color={PALETTE.pink} delay={0.25} />
               {kpis.rutasBajas > 0 && <StatCard title="Rutas con Baja Carga" value={kpis.rutasBajas} subtitle="Menos de 8 pasajeros" icon="📉" color={PALETTE.red} delay={0.3} />}
