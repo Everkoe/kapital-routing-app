@@ -10,7 +10,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [error, setError] = useState('');
   
   // Si el usuario ya está en revisión, su perfil está completo
-  const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || usuario.estado === 'Activo' || false);
+  const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || false);
 
   const [conductorId, setConductorId] = useState(usuario.unidad_id || 'KAP-001');
 
