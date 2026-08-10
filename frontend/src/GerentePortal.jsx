@@ -156,17 +156,17 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
           <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{fontWeight:700,fontSize:"0.95rem",color:"var(--kapital-text-primary)"}}>Panel Ejecutivo</div>
+            <div style={{fontWeight:700,fontSize:"0.95rem",color:"#ffffff"}}>Panel Ejecutivo</div>
             <div style={{fontSize:"0.7rem",color:PALETTE.amber,fontWeight:700,letterSpacing:"0.6px"}}>GERENTE DE OPERACIONES</div>
           </div>
         </div>
         <div className="nav-links open" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {lastUpdated && <span style={{fontSize:"0.73rem",color:"var(--kapital-text-secondary)", marginRight:"10px"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
+          {lastUpdated && <span style={{fontSize:"0.73rem",color:"rgba(255,255,255,0.7)", marginRight:"10px"}}>Actualizado: {lastUpdated.toLocaleTimeString()}</span>}
           <a onClick={loadData} className="nav-link" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" }}>🔄 Actualizar</a>
           <span className="nav-separator">|</span>
           <div style={{ display:"flex", alignItems:"center", gap:"10px", padding: "0 10px" }}>
             <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`linear-gradient(135deg, ${PALETTE.amber}, #f97316)`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontWeight:700, fontSize:"0.9rem" }}>{usuario?.nombre?.charAt(0)?.toUpperCase()||"G"}</div>
-            <div style={{fontSize:"0.85rem",fontWeight:600,color:"var(--kapital-text-primary)"}}>{usuario?.nombre}</div>
+            <div style={{fontSize:"0.85rem",fontWeight:600,color:"#ffffff"}}>{usuario?.nombre}</div>
           </div>
           <a onClick={onLogout} className="nav-link" style={{cursor: "pointer"}}>Cerrar Sesión</a>
           <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
