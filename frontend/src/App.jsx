@@ -762,18 +762,33 @@ const KPIDashboard = ({ routes }) => {
   }, [routes]); 
 
   const chartData = useMemo(() => {
-    return routes.map(r => ({
-      name: r.conductor,
-      pasajeros: r.agentes.length,
-      vacios: 15 - r.agentes.length
-    }));
+    const zones = {};
+    routes.forEach(r => {
+      const z = r.micro_zona || 'Sin Zona';
+      if (!zones[z]) zones[z] = 0;
+      zones[z] += r.agentes.length;
+    });
+    return Object.keys(zones).map(z => ({ name: z, pasajeros: zones[z] })).sort((a,b) => b.pasajeros - a.pasajeros).slice(0, 15); // Top 15 zones
   }, [routes]);
 
-  const pieData = [
-    { name: 'Ocupado', value: parseFloat(kpis.tasaOptimizacion) },
-    { name: 'Libre', value: 100 - parseFloat(kpis.tasaOptimizacion) }
-  ];
-  const COLORS = ['#10B981', '#334155'];
+  const pieData = useMemo(() => {
+    let asignados = 0;
+    let sinAsignar = 0;
+    routes.forEach(r => {
+      if (r.conductor && r.conductor.trim() !== "SIN ASIGNAR") {
+        asignados += r.agentes.length;
+      } else {
+        sinAsignar += r.agentes.length;
+      }
+    });
+    if (asignados === 0 && sinAsignar === 0) return [{name: 'Sin datos', value: 1}];
+    return [
+      { name: 'Asignados', value: asignados },
+      { name: 'Faltan Asignar', value: sinAsignar }
+    ];
+  }, [routes]);
+  
+  const COLORS = ['#10B981', '#f59e0b', '#334155'];
 
   return ( 
     <div style={{display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '20px'}}>
@@ -785,29 +800,28 @@ const KPIDashboard = ({ routes }) => {
       </div> 
       {routes.length > 0 && (
       <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '20px'}}>
-        <div className="card" style={{flex: '1 1 300px', minWidth: '280px', height: '320px'}}>
-          <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Carga por Unidad</h3>
+        <div className="card" style={{flex: '2 1 400px', minWidth: '280px', height: '340px'}}>
+          <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Demanda por Zona</h3>
           <ResponsiveContainer width="100%" height="80%">
-            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <XAxis dataKey="name" stroke="var(--kapital-text-secondary)" />
-              <YAxis stroke="var(--kapital-text-secondary)" />
-              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)'}} />
-              <Legend />
-              <Bar dataKey="pasajeros" stackId="a" fill="#38bdf8" name="Pasajeros" />
-              <Bar dataKey="vacios" stackId="a" fill="rgba(56, 189, 248, 0.2)" name="Asientos Vacíos" />
+            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 25 }}>
+              <XAxis dataKey="name" stroke="var(--kapital-text-secondary)" tick={{fontSize: 10}} angle={-35} textAnchor="end" interval={0} />
+              <YAxis stroke="var(--kapital-text-secondary)" tick={{fontSize: 11}} />
+              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)', borderRadius: '8px'}} />
+              <Bar dataKey="pasajeros" fill="#38bdf8" name="Pasajeros" radius={[4,4,0,0]} barSize={24} animationDuration={1000} animationEasing="ease-out" />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="card" style={{flex: '1 1 280px', minWidth: '280px', height: '320px'}}>
-           <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Eficiencia Global</h3>
+        <div className="card" style={{flex: '1 1 280px', minWidth: '280px', height: '340px'}}>
+           <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Progreso de Asignación</h3>
            <ResponsiveContainer width="100%" height="80%">
             <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+              <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={5} dataKey="value" animationDuration={1000} animationEasing="ease-out">
                 {pieData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)'}} />
+              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)', borderRadius: '8px'}} />
+              <Legend wrapperStyle={{fontSize:"12px"}} />
             </PieChart>
           </ResponsiveContainer>
         </div>
