@@ -256,13 +256,13 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                   </div>
                 }>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={conductorPageData} margin={{ top:4, right:16, left:-10, bottom:36 }}>
-                    <XAxis dataKey="name" tick={{ fontSize:9, fill:"var(--kapital-text-secondary)" }} angle={-40} textAnchor="end" interval={0} />
-                    <YAxis tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} />
+                  <BarChart data={conductorPageData} layout="vertical" margin={{ top:4, right:16, left:10, bottom:0 }}>
+                    <XAxis type="number" tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize:10, fill:"var(--kapital-text-secondary)" }} width={50} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend wrapperStyle={{fontSize:"11px"}} />
-                    <Bar dataKey="Pasajeros" fill={PALETTE.primary} radius={[4,4,0,0]} />
-                    <Bar dataKey="Disponible" fill="#1e2a3a" radius={[4,4,0,0]} />
+                    <Bar dataKey="Pasajeros" fill={PALETTE.primary} radius={[0,4,4,0]} animationDuration={1500} animationEasing="ease-out" />
+                    <Bar dataKey="Disponible" fill="#1e2a3a" radius={[0,4,4,0]} animationDuration={1500} animationEasing="ease-out" />
                   </BarChart>
                 </ResponsiveContainer>
               </ChartCard>
@@ -272,7 +272,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
                     <ResponsiveContainer width="100%" height={155}>
                       <PieChart>
-                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={48} outerRadius={68} dataKey="value" strokeWidth={0}>
+                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={48} outerRadius={68} dataKey="value" strokeWidth={0} animationDuration={1500} animationEasing="ease-out">
                           <Cell fill={parseFloat(kpis.tasaOpt) >= 80 ? PALETTE.green : parseFloat(kpis.tasaOpt) >= 50 ? PALETTE.amber : PALETTE.red} />
                           <Cell fill="#1e2433" />
                         </Pie>
@@ -291,15 +291,17 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
             {/* Row 2: Zona horizontal + Horario */}
             <div style={{ display:"flex", gap:"18px", flexWrap:"wrap", marginBottom:"18px" }}>
               <ChartCard title="Agentes por Micro-Zona" subtitle="Distribución geográfica completa" style={{ flex:"1 1 320px", minWidth:"280px" }}>
-                <div style={{ overflowY:"auto", maxHeight:"260px" }}>
-                  <ResponsiveContainer width="100%" height={Math.max(220, zonaData.length * 28)}>
-                    <BarChart data={zonaData} layout="vertical" margin={{ top:0, right:20, left:110, bottom:0 }}>
-                      <XAxis type="number" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
-                      <YAxis type="category" dataKey="zona" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} width={110} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="Agentes" fill={PALETTE.cyan} radius={[0,4,4,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div style={{ overflowX:"auto" }}>
+                  <div style={{ width: Math.max(300, zonaData.length * 40), height: 260 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={zonaData} margin={{ top:20, right:20, left:-20, bottom:50 }}>
+                        <XAxis dataKey="zona" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} angle={-40} textAnchor="end" interval={0} />
+                        <YAxis tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Bar dataKey="Agentes" fill={PALETTE.cyan} radius={[4,4,0,0]} animationDuration={1500} animationEasing="ease-out" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </ChartCard>
 
@@ -309,7 +311,7 @@ const GerentePortal = ({ usuario, onLogout, theme, toggleTheme }) => {
                     <XAxis dataKey="horario" tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
                     <YAxis tick={{fontSize:10,fill:"var(--kapital-text-secondary)"}} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="Agentes" radius={[4,4,0,0]}>
+                    <Bar dataKey="Agentes" radius={[4,4,0,0]} animationDuration={1500} animationEasing="ease-out">
                       {horarioData.map((_, i) => <Cell key={i} fill={[PALETTE.amber, PALETTE.primary, PALETTE.cyan, PALETTE.pink, PALETTE.green][i % 5]} />)}
                     </Bar>
                   </BarChart>
