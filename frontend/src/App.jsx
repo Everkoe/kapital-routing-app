@@ -577,10 +577,10 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         
         {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
           <>
+           <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
              <Shield size={18} style={{ marginRight: '6px' }} /> Accesos
            </a>
-           <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
           </>
         )}
         
