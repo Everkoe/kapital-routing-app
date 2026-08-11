@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
-import { LogOut, Sun, Moon, Pencil } from 'lucide-react';
+import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './App.css';
 
@@ -79,7 +79,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     }
   };
 
-  const marcarRecogido = async (horario, agenteId) => {
+  const actualizarEstadoPasajero = async (horario, agenteId, estado) => {
     try {
       const response = await fetch('/api/actualizar-pasajero', {
         method: 'POST',
@@ -88,16 +88,19 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
           conductor_id: conductorId,
           horario: horario,
           agente_id: agenteId,
-          estado: 'Recogido'
+          estado: estado
         })
       });
       if (response.ok) {
         fetchMisRutas();
-        toast.success("Pasajero marcado como recogido");
+        toast.success(`Pasajero marcado como ${estado}`);
       } else {
         toast.error("Error al actualizar pasajero");
       }
     } catch (error) {
+      toast.error("Error de red");
+    }
+  };
       toast.error("Error al actualizar pasajero");
     }
   };
@@ -247,22 +250,63 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
               <span className="driver-route-zone">📍 {ruta.zona}</span>
             </div>
             
+            {/* Barra de progreso de la ruta */}
+            <div style={{ marginBottom: '15px', background: 'var(--kapital-bg)', borderRadius: '10px', height: '12px', overflow: 'hidden', border: '1px solid var(--kapital-border)' }}>
+              <div style={{ width: `${(ruta.agentes.filter(a => a.estado === 'Recogido' || a.estado === 'Ausente').length / ruta.agentes.length) * 100}%`, height: '100%', background: 'var(--kapital-accent-green)', transition: 'width 0.5s ease' }} />
+            </div>
+
             <div className="driver-passengers-list">
               {ruta.agentes.map((agente, idx) => {
                 const isRecogido = agente.estado === 'Recogido';
+                const isAusente = agente.estado === 'Ausente';
+                const isCompletado = isRecogido || isAusente;
+                
+                // Encontrar el primer pasajero no completado para resaltarlo
+                const firstPendingIdx = ruta.agentes.findIndex(a => a.estado !== 'Recogido' && a.estado !== 'Ausente');
+                const isNext = idx === firstPendingIdx;
+
                 return (
-                  <div key={idx} className={`driver-passenger-item ${isRecogido ? 'recogido' : ''}`}>
-                    <div className="driver-passenger-info">
-                      <div style={{ fontWeight: 'bold' }}>{agente.nombre}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>🏠 {agente.direccion}</div>
+                  <div key={idx} className={`driver-passenger-item ${isCompletado ? 'recogido' : ''} ${isNext ? 'next-passenger-glow' : ''}`}>
+                    <div className="driver-passenger-info" style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'inherit' }}>{agente.nombre}</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)', marginTop: '4px' }}>🏠 {agente.direccion}</div>
+                      
+                      {/* Botones de acción rápida */}
+                      {!isCompletado && (
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }} className="no-print">
+                          <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente.direccion)}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze">
+                            <Navigation size={14} /> Waze
+                          </a>
+                          <a href={`https://wa.me/51${agente.telefono || ''}?text=${encodeURIComponent('Hola ' + agente.nombre + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp">
+                            <MessageCircle size={14} /> 
+                          </a>
+                          <a href={`tel:${agente.telefono || ''}`} className="quick-action-btn phone">
+                            <Phone size={14} />
+                          </a>
+                        </div>
+                      )}
                     </div>
-                    <button 
-                      className={`driver-action-btn no-print ${isRecogido ? 'btn-recogido' : ''}`}
-                      disabled={isRecogido}
-                      onClick={() => marcarRecogido(ruta.horario, agente.id)}
-                    >
-                      {isRecogido ? '✓ Listo' : 'Recoger'}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end', marginLeft: '10px' }}>
+                      <button 
+                        className={`driver-action-btn no-print ${isCompletado ? 'btn-recogido' : ''}`}
+                        disabled={isCompletado}
+                        onClick={() => actualizarEstadoPasajero(ruta.horario, agente.id, 'Recogido')}
+                      >
+                        {isRecogido ? '✓ Listo' : isAusente ? '❌ Ausente' : 'Recoger'}
+                      </button>
+                      {!isCompletado && (
+                        <button 
+                          className="driver-action-btn ausente-btn no-print"
+                          onClick={() => {
+                            if(window.confirm(`¿Seguro que ${agente.nombre} no se presentó?`)) {
+                              actualizarEstadoPasajero(ruta.horario, agente.id, 'Ausente');
+                            }
+                          }}
+                        >
+                          <AlertTriangle size={14} style={{ marginRight: '4px' }}/> Ausente
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -328,9 +372,53 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         }
         .driver-action-btn.btn-recogido {
           background-color: transparent;
-          border: 1px solid var(--kapital-accent-green);
-          color: var(--kapital-accent-green);
+          border: 1px solid var(--kapital-border);
+          color: var(--kapital-text-secondary);
           cursor: default;
+        }
+        .driver-action-btn.ausente-btn {
+          background-color: transparent;
+          border: 1px solid #f59e0b;
+          color: #f59e0b;
+          padding: 8px 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.8rem;
+        }
+        .driver-action-btn.ausente-btn:hover {
+          background-color: rgba(245, 158, 11, 0.1);
+        }
+        
+        .quick-action-btn {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 6px 10px;
+          border-radius: 6px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-decoration: none;
+          transition: all 0.2s ease;
+        }
+        .quick-action-btn.waze { background: rgba(56, 189, 248, 0.1); color: #38BDF8; border: 1px solid rgba(56, 189, 248, 0.3); }
+        .quick-action-btn.waze:hover { background: rgba(56, 189, 248, 0.2); }
+        .quick-action-btn.whatsapp { background: rgba(34, 197, 94, 0.1); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .quick-action-btn.whatsapp:hover { background: rgba(34, 197, 94, 0.2); }
+        .quick-action-btn.phone { background: rgba(148, 163, 184, 0.1); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
+        .quick-action-btn.phone:hover { background: rgba(148, 163, 184, 0.2); }
+
+        .next-passenger-glow {
+          border-left: 4px solid #38BDF8;
+          background: linear-gradient(90deg, rgba(56, 189, 248, 0.08) 0%, transparent 100%);
+          padding-left: 15px;
+          margin-left: -15px;
+          animation: pulseGlow 2s infinite;
+        }
+        @keyframes pulseGlow {
+          0% { box-shadow: inset 2px 0 0px rgba(56, 189, 248, 0); }
+          50% { box-shadow: inset 4px 0 10px rgba(56, 189, 248, 0.2); }
+          100% { box-shadow: inset 2px 0 0px rgba(56, 189, 248, 0); }
         }
         @media print {
           .no-print { display: none !important; }
