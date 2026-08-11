@@ -101,9 +101,6 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       toast.error("Error de red");
     }
   };
-      toast.error("Error al actualizar pasajero");
-    }
-  };
 
   const enviarSOS = async () => {
     try {
