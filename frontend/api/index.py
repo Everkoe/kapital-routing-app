@@ -226,6 +226,10 @@ class FlotaRegistro(BaseModel):
     revision: str
     atu: str
     licencia: str
+    soat_doc: Optional[str] = None
+    revision_doc: Optional[str] = None
+    atu_doc: Optional[str] = None
+    licencia_doc: Optional[str] = None
 
 class ChatMessagePayload(BaseModel):
     role: str

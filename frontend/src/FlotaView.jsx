@@ -10,7 +10,8 @@ const FlotaView = () => {
   // Modal state
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
-    placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: ''
+    placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '',
+    soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
 
@@ -48,12 +49,19 @@ const FlotaView = () => {
     }
   };
 
-  const renderBadge = (dateString) => {
+  const renderBadge = (dateString, docUrl) => {
     const { status, text } = getStatus(dateString);
     return (
-      <div className={`status-badge status-${status}`} title={dateString}>
-        <span className="dot"></span>
-        {text}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className={`status-badge status-${status}`} title={dateString}>
+          <span className="dot"></span>
+          {text}
+        </div>
+        {docUrl && (
+          <a href={docUrl} target="_blank" rel="noreferrer" title="Ver Documento Adjunto" style={{ textDecoration: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>
+            📎
+          </a>
+        )}
       </div>
     );
   };
@@ -76,9 +84,35 @@ const FlotaView = () => {
   };
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setShowModal(true);
+  };
+
+  const handleFileUpload = (e, field) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFormData(prev => ({ ...prev, [field]: event.target.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleExport = () => {
+    const headers = ['UNIDAD (PLACA)', 'CONDUCTOR', 'TIPO / CAP.', 'SOAT', 'REV. TECNICA', 'T.U.C (ATU)', 'LICENCIA MTC'];
+    const rows = flota.map(v => [
+      v.placa, v.chofer, `${v.tipo} (${v.capacidad} pax)`,
+      v.soat, v.revision, v.atu, v.licencia
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + 
+      [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Matriz_Legal_Flota.csv");
+    document.body.appendChild(link);
+    link.click();
   };
 
   const handleSubmit = async (e) => {
@@ -110,6 +144,7 @@ const FlotaView = () => {
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>Control de Conformidad Legal y Flota</h2>
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn-secondary" onClick={handleExport} style={{ backgroundColor: '#10b981', color: 'white', border: 'none' }}>⬇️ Exportar Excel</button>
           <button className="btn-secondary" onClick={fetchFlota}>Actualizar</button>
           <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>
         </div>
@@ -145,10 +180,10 @@ const FlotaView = () => {
                 <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
                 <td>{vehiculo.chofer}</td>
                 <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>
-                <td>{renderBadge(vehiculo.soat)}</td>
-                <td>{renderBadge(vehiculo.revision)}</td>
-                <td>{renderBadge(vehiculo.atu)}</td>
-                <td>{renderBadge(vehiculo.licencia)}</td>
+                <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
+                <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
+                <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>
+                <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc)}</td>
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar">✏️</button>
@@ -189,19 +224,43 @@ const FlotaView = () => {
               </div>
               <div className="form-row">
                 <label>Vencimiento SOAT</label>
-                <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ fontSize: '0.8rem' }} />
+                    {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Revisión</label>
-                <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ fontSize: '0.8rem' }} />
+                    {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento ATU</label>
-                <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ fontSize: '0.8rem' }} />
+                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Licencia</label>
-                <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ fontSize: '0.8rem' }} />
+                    {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                  </div>
+                </div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
