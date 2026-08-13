@@ -201,7 +201,8 @@ const FlotaView = () => {
           <div className="modal-content">
             <h3>{isEditing ? 'Editar Unidad' : 'Registrar Nueva Unidad'}</h3>
             <form onSubmit={handleSubmit} className="flota-form">
-              <div className="form-row">
+              <div className="form-scroll-area">
+                <div className="form-row">
                 <label>Placa/ID</label>
                 <input required disabled={isEditing} value={formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
               </div>
@@ -227,7 +228,7 @@ const FlotaView = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                   <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ fontSize: '0.8rem' }} />
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} className="file-input" />
                     {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
                   </div>
                 </div>
@@ -237,7 +238,7 @@ const FlotaView = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                   <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ fontSize: '0.8rem' }} />
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} className="file-input" />
                     {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
                   </div>
                 </div>
@@ -247,7 +248,7 @@ const FlotaView = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                   <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ fontSize: '0.8rem' }} />
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} className="file-input" />
                     {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
                   </div>
                 </div>
@@ -257,10 +258,11 @@ const FlotaView = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                   <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ fontSize: '0.8rem' }} />
+                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} className="file-input" />
                     {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
                   </div>
                 </div>
+              </div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
@@ -299,10 +301,48 @@ const FlotaView = () => {
           border-radius: 12px;
           width: 90%;
           max-width: 500px;
-          max-height: 90vh;
-          overflow-y: auto;
           box-shadow: 0 10px 25px rgba(0,0,0,0.5);
           border: 1px solid var(--kapital-border);
+          display: flex;
+          flex-direction: column;
+        }
+        .form-scroll-area {
+          max-height: 60vh;
+          overflow-y: auto;
+          padding-right: 15px;
+          margin-bottom: 20px;
+        }
+        .form-scroll-area::-webkit-scrollbar {
+          width: 6px;
+        }
+        .form-scroll-area::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .form-scroll-area::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 4px;
+        }
+        .form-scroll-area::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+        .file-input {
+          font-size: 0.8rem;
+          color: var(--text-secondary);
+        }
+        .file-input::file-selector-button {
+          padding: 6px 12px;
+          border-radius: 4px;
+          border: 1px solid var(--kapital-border);
+          background: var(--kapital-bg);
+          color: var(--kapital-text-primary);
+          cursor: pointer;
+          font-weight: 500;
+          transition: all 0.2s;
+          margin-right: 10px;
+        }
+        .file-input::file-selector-button:hover {
+          background: var(--kapital-light-blue);
+          color: var(--kapital-blue-deep);
         }
         .modal-content h3 {
           margin-top: 0;
