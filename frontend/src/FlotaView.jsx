@@ -33,6 +33,15 @@ const FlotaView = () => {
     fetchFlota();
   }, []);
 
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [showModal]);
+
   const getStatus = (dateString) => {
     if (!dateString) return { status: 'unknown', text: 'N/A' };
     const today = new Date('2026-07-27T00:00:00');
@@ -225,41 +234,53 @@ const FlotaView = () => {
               </div>
               <div className="form-row">
                 <label>Vencimiento SOAT</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} className="file-input" />
-                    {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
+                      📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
                   </div>
                 </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Revisión</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} className="file-input" />
-                    {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
+                      📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
                   </div>
                 </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento ATU</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} className="file-input" />
-                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
+                      📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
                   </div>
                 </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Licencia</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} className="file-input" />
-                    {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)' }}>Ver adjunto</a>}
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
+                      📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}
                   </div>
                 </div>
               </div>
@@ -325,24 +346,22 @@ const FlotaView = () => {
         .form-scroll-area::-webkit-scrollbar-thumb:hover {
           background: #94a3b8;
         }
-        .file-input {
-          font-size: 0.8rem;
+        .custom-file-upload {
+          display: inline-block;
+          padding: 8px 12px;
+          border-radius: 6px;
+          border: 1px dashed var(--kapital-border);
+          background: #f8fafc;
           color: var(--text-secondary);
-        }
-        .file-input::file-selector-button {
-          padding: 6px 12px;
-          border-radius: 4px;
-          border: 1px solid var(--kapital-border);
-          background: var(--kapital-bg);
-          color: var(--kapital-text-primary);
           cursor: pointer;
+          font-size: 0.85rem;
           font-weight: 500;
           transition: all 0.2s;
-          margin-right: 10px;
         }
-        .file-input::file-selector-button:hover {
+        .custom-file-upload:hover {
           background: var(--kapital-light-blue);
           color: var(--kapital-blue-deep);
+          border-color: var(--kapital-blue-deep);
         }
         .modal-content h3 {
           margin-top: 0;
