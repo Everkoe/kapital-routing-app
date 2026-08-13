@@ -299,6 +299,8 @@ const FlotaView = () => {
           border-radius: 12px;
           width: 90%;
           max-width: 500px;
+          max-height: 90vh;
+          overflow-y: auto;
           box-shadow: 0 10px 25px rgba(0,0,0,0.5);
           border: 1px solid var(--kapital-border);
         }
