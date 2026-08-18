@@ -41,6 +41,7 @@ body, #root {
   background-color: var(--kapital-bg);
   font-family: var(--font-sans);
   color: var(--kapital-text-secondary);
+  overflow-x: hidden;
 }
 
 .App {
@@ -48,7 +49,7 @@ body, #root {
 }
 
 /* --- Pantalla de Autenticación Premium --- */
-.auth-container { display: flex; height: 100vh; width: 100vw; overflow: hidden; background-color: #0b1320; }
+.auth-container { display: flex; height: 100vh; width: 100%; overflow: hidden; background-color: #0b1320; }
 .auth-branding { 
   flex: 1.2; 
   background: radial-gradient(circle at 0% 0%, #101c30 0%, #060b13 100%); 
