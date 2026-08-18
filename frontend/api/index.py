@@ -343,11 +343,11 @@ async def login_user(usuario: UsuarioLogin):
 
     
     return {
-        "identifier": user_in_db["identifier"],
+        "identifier": user_in_db.get("identifier", usuario.identifier),
         "email": user_in_db.get("email"),
         "dni": user_in_db.get("dni"),
-        "nombre": user_in_db["nombre"],
-        "rol": user_in_db["rol"],
+        "nombre": user_in_db.get("nombre", "Usuario"),
+        "rol": user_in_db.get("rol", "Usuario"),
         "unidad_id": user_in_db.get("unidad_id"),
         "empresa_id": user_in_db.get("empresa_id"),
         "avatar": user_in_db.get("avatar"),
@@ -392,11 +392,11 @@ async def update_profile(update_data: UsuarioUpdate):
 
     await persist_users_only()
     return {
-        "identifier": user["identifier"],
+        "identifier": user.get("identifier", update_data.identifier),
         "email": user.get("email"),
         "dni": user.get("dni"),
-        "nombre": user["nombre"],
-        "rol": user["rol"],
+        "nombre": user.get("nombre", "Usuario"),
+        "rol": user.get("rol", "Usuario"),
         "unidad_id": user.get("unidad_id"),
         "empresa_id": user.get("empresa_id"),
         "avatar": user.get("avatar"),
