@@ -17,7 +17,7 @@ const PantallaAuth = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
+  const [formData, setFormData] = useState({ identifier: '', email: '', dni: '', password: '', confirmPassword: '', nombre: '', rol: 'Administrador', unidad_id: '', empresa_id: '' });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -27,8 +27,15 @@ const PantallaAuth = ({ onLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    
+    if (!isLogin && formData.password !== formData.confirmPassword) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-    const payload = isLogin ? { email: formData.email, password: formData.password } : formData;
+    const registerIdentifier = formData.rol === 'Conductor' ? formData.dni : formData.email;
+    const payload = isLogin ? { identifier: formData.identifier, password: formData.password } : { ...formData, identifier: registerIdentifier };
 
     setIsAuthLoading(true);
     try {
@@ -75,24 +82,37 @@ const PantallaAuth = ({ onLogin }) => {
             </p>
             {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
             
+            {!isLogin && (
+              <select className="auth-input" name="rol" onChange={handleInputChange} value={formData.rol}>
+                <option value="Administrador">Administrador</option>
+                <option value="Conductor">Conductor</option>
+                <option value="Cliente">Cliente</option>
+              </select>
+            )}
+
+            {!isLogin && formData.rol === 'Conductor' && (
+              <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
+            )}
+            {!isLogin && formData.rol === 'Cliente' && (
+              <input className="auth-input" name="empresa_id" type="text" placeholder="Código de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
+            )}
+
             {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
-            <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
+            
+            {isLogin ? (
+              <input className="auth-input" name="identifier" type="text" placeholder="Correo Electrónico o DNI" onChange={handleInputChange} required />
+            ) : (
+              formData.rol === 'Conductor' ? (
+                <input className="auth-input" name="dni" type="text" placeholder="DNI (Documento de Identidad)" onChange={handleInputChange} required />
+              ) : (
+                <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
+              )
+            )}
+            
             <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
             
             {!isLogin && (
-              <>
-                <select className="auth-input" name="rol" onChange={handleInputChange}>
-                  <option>Administrador</option>
-                  <option>Conductor</option>
-                  <option>Cliente</option>
-                </select>
-                {formData.rol === 'Conductor' && (
-                  <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
-                )}
-                {formData.rol === 'Cliente' && (
-                  <input className="auth-input" name="empresa_id" type="text" placeholder="Código de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
-                )}
-              </>
+              <input className="auth-input" name="confirmPassword" type="password" placeholder="Confirmar Contraseña" onChange={handleInputChange} required />
             )}
             
             <button type="submit" className="auth-button" disabled={isAuthLoading}>
@@ -102,7 +122,7 @@ const PantallaAuth = ({ onLogin }) => {
                   {isLogin ? 'Iniciando sesión...' : 'Registrando...'}
                 </div>
               ) : (
-                isLogin ? 'Ingresar' : 'Completar Registro'
+                isLogin ? 'Ingresar' : 'Enviar Solicitud'
               )}
             </button>
             
@@ -174,7 +194,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
     
     try {
       const payload = {
-        email: usuario.email,
+        identifier: usuario.identifier,
         nombre: formData.nombre !== usuario.nombre ? formData.nombre : undefined,
         current_password: formData.current_password || undefined,
         new_password: formData.new_password || undefined,
@@ -232,8 +252,8 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
             </div>
             <label>Nombre Completo</label>
             <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} className="form-input" required />
-            <label>Correo Electrónico</label>
-            <input type="email" value={usuario.email} className="form-input disabled-input" disabled />
+            <label>{usuario.rol === 'Conductor' ? 'DNI' : 'Correo Electrónico'}</label>
+            <input type="text" value={usuario.identifier} className="form-input disabled-input" disabled />
             <label>Rol de Usuario</label>
             <input type="text" value={usuario.rol} className="form-input disabled-input" disabled />
             

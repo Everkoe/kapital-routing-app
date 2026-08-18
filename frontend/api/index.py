@@ -95,15 +95,16 @@ def read_root():
 
 # --- Modelos de Datos Pydantic ---
 class UsuarioRegistro(BaseModel):
-    email: EmailStr
+    identifier: str
     password: str
     nombre: str
     rol: str
     unidad_id: Optional[str] = None
     empresa_id: Optional[str] = None
+    avatar: Optional[str] = None
 
 class UsuarioLogin(BaseModel):
-    email: EmailStr
+    identifier: str
     password: str
 
 class EmergencyRequest(BaseModel):
@@ -130,7 +131,7 @@ class ChatRequest(BaseModel):
     history: List[ChatMessagePayload] = []
 
 class UsuarioUpdate(BaseModel):
-    email: EmailStr
+    identifier: str
     nombre: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
@@ -142,11 +143,13 @@ class UsuarioUpdate(BaseModel):
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
     await ensure_db_loaded()
-    if usuario.email in usuarios_db:
-        raise HTTPException(status_code=400, detail="El correo ya está registrado.")
+    if usuario.identifier in usuarios_db:
+        raise HTTPException(status_code=400, detail="El usuario ya está registrado.")
     
     nuevo_usuario = {
-        "email": usuario.email,
+        "identifier": usuario.identifier,
+        "email": usuario.identifier if usuario.rol != 'Conductor' else None,
+        "dni": usuario.identifier if usuario.rol == 'Conductor' else None,
         "password": usuario.password,
         "nombre": usuario.nombre,
         "rol": usuario.rol,
@@ -154,7 +157,7 @@ async def register_user(usuario: UsuarioRegistro):
         "empresa_id": usuario.empresa_id,
         "avatar": usuario.avatar
     }
-    usuarios_db[usuario.email] = nuevo_usuario
+    usuarios_db[usuario.identifier] = nuevo_usuario
     
     # Generate mock schedule if role is Conductor
     if usuario.rol == "Conductor" and usuario.unidad_id:
@@ -169,12 +172,14 @@ async def register_user(usuario: UsuarioRegistro):
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
     await ensure_db_loaded()
-    user_in_db = usuarios_db.get(usuario.email)
+    user_in_db = usuarios_db.get(usuario.identifier)
     if not user_in_db or user_in_db["password"] != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
     
     return {
-        "email": user_in_db["email"],
+        "identifier": user_in_db["identifier"],
+        "email": user_in_db.get("email"),
+        "dni": user_in_db.get("dni"),
         "nombre": user_in_db["nombre"],
         "rol": user_in_db["rol"],
         "unidad_id": user_in_db.get("unidad_id"),
@@ -185,7 +190,7 @@ async def login_user(usuario: UsuarioLogin):
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate):
     await ensure_db_loaded()
-    user_in_db = usuarios_db.get(update_data.email)
+    user_in_db = usuarios_db.get(update_data.identifier)
     if not user_in_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     
@@ -208,7 +213,9 @@ async def update_profile(update_data: UsuarioUpdate):
     return {
         "message": "Perfil actualizado",
         "user": {
-            "email": user_in_db["email"],
+            "identifier": user_in_db["identifier"],
+            "email": user_in_db.get("email"),
+            "dni": user_in_db.get("dni"),
             "nombre": user_in_db["nombre"],
             "rol": user_in_db["rol"],
             "unidad_id": user_in_db.get("unidad_id"),
