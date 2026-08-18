@@ -99,15 +99,9 @@ const PantallaAuth = ({ onLogin }) => {
             </p>
             {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
             
-                {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" onChange={handleInputChange} required />}
-                {!isLogin && <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />}
-                <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" onChange={handleInputChange} required />
-                <input className="auth-input" name="password" type="password" placeholder="Contraseña" onChange={handleInputChange} required />
-                {!isLogin && <input className="auth-input" name="confirmar_password" type="password" placeholder="Confirmar Contraseña" onChange={handleInputChange} required />}
-                
                 {!isLogin && (
                   <>
-                    <select className="auth-input" name="rol" onChange={handleInputChange}>
+                    <select className="auth-input" name="rol" onChange={handleInputChange} value={formData.rol}>
                     <option>Programador de rutas</option>
                     <option>Administración</option>
                     <option>Conductor</option>
@@ -122,6 +116,22 @@ const PantallaAuth = ({ onLogin }) => {
                     )}
                   </>
                 )}
+                
+                {!isLogin && (
+                  <input 
+                    className="auth-input" 
+                    name="nombre" 
+                    type="text" 
+                    placeholder={formData.rol === 'Conductor' ? "DNI (Documento de Identidad)" : "Nombre Completo"} 
+                    autoComplete={formData.rol === 'Conductor' ? "username" : "name"}
+                    onChange={handleInputChange} 
+                    required 
+                  />
+                )}
+                {!isLogin && <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />}
+                <input className="auth-input" name="email" type="email" placeholder="Correo Electrónico" autoComplete="username" onChange={handleInputChange} required />
+                <input className="auth-input" name="password" type="password" placeholder="Contraseña" autoComplete={isLogin ? "current-password" : "new-password"} onChange={handleInputChange} required />
+                {!isLogin && <input className="auth-input" name="confirmar_password" type="password" placeholder="Confirmar Contraseña" autoComplete="new-password" onChange={handleInputChange} required />}
             
             <button type="submit" className="auth-button" disabled={isAuthLoading}>
               {isAuthLoading ? (

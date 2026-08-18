@@ -449,6 +449,9 @@ async def driver_onboarding(payload: DriverProfilePayload):
     user["perfil_conductor"] = payload.perfilData
     user["estado"] = "Pendiente Revisión"
     
+    if payload.perfilData.get("nombres"):
+        user["nombre"] = payload.perfilData.get("nombres")
+    
     await persist_users_only()
     return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}
 

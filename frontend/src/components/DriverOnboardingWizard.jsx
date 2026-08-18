@@ -43,12 +43,14 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   const [openSection, setOpenSection] = useState('personales'); // 'personales', 'vehiculares', 'requisitos'
   const [isSaving, setIsSaving] = useState(false);
 
-  // Form State
+  // Check if the registered name is actually a DNI (digits only)
+  const isRegisteredNameDni = usuario?.nombre && /^\d+$/.test(usuario.nombre);
+
   const [formData, setFormData] = useState({
     // Datos Personales
-    nombres: usuario?.nombre || '',
+    nombres: isRegisteredNameDni ? '' : (usuario?.nombre || ''),
     tipoDoc: 'DNI',
-    numDoc: '',
+    numDoc: isRegisteredNameDni ? usuario.nombre : '',
     fechaNacimiento: '',
     edad: '',
     direccion: '',
