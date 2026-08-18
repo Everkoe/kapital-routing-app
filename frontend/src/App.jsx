@@ -580,6 +580,12 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
           </>
         )}
         
+        {usuarioActual?.rol === 'Cliente' && (
+          <>
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard Auditoría</a>
+          </>
+        )}
+        
         {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
           <>
            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
@@ -1310,6 +1316,9 @@ function App() {
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
+        if (usuarioActual?.rol === 'Cliente') {
+          return <ClientPortal usuario={usuarioActual} onLogout={handleLogout} />;
+        }
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }
   };
@@ -1350,14 +1359,7 @@ function App() {
     );
   }
 
-  if (usuarioActual.rol === 'Cliente') {
-    return (
-      <>
-        <Toaster position="top-right" />
-        <ClientPortal usuario={usuarioActual} onLogout={handleLogout} />
-      </>
-    );
-  }
+
 
   return (
     <div className="App">

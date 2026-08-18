@@ -64,20 +64,11 @@ const ClientPortal = ({ usuario, onLogout }) => {
 
   return (
     <div className="client-portal">
-      <header className="client-header">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1200px', margin: '0 auto' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--kapital-accent-blue)' }}>Kapital <span style={{color: 'white'}}>Corporate</span></h1>
-            <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>Dashboard de Auditoría: <strong>{empresaId}</strong></p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <span style={{ fontSize: '0.9rem', opacity: 0.9 }}>👤 {usuario.nombre}</span>
-            <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer' }}>Cerrar Sesión</button>
-          </div>
-        </div>
-      </header>
-
       <main className="client-content">
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--kapital-accent-blue)' }}>Dashboard de Auditoría</h1>
+          <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>Empresa: <strong>{empresaId}</strong></p>
+        </div>
         <div className="client-kpi-grid">
           <div className="client-kpi-card">
             <h3>Personal en Ruta Hoy</h3>
@@ -207,18 +198,10 @@ const ClientPortal = ({ usuario, onLogout }) => {
 
       <style jsx>{`
         .client-portal {
-          min-height: 100vh;
-          background-color: var(--kapital-bg);
-          color: var(--kapital-text-primary);
-        }
-        .client-header {
-          background-color: var(--kapital-surface);
-          padding: 20px 30px;
-          border-bottom: 1px solid var(--kapital-border);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+          padding: 20px;
+          color: var(--text);
         }
         .client-content {
-          padding: 30px;
           max-width: 1200px;
           margin: 0 auto;
         }
