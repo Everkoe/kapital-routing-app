@@ -436,9 +436,9 @@ async def get_all_users(email: str):
     lista_usuarios = []
     for k, v in usuarios_db.items():
         lista_usuarios.append({
-            "email": v["email"],
-            "nombre": v["nombre"],
-            "rol": v["rol"],
+            "email": v.get("identifier", k),
+            "nombre": v.get("nombre", "Usuario"),
+            "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
             "perfil_conductor": v.get("perfil_conductor", None)
         })
