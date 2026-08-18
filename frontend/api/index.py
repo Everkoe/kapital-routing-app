@@ -288,7 +288,7 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.email in usuarios_db:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
-    ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones"]
+    ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones", "Cliente"]
     rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Programador de rutas"
     
     # Si es el primer usuario, se aprueba automáticamente como Admin
@@ -301,6 +301,7 @@ async def register_user(usuario: UsuarioRegistro):
         "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id,
+        "empresa_id": usuario.empresa_id,
         "avatar": usuario.avatar,
         "estado": estado
     }

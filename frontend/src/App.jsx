@@ -111,9 +111,13 @@ const PantallaAuth = ({ onLogin }) => {
                     <option>Administración</option>
                     <option>Conductor</option>
                     <option>Gerente de Operaciones</option>
+                    <option>Cliente</option>
                     </select>
                     {formData.rol === 'Conductor' && (
                       <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
+                    )}
+                    {formData.rol === 'Cliente' && (
+                      <input className="auth-input" name="empresa_id" type="text" placeholder="ID de Empresa (Ej. GLOBO_AZUL)" onChange={handleInputChange} required />
                     )}
                   </>
                 )}
