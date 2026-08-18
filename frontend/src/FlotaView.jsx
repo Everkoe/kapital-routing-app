@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import './App.css';
 
-const FlotaView = () => {
+const FlotaView = ({ usuario }) => {
+  const isCliente = usuario?.rol === 'Cliente';
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -155,7 +156,7 @@ const FlotaView = () => {
         <div style={{ display: 'flex', gap: '10px' }}>
           <button className="btn-secondary" onClick={handleExport} style={{ backgroundColor: '#10b981', color: 'white', border: 'none' }}>⬇️ Exportar Excel</button>
           <button className="btn-secondary" onClick={fetchFlota}>Actualizar</button>
-          <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>
+          {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>}
         </div>
       </div>
       
@@ -166,14 +167,14 @@ const FlotaView = () => {
       <table className="flota-table">
         <thead>
           <tr>
-            <th>Unidad (Placa)</th>
-            <th>Conductor</th>
-            <th>Tipo / Cap.</th>
+            <th>{isCliente ? 'PADRON' : 'Unidad (Placa)'}</th>
+            <th>{isCliente ? 'NAME' : 'Conductor'}</th>
+            {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
             <th>T.U.C (ATU)</th>
             <th>Licencia MTC</th>
-            <th>Acciones</th>
+            {!isCliente && <th>Acciones</th>}
           </tr>
         </thead>
         <tbody>
@@ -188,17 +189,19 @@ const FlotaView = () => {
               <tr key={vehiculo.placa || index} className={hasDanger ? 'row-danger' : ''}>
                 <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
                 <td>{vehiculo.chofer}</td>
-                <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>
+                {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
                 <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
                 <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
                 <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>
                 <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc)}</td>
+                {!isCliente && (
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar">✏️</button>
                     <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar">🗑️</button>
                   </div>
                 </td>
+                )}
               </tr>
             );
           })}

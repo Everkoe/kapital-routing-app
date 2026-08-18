@@ -593,6 +593,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         {usuarioActual?.rol === 'Cliente' && (
           <>
             <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard Auditoría</a>
+            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
           </>
         )}
         
@@ -1319,7 +1320,7 @@ function App() {
     }
 
     switch (vistaActual) {
-      case 'flota': return <FlotaView />;
+      case 'flota': return <FlotaView usuario={usuarioActual} />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
       case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} />;
