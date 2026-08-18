@@ -302,7 +302,7 @@ const FlotaView = ({ usuario }) => {
                         { name: 'Revisión Técnica', file: conductorInfo.flota?.revision_doc || conductorInfo.usuario.perfil_conductor?.revisionTecnica }
                       ].map((doc, i) => (
                         <div key={i} className="doc-item">
-                          <span>{doc.name}: {doc.file ? <span className="text-green">✅ Subido</span> : <span style={{color: '#f59e0b', marginLeft: '5px'}}>⏳ Falta</span>}</span>
+                          <span>{doc.name}{!doc.file && <span style={{color: '#f59e0b', marginLeft: '5px'}}>⏳ Falta</span>}</span>
                           {doc.file && (
                             <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>👁️ Ver Archivo</button>
                           )}
