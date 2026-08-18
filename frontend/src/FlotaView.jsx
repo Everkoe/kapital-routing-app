@@ -248,7 +248,7 @@ const FlotaView = ({ usuario }) => {
       {/* Driver Profile Modal */}
       {isConductorModalOpen && (
         <div className="modal-overlay" onClick={closeConductorModal}>
-          <div className="modal-content conductor-profile" onClick={e => e.stopPropagation()}>
+          <div className="conductor-profile" onClick={e => e.stopPropagation()}>
             <button className="close-btn" onClick={closeConductorModal}>&times;</button>
             {isLoadingConductor ? (
               <div style={{ padding: '50px', textAlign: 'center' }}>
