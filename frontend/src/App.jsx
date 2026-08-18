@@ -12,6 +12,7 @@ import DriverPortal from './DriverPortal';
 import GerentePortal from './GerentePortal';
 import CopilotChat from './CopilotChat';
 import VistaReportes from './VistaReportes';
+import ClientPortal from './ClientPortal';
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -1345,6 +1346,15 @@ function App() {
       <>
         <Toaster position="top-right" />
         <GerentePortal usuario={usuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
+      </>
+    );
+  }
+
+  if (usuarioActual.rol === 'Cliente') {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <ClientPortal usuario={usuarioActual} onLogout={handleLogout} />
       </>
     );
   }
