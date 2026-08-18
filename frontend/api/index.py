@@ -792,6 +792,33 @@ async def get_rutas_cliente(empresa_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener rutas del cliente: {str(e)}")
 
+@app.get("/api/conductor/info/{unidad_id}")
+async def get_conductor_info(unidad_id: str):
+    await reload_db()
+    
+    conductor_user = None
+    for k, v in usuarios_db.items():
+        if v.get("unidad_id") == unidad_id and v.get("rol") == "Conductor":
+            conductor_user = v
+            break
+            
+    flota_info = conductores_db.get(unidad_id, {})
+    
+    if not conductor_user and not flota_info:
+        raise HTTPException(status_code=404, detail="Conductor/Unidad no encontrada")
+        
+    return {
+        "unidad_id": unidad_id,
+        "usuario": {
+            "nombre": conductor_user.get("nombre") if conductor_user else flota_info.get("chofer", "Desconocido"),
+            "email": conductor_user.get("email") if conductor_user else "",
+            "avatar": conductor_user.get("avatar") if conductor_user else None,
+            "perfil_conductor": conductor_user.get("perfil_conductor") if conductor_user else None
+        },
+        "flota": flota_info
+    }
+
+
 @app.post("/api/flota")
 async def add_flota(flota: FlotaRegistro):
     await reload_db()
