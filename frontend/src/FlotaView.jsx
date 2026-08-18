@@ -8,13 +8,42 @@ const FlotaView = ({ usuario }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Modal state
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
     placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '',
     soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
+
+  // Conductor Modal state
+  const [isConductorModalOpen, setIsConductorModalOpen] = useState(false);
+  const [conductorInfo, setConductorInfo] = useState(null);
+  const [isLoadingConductor, setIsLoadingConductor] = useState(false);
+
+  const handleOpenConductor = async (unidadId) => {
+    if (!unidadId) return;
+    setIsConductorModalOpen(true);
+    setIsLoadingConductor(true);
+    try {
+      const res = await fetch(`/api/conductor/info/${unidadId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setConductorInfo(data);
+      } else {
+        setConductorInfo(null);
+      }
+    } catch (e) {
+      console.error(e);
+      setConductorInfo(null);
+    } finally {
+      setIsLoadingConductor(false);
+    }
+  };
+
+  const closeConductorModal = () => {
+    setIsConductorModalOpen(false);
+    setConductorInfo(null);
+  };
 
   const fetchFlota = async () => {
     setIsLoading(true);
@@ -188,7 +217,15 @@ const FlotaView = ({ usuario }) => {
             return (
               <tr key={vehiculo.placa || index} className={hasDanger ? 'row-danger' : ''}>
                 <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
-                <td>{vehiculo.chofer}</td>
+                <td>
+                  <span
+                    style={{ cursor: 'pointer', textDecoration: 'underline', color: '#38bdf8' }}
+                    onClick={() => handleOpenConductor(vehiculo.placa)}
+                    title="Ver perfil del conductor"
+                  >
+                    {vehiculo.chofer}
+                  </span>
+                </td>
                 {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
                 <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
                 <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
@@ -207,6 +244,82 @@ const FlotaView = ({ usuario }) => {
           })}
         </tbody>
       </table>
+
+      {/* Driver Profile Modal */}
+      {isConductorModalOpen && (
+        <div className="modal-overlay" onClick={closeConductorModal}>
+          <div className="modal-content conductor-profile" onClick={e => e.stopPropagation()}>
+            <button className="close-btn" onClick={closeConductorModal}>&times;</button>
+            {isLoadingConductor ? (
+              <div style={{ padding: '50px', textAlign: 'center' }}>
+                <div className="loading-spinner" style={{ fontSize: '2rem', animation: 'spin 1s linear infinite' }}>⚙️</div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <p>Cargando perfil del conductor...</p>
+              </div>
+            ) : conductorInfo ? (
+              <div className="profile-layout">
+                <div className="profile-left">
+                  <div className="driver-photo">
+                    {conductorInfo.usuario.avatar ? (
+                      <img src={conductorInfo.usuario.avatar} alt="Conductor" />
+                    ) : (
+                      <div className="avatar-placeholder">👤</div>
+                    )}
+                  </div>
+                  <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
+                  <h3 className="driver-name">{conductorInfo.usuario.nombre.toUpperCase()}</h3>
+                </div>
+                <div className="profile-right">
+                  <div className="vehicle-photo">
+                    <img src="https://images.unsplash.com/photo-1619682817481-e994891cd1f5?auto=format&fit=crop&q=80&w=1600" alt="Vehículo" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                  </div>
+                  <div className="info-grid">
+                    <div className="info-section">
+                      <h4>Información del conductor</h4>
+                      <p><strong>DNI/Documento:</strong> {conductorInfo.usuario.perfil_conductor?.tipoDoc || 'DNI'} {conductorInfo.usuario.perfil_conductor?.numDoc || 'No registrado'}</p>
+                      <p><strong>Fecha de Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || 'No registrado'}</p>
+                      <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || 'No registrado'}</p>
+                      <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || 'No registrado'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
+                    </div>
+                    <div className="info-section">
+                      <h4>Información del vehículo</h4>
+                      <p><strong>Marca y Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || conductorInfo.flota?.tipo || 'Vehículo'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
+                      <p><strong>Año y Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || 'N/A'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || 'N/A'}</p>
+                      <p><strong>Placa:</strong> {conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
+                      <p><strong>Capacidad:</strong> {conductorInfo.flota?.capacidad || 15} pasajeros</p>
+                    </div>
+                  </div>
+                  <div className="docs-section">
+                    <h4>Documentación</h4>
+                    <div className="docs-grid">
+                      {[
+                        { name: 'Comprobante de domicilio', file: conductorInfo.usuario.perfil_conductor?.comprobanteDomicilio },
+                        { name: 'Licencia de Conducir', file: conductorInfo.usuario.perfil_conductor?.licenciaConducir },
+                        { name: 'Récord de Conductor', file: conductorInfo.usuario.perfil_conductor?.recordConductor },
+                        { name: 'Antecedentes', file: conductorInfo.usuario.perfil_conductor?.antecedentesPenales },
+                        { name: 'Tarjeta de Propiedad', file: conductorInfo.flota?.tarjeta_propiedad || conductorInfo.usuario.perfil_conductor?.tarjetaPropiedad },
+                        { name: 'SOAT', file: conductorInfo.flota?.soat_doc || conductorInfo.usuario.perfil_conductor?.soat },
+                        { name: 'Revisión Técnica', file: conductorInfo.flota?.revision_doc || conductorInfo.usuario.perfil_conductor?.revisionTecnica }
+                      ].map((doc, i) => (
+                        <div key={i} className="doc-item">
+                          <span>{doc.name}: {doc.file ? <span className="text-green">✅ Subido</span> : <span style={{color: '#f59e0b', marginLeft: '5px'}}>⏳ Falta</span>}</span>
+                          {doc.file && (
+                            <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>👁️ Ver Archivo</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '50px', textAlign: 'center' }}>
+                <p className="error-message">No se pudo cargar la información del conductor.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay">
@@ -297,6 +410,93 @@ const FlotaView = ({ usuario }) => {
         </div>
       )}
       <style jsx>{`
+        /* Modal Profile CSS */
+        .conductor-profile {
+          background: #1a1a24; border-radius: 16px; padding: 30px;
+          width: 90%; max-width: 1000px; max-height: 90vh; overflow-y: auto;
+          position: relative; color: #fff;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+        .close-btn {
+          position: absolute; top: 15px; right: 20px;
+          background: transparent; border: none; color: #fff; font-size: 24px; cursor: pointer;
+          opacity: 0.7; transition: opacity 0.2s;
+        }
+        .close-btn:hover { opacity: 1; }
+        
+        .profile-layout {
+          display: flex; gap: 30px; margin-top: 10px;
+        }
+        @media (max-width: 768px) {
+          .profile-layout { flex-direction: column; }
+        }
+        .profile-left {
+          flex: 0 0 280px; text-align: center;
+        }
+        .driver-photo {
+          width: 100%; aspect-ratio: 9/16; background: #2a2a3c; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center; overflow: hidden;
+          margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.05);
+        }
+        .driver-photo img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-placeholder { font-size: 80px; opacity: 0.5; }
+        .driver-id { font-size: 1.2rem; margin: 0 0 5px 0; color: #38bdf8; font-weight: 600; letter-spacing: 1px; }
+        .driver-name { font-size: 1.4rem; margin: 0; opacity: 0.9; }
+        
+        .profile-right {
+          flex: 1; display: flex; flex-direction: column; gap: 20px;
+        }
+        .vehicle-photo {
+          width: 100%; aspect-ratio: 21/9; background: #2a2a3c; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center; overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .vehicle-placeholder { text-align: center; font-size: 24px; opacity: 0.5; }
+        
+        .info-grid {
+          display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+        }
+        @media (max-width: 500px) {
+          .info-grid { grid-template-columns: 1fr; }
+        }
+        .info-section {
+          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .info-section h4 {
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+        }
+        .info-section p { margin: 8px 0; font-size: 0.9rem; opacity: 0.8; }
+        .info-section strong { color: #f4f4f5; font-weight: 600; opacity: 1; }
+        
+        .docs-section {
+          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .docs-section h4 {
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+        }
+        .docs-grid {
+          display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+        }
+        @media (max-width: 500px) {
+          .docs-grid { grid-template-columns: 1fr; }
+        }
+        .doc-item {
+          display: flex; justify-content: space-between; align-items: center;
+          background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px;
+          font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.03);
+        }
+        .text-green { color: #10b981; font-weight: 600; margin-left: 5px; }
+        .btn-view-doc {
+          background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.3); color: #38bdf8;
+          padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;
+        }
+        .btn-view-doc:hover {
+          background: rgba(56,189,248,0.2);
+        }
+
         .btn-icon {
           background: transparent;
           border: none;
