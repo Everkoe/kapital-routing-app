@@ -592,7 +592,6 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         
         {usuarioActual?.rol === 'Cliente' && (
           <>
-            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Dashboard Auditoría</a>
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
           </>
         )}
@@ -1328,7 +1327,7 @@ function App() {
       case 'dashboard':
       default:
         if (usuarioActual?.rol === 'Cliente') {
-          return <ClientPortal usuario={usuarioActual} onLogout={handleLogout} />;
+          return <FlotaView usuario={usuarioActual} />;
         }
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }
