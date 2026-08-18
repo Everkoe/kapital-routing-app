@@ -1,17 +1,49 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import './App.css';
 
-const FlotaView = () => {
+const FlotaView = ({ usuario }) => {
+  const isCliente = usuario?.rol === 'Cliente';
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Modal state
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
-    placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: ''
+    placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '',
+    soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
+
+  // Conductor Modal state
+  const [isConductorModalOpen, setIsConductorModalOpen] = useState(false);
+  const [conductorInfo, setConductorInfo] = useState(null);
+  const [isLoadingConductor, setIsLoadingConductor] = useState(false);
+
+  const handleOpenConductor = async (unidadId) => {
+    if (!unidadId) return;
+    setIsConductorModalOpen(true);
+    setIsLoadingConductor(true);
+    try {
+      const res = await fetch(`/api/conductor/info/${unidadId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setConductorInfo(data);
+      } else {
+        setConductorInfo(null);
+      }
+    } catch (e) {
+      console.error(e);
+      setConductorInfo(null);
+    } finally {
+      setIsLoadingConductor(false);
+    }
+  };
+
+  const closeConductorModal = () => {
+    setIsConductorModalOpen(false);
+    setConductorInfo(null);
+  };
 
   const fetchFlota = async () => {
     setIsLoading(true);
@@ -31,6 +63,15 @@ const FlotaView = () => {
     fetchFlota();
   }, []);
 
+  useEffect(() => {
+    if (showModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [showModal]);
+
   const getStatus = (dateString) => {
     if (!dateString) return { status: 'unknown', text: 'N/A' };
     const today = new Date('2026-07-27T00:00:00');
@@ -47,12 +88,19 @@ const FlotaView = () => {
     }
   };
 
-  const renderBadge = (dateString) => {
+  const renderBadge = (dateString, docUrl) => {
     const { status, text } = getStatus(dateString);
     return (
-      <div className={`status-badge status-${status}`} title={dateString}>
-        <span className="dot"></span>
-        {text}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className={`status-badge status-${status}`} title={dateString}>
+          <span className="dot"></span>
+          {text}
+        </div>
+        {docUrl && (
+          <a href={docUrl} target="_blank" rel="noreferrer" title="Ver Documento Adjunto" style={{ textDecoration: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>
+            📎
+          </a>
+        )}
       </div>
     );
   };
@@ -75,9 +123,35 @@ const FlotaView = () => {
   };
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setShowModal(true);
+  };
+
+  const handleFileUpload = (e, field) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFormData(prev => ({ ...prev, [field]: event.target.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleExport = () => {
+    const headers = ['UNIDAD (PLACA)', 'CONDUCTOR', 'TIPO / CAP.', 'SOAT', 'REV. TECNICA', 'T.U.C (ATU)', 'LICENCIA MTC'];
+    const rows = flota.map(v => [
+      v.placa, v.chofer, `${v.tipo} (${v.capacidad} pax)`,
+      v.soat, v.revision, v.atu, v.licencia
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + 
+      [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Matriz_Legal_Flota.csv");
+    document.body.appendChild(link);
+    link.click();
   };
 
   const handleSubmit = async (e) => {
@@ -109,8 +183,9 @@ const FlotaView = () => {
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>Control de Conformidad Legal y Flota</h2>
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn-secondary" onClick={handleExport} style={{ backgroundColor: '#10b981', color: 'white', border: 'none' }}>⬇️ Exportar Excel</button>
           <button className="btn-secondary" onClick={fetchFlota}>Actualizar</button>
-          <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>
+          {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>}
         </div>
       </div>
       
@@ -121,14 +196,14 @@ const FlotaView = () => {
       <table className="flota-table">
         <thead>
           <tr>
-            <th>Unidad (Placa)</th>
-            <th>Conductor</th>
-            <th>Tipo / Cap.</th>
+            <th>{isCliente ? 'PADRON' : 'Unidad (Placa)'}</th>
+            <th>{isCliente ? 'NAME' : 'Conductor'}</th>
+            {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
             <th>T.U.C (ATU)</th>
             <th>Licencia MTC</th>
-            <th>Acciones</th>
+            {!isCliente && <th>Acciones</th>}
           </tr>
         </thead>
         <tbody>
@@ -142,30 +217,117 @@ const FlotaView = () => {
             return (
               <tr key={vehiculo.placa || index} className={hasDanger ? 'row-danger' : ''}>
                 <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
-                <td>{vehiculo.chofer}</td>
-                <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>
-                <td>{renderBadge(vehiculo.soat)}</td>
-                <td>{renderBadge(vehiculo.revision)}</td>
-                <td>{renderBadge(vehiculo.atu)}</td>
-                <td>{renderBadge(vehiculo.licencia)}</td>
+                <td>
+                  <span
+                    style={{ cursor: 'pointer', textDecoration: 'underline', color: '#38bdf8' }}
+                    onClick={() => handleOpenConductor(vehiculo.placa)}
+                    title="Ver perfil del conductor"
+                  >
+                    {vehiculo.chofer}
+                  </span>
+                </td>
+                {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
+                <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
+                <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
+                <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>
+                <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc)}</td>
+                {!isCliente && (
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar">✏️</button>
                     <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar">🗑️</button>
                   </div>
                 </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
 
+      {/* Driver Profile Modal */}
+      {isConductorModalOpen && (
+        <div className="modal-overlay" onClick={closeConductorModal}>
+          <div className="conductor-profile" onClick={e => e.stopPropagation()}>
+            <button className="close-btn" onClick={closeConductorModal}>&times;</button>
+            {isLoadingConductor ? (
+              <div style={{ padding: '50px', textAlign: 'center' }}>
+                <div className="loading-spinner" style={{ fontSize: '2rem', animation: 'spin 1s linear infinite' }}>⚙️</div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <p>Cargando perfil del conductor...</p>
+              </div>
+            ) : conductorInfo ? (
+              <div className="profile-layout">
+                <div className="profile-left">
+                  <div className="driver-photo">
+                    {conductorInfo.usuario.avatar ? (
+                      <img src={conductorInfo.usuario.avatar} alt="Conductor" />
+                    ) : (
+                      <div className="avatar-placeholder">👤</div>
+                    )}
+                  </div>
+                  <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
+                  <h3 className="driver-name">{conductorInfo.usuario.nombre.toUpperCase()}</h3>
+                </div>
+                <div className="profile-right">
+                  <div className="vehicle-photo">
+                    <img src="https://images.unsplash.com/photo-1619682817481-e994891cd1f5?auto=format&fit=crop&q=80&w=1600" alt="Vehículo" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                  </div>
+                  <div className="info-grid">
+                    <div className="info-section">
+                      <h4>Información del conductor</h4>
+                      <p><strong>DNI/Documento:</strong> {conductorInfo.usuario.perfil_conductor?.tipoDoc || 'DNI'} {conductorInfo.usuario.perfil_conductor?.numDoc || 'No registrado'}</p>
+                      <p><strong>Fecha de Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || 'No registrado'}</p>
+                      <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || 'No registrado'}</p>
+                      <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || 'No registrado'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
+                    </div>
+                    <div className="info-section">
+                      <h4>Información del vehículo</h4>
+                      <p><strong>Marca y Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || conductorInfo.flota?.tipo || 'Vehículo'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
+                      <p><strong>Año y Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || 'N/A'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || 'N/A'}</p>
+                      <p><strong>Placa:</strong> {conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
+                      <p><strong>Capacidad:</strong> {conductorInfo.flota?.capacidad || 15} pasajeros</p>
+                    </div>
+                  </div>
+                  <div className="docs-section">
+                    <h4>Documentación</h4>
+                    <div className="docs-grid">
+                      {[
+                        { name: 'Comprobante de domicilio', file: conductorInfo.usuario.perfil_conductor?.comprobanteDomicilio },
+                        { name: 'Licencia de Conducir', file: conductorInfo.usuario.perfil_conductor?.licenciaConducir },
+                        { name: 'Récord de Conductor', file: conductorInfo.usuario.perfil_conductor?.recordConductor },
+                        { name: 'Antecedentes', file: conductorInfo.usuario.perfil_conductor?.antecedentesPenales },
+                        { name: 'Tarjeta de Propiedad', file: conductorInfo.flota?.tarjeta_propiedad || conductorInfo.usuario.perfil_conductor?.tarjetaPropiedad },
+                        { name: 'SOAT', file: conductorInfo.flota?.soat_doc || conductorInfo.usuario.perfil_conductor?.soat },
+                        { name: 'Revisión Técnica', file: conductorInfo.flota?.revision_doc || conductorInfo.usuario.perfil_conductor?.revisionTecnica }
+                      ].map((doc, i) => (
+                        <div key={i} className="doc-item">
+                          <span>{doc.name}{!doc.file && <span style={{color: '#f59e0b', marginLeft: '5px'}}>⏳ Falta</span>}</span>
+                          {doc.file && (
+                            <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>👁️ Ver Archivo</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '50px', textAlign: 'center' }}>
+                <p className="error-message">No se pudo cargar la información del conductor.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-content">
             <h3>{isEditing ? 'Editar Unidad' : 'Registrar Nueva Unidad'}</h3>
             <form onSubmit={handleSubmit} className="flota-form">
-              <div className="form-row">
+              <div className="form-scroll-area">
+                <div className="form-row">
                 <label>Placa/ID</label>
                 <input required disabled={isEditing} value={formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
               </div>
@@ -188,19 +350,56 @@ const FlotaView = () => {
               </div>
               <div className="form-row">
                 <label>Vencimiento SOAT</label>
-                <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
+                      📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Revisión</label>
-                <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
+                      📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento ATU</label>
-                <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
+                      📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
+                  </div>
+                </div>
               </div>
               <div className="form-row">
                 <label>Vencimiento Licencia</label>
-                <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <label className="custom-file-upload">
+                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
+                      📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
+                    </label>
+                    {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}
+                  </div>
+                </div>
+              </div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
@@ -211,6 +410,93 @@ const FlotaView = () => {
         </div>
       )}
       <style jsx>{`
+        /* Modal Profile CSS */
+        .conductor-profile {
+          background: #1a1a24; border-radius: 16px; padding: 30px;
+          width: 90%; max-width: 1000px; max-height: 90vh; overflow-y: auto;
+          position: relative; color: #fff;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+        .close-btn {
+          position: absolute; top: 15px; right: 20px;
+          background: transparent; border: none; color: #fff; font-size: 24px; cursor: pointer;
+          opacity: 0.7; transition: opacity 0.2s;
+        }
+        .close-btn:hover { opacity: 1; }
+        
+        .profile-layout {
+          display: flex; gap: 30px; margin-top: 10px;
+        }
+        @media (max-width: 768px) {
+          .profile-layout { flex-direction: column; }
+        }
+        .profile-left {
+          flex: 0 0 280px; text-align: center;
+        }
+        .driver-photo {
+          width: 100%; aspect-ratio: 9/16; background: #2a2a3c; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center; overflow: hidden;
+          margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.05);
+        }
+        .driver-photo img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar-placeholder { font-size: 80px; opacity: 0.5; }
+        .driver-id { font-size: 1.2rem; margin: 0 0 5px 0; color: #38bdf8; font-weight: 600; letter-spacing: 1px; }
+        .driver-name { font-size: 1.4rem; margin: 0; opacity: 0.9; }
+        
+        .profile-right {
+          flex: 1; display: flex; flex-direction: column; gap: 20px;
+        }
+        .vehicle-photo {
+          width: 100%; aspect-ratio: 21/9; background: #2a2a3c; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center; overflow: hidden;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .vehicle-placeholder { text-align: center; font-size: 24px; opacity: 0.5; }
+        
+        .info-grid {
+          display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+        }
+        @media (max-width: 500px) {
+          .info-grid { grid-template-columns: 1fr; }
+        }
+        .info-section {
+          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .info-section h4 {
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+        }
+        .info-section p { margin: 8px 0; font-size: 0.9rem; opacity: 0.8; }
+        .info-section strong { color: #f4f4f5; font-weight: 600; opacity: 1; }
+        
+        .docs-section {
+          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+        .docs-section h4 {
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+        }
+        .docs-grid {
+          display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+        }
+        @media (max-width: 500px) {
+          .docs-grid { grid-template-columns: 1fr; }
+        }
+        .doc-item {
+          display: flex; justify-content: space-between; align-items: center;
+          background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px;
+          font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.03);
+        }
+        .text-green { color: #10b981; font-weight: 600; margin-left: 5px; }
+        .btn-view-doc {
+          background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.3); color: #38bdf8;
+          padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;
+        }
+        .btn-view-doc:hover {
+          background: rgba(56,189,248,0.2);
+        }
+
         .btn-icon {
           background: transparent;
           border: none;
@@ -234,13 +520,56 @@ const FlotaView = () => {
           backdrop-filter: blur(4px);
         }
         .modal-content {
-          background: var(--bg-card);
+          background: var(--kapital-card-bg);
           padding: 30px;
           border-radius: 12px;
           width: 90%;
           max-width: 500px;
           box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--kapital-border);
+          display: flex;
+          flex-direction: column;
+        }
+        .form-scroll-area {
+          max-height: 60vh;
+          overflow-y: auto;
+          padding-right: 15px;
+          margin-bottom: 20px;
+        }
+        .form-scroll-area::-webkit-scrollbar {
+          width: 6px;
+        }
+        .form-scroll-area::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .form-scroll-area::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 4px;
+        }
+        .form-scroll-area::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+        .custom-file-upload {
+          display: inline-block;
+          padding: 8px 12px;
+          border-radius: 6px;
+          border: 1px dashed var(--kapital-border);
+          background: #f8fafc;
+          color: var(--text-secondary);
+          cursor: pointer;
+          font-size: 0.85rem;
+          font-weight: 500;
+          transition: all 0.2s;
+        }
+        .custom-file-upload:hover {
+          background: var(--kapital-light-blue);
+          color: var(--kapital-blue-deep);
+          border-color: var(--kapital-blue-deep);
+        }
+        .modal-content h3 {
+          margin-top: 0;
+          color: var(--kapital-text-primary);
+          font-weight: 700;
         }
         .flota-form {
           display: flex;
@@ -251,24 +580,31 @@ const FlotaView = () => {
         .form-row {
           display: flex;
           flex-direction: column;
-          gap: 5px;
+          gap: 6px;
         }
         .form-row label {
           font-size: 0.9rem;
-          color: var(--text-secondary);
+          font-weight: 600;
+          color: var(--kapital-text-secondary);
         }
         .form-row input, .form-row select {
-          padding: 10px;
-          border-radius: 6px;
-          border: 1px solid var(--border-color);
-          background: var(--bg-main);
-          color: var(--text-primary);
+          padding: 10px 12px;
+          border-radius: 8px;
+          border: 1px solid var(--kapital-border);
+          background: var(--kapital-bg);
+          color: var(--kapital-text-primary);
+          font-size: 0.95rem;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .form-row input:focus, .form-row select:focus {
+          border-color: var(--kapital-nav-link-active);
         }
         .modal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 10px;
-          margin-top: 20px;
+          gap: 12px;
+          margin-top: 25px;
         }
       `}</style>
     </div>
