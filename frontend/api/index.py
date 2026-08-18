@@ -80,6 +80,16 @@ async def ensure_db_loaded():
                         "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"}
                     }
                 conductores_db = flota
+                if "TELEPERFORMANCE" not in usuarios_db:
+                    usuarios_db["TELEPERFORMANCE"] = {
+                        "identifier": "TELEPERFORMANCE",
+                        "password": "1234",
+                        "nombre": "Cliente Teleperformance",
+                        "rol": "Cliente",
+                        "empresa_id": "TELEPERFORMANCE",
+                        "estado": "Activo"
+                    }
+
                 db_loaded = True
     except Exception as e:
         print(f"Error loading from Supabase: {e}")
@@ -103,6 +113,16 @@ async def reload_db():
                 
                 # Cargar notificaciones
                 notifications_db = usuarios_db.pop("__notifications__", [])
+                
+                if "TELEPERFORMANCE" not in usuarios_db:
+                    usuarios_db["TELEPERFORMANCE"] = {
+                        "identifier": "TELEPERFORMANCE",
+                        "password": "1234",
+                        "nombre": "Cliente Teleperformance",
+                        "rol": "Cliente",
+                        "empresa_id": "TELEPERFORMANCE",
+                        "estado": "Activo"
+                    }
                 
                 db_loaded = True
     except Exception as e:
