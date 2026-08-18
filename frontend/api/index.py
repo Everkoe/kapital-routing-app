@@ -362,6 +362,7 @@ async def get_profile(email: str):
         "nombre": user["nombre"],
         "rol": user["rol"],
         "unidad_id": user.get("unidad_id"),
+        "empresa_id": user.get("empresa_id"),
         "avatar": user.get("avatar"),
         "estado": user.get("estado", "Activo"),
         "profileComplete": "perfil_conductor" in user
@@ -386,7 +387,16 @@ async def update_profile(update_data: UsuarioUpdate):
     if update_data.rol: user["rol"] = update_data.rol
 
     await persist_users_only()
-    return {"message": "Perfil actualizado exitosamente."}
+    return {
+        "email": user["email"],
+        "nombre": user["nombre"],
+        "rol": user["rol"],
+        "unidad_id": user.get("unidad_id"),
+        "empresa_id": user.get("empresa_id"),
+        "avatar": user.get("avatar"),
+        "estado": user.get("estado", "Activo"),
+        "profileComplete": "perfil_conductor" in user
+    }
 
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
