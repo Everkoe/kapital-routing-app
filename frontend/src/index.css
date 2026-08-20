@@ -38,31 +38,6 @@
   }
 }
 
-:root[data-theme="dark"],
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --text-primary: #f3f4f6;
-    --text-secondary: #9ca3af;
-    --bg: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-hover: #334155;
-    --border: #334155;
-    --border-color: #334155;
-    --code-bg: #1f2028;
-    
-    /* Kapital Brand Colors (Teal/Green) */
-    --primary-color: #14b8a6;
-    --accent: #2dd4bf;
-    --accent-bg: rgba(20, 184, 166, 0.15);
-    --accent-border: rgba(20, 184, 166, 0.5);
-    
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow: rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-    color-scheme: dark;
-  }
-}
 
 :root[data-theme="dark"] {
     --text: #9ca3af;
