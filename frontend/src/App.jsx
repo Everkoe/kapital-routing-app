@@ -248,7 +248,7 @@ const RoleBadge = ({ rol }) => {
   const colors = {
     "Administrador": ['#3b82f6','#3b82f622'], // Legacy support
     "Administración": ['#3b82f6','#3b82f622'],
-    "Programador de rutas": ['#6366f1','rgba(99,102,241,0.15)'],
+    "Programador de rutas": ['#0ea5e9','rgba(14,165,233,0.15)'],
     "Conductor": ['#10b981','rgba(16,185,129,0.15)'],
     "Gerente de Operaciones": ['#f59e0b','rgba(245,158,11,0.15)']
   };
@@ -278,6 +278,70 @@ const UsersManagementTab = ({ usuarioActual }) => {
   const [actionLoading, setActionLoading] = useState(null);
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
+  
+  // CRM Features
+  const [activeTab, setActiveTab] = useState('Pendientes');
+  const [activeRole, setActiveRole] = useState('Todos');
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [pageSizeDropdownOpen, setPageSizeDropdownOpen] = useState(false);
+  const roleDropdownRef = React.useRef(null);
+  const pageSizeDropdownRef = React.useRef(null);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, activeRole, pageSize]);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (roleDropdownRef.current && !roleDropdownRef.current.contains(e.target)) {
+        setRoleDropdownOpen(false);
+      }
+      if (pageSizeDropdownRef.current && !pageSizeDropdownRef.current.contains(e.target)) {
+        setPageSizeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const ROLE_OPTIONS = [
+    { key: 'Todos', label: 'Todos los roles' },
+    { key: 'Administración', label: 'Administración' },
+    { key: 'Gerente de Operaciones', label: 'Gerencia' },
+    { key: 'Programador de rutas', label: 'Programador de Rutas' },
+    { key: 'Conductor', label: 'Conductor' },
+    { key: 'Cliente', label: 'Cliente B2B' },
+  ];
+  
+  const formatTimeAgo = (isoDate) => {
+    if (!isoDate) return 'Nunca';
+    const date = new Date(isoDate);
+    const diff = Math.floor((new Date() - date) / 1000);
+    if (diff < 60) return 'Hace unos segundos';
+    if (diff < 3600) return `Hace ${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `Hace ${Math.floor(diff / 3600)} horas`;
+    if (diff < 172800) return 'Ayer';
+    return date.toLocaleDateString();
+  };
+
+  const filteredUsers = users.filter(u => {
+    let matchesTab = false;
+    if (activeTab === 'Todos') matchesTab = true;
+    else if (activeTab === 'Pendientes') matchesTab = u.estado.includes('Pendiente');
+    else if (activeTab === 'Rechazados') matchesTab = u.estado === 'Rechazado' || u.estado === 'Inactivo';
+    else matchesTab = u.estado === 'Activo';
+
+    let matchesRole = false;
+    if (activeRole === 'Todos') matchesRole = true;
+    else matchesRole = u.rol === activeRole || (u.rol === 'Administrador' && activeRole === 'Administración'); // Legacy support
+
+    return matchesTab && matchesRole;
+  });
+
+  const totalPages = Math.ceil(filteredUsers.length / pageSize);
+  const paginatedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const fetchUsers = async () => {
     try {
@@ -422,9 +486,11 @@ const UsersManagementTab = ({ usuarioActual }) => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
                 <div style={{
                   width: '34px', height: '34px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)', fontSize: '1.1rem',
-                  boxShadow: '0 4px 12px rgba(99,102,241,0.35)',
-                }}>🛡️</div>
+                  background: 'linear-gradient(135deg, #0ea5e9, var(--primary-color))', fontSize: '1.1rem',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.15)',
+                }}>
+                  <Shield size={18} color="white" strokeWidth={2.5} />
+                </div>
                 <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   Gestión de Accesos B2B
                 </h2>
@@ -458,10 +524,142 @@ const UsersManagementTab = ({ usuarioActual }) => {
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
+              {/* Filters Bar */}
+              <style>{`
+                .crm-tab-btn {
+                  background: transparent;
+                  border: none;
+                  padding: 8px 18px;
+                  font-size: 0.88rem;
+                  font-weight: 600;
+                  border-radius: 8px;
+                  cursor: pointer;
+                  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+                  color: var(--text-secondary);
+                  letter-spacing: 0.02em;
+                }
+                .crm-tab-btn.active {
+                  background: var(--primary-color);
+                  color: #fff;
+                  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+                }
+                .crm-tab-btn:not(.active):hover {
+                  background: var(--border-color);
+                  color: var(--text-primary);
+                }
+                .role-pill {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+                  padding: 6px 14px;
+                  border-radius: 20px;
+                  font-size: 0.8rem;
+                  font-weight: 600;
+                  cursor: pointer;
+                  border: 1.5px solid var(--border-color);
+                  background: transparent;
+                  color: var(--text-secondary);
+                  transition: all 0.2s;
+                }
+                .role-pill:hover {
+                  border-color: var(--primary-color);
+                  color: var(--text-primary);
+                }
+                .role-pill.active {
+                  background: var(--accent-bg);
+                  border-color: var(--primary-color);
+                  color: var(--primary-color);
+                }
+              `}</style>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--border-color)' }}>
+                {/* Status Tabs */}
+                <div style={{
+                  display: 'flex', gap: '4px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px', padding: '4px'
+                }}>
+                  {[
+                    { key: 'Pendientes', label: 'Pendientes', dot: '#f59e0b' },
+                    { key: 'Activos', label: 'Activos', dot: '#10b981' },
+                    { key: 'Rechazados', label: 'Rechazados', dot: '#ef4444' },
+                    { key: 'Todos', label: 'Todos', dot: null },
+                  ].map(({ key, label, dot }) => (
+                    <button key={key}
+                      className={`crm-tab-btn${activeTab === key ? ' active' : ''}`}
+                      onClick={() => setActiveTab(key)}>
+                      {dot && <span style={{
+                        display: 'inline-block', width: '7px', height: '7px',
+                        borderRadius: '50%', background: activeTab === key ? 'rgba(255,255,255,0.8)' : dot,
+                        marginRight: '5px', flexShrink: 0,
+                      }} />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Role Dropdown */}
+                <div ref={roleDropdownRef} style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setRoleDropdownOpen(o => !o)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '8px',
+                      background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                      color: 'var(--text-primary)', borderRadius: '8px',
+                      padding: '8px 14px', fontSize: '0.875rem', fontWeight: 600,
+                      cursor: 'pointer', transition: 'border-color 0.2s, box-shadow 0.2s',
+                      boxShadow: roleDropdownOpen ? '0 0 0 2px var(--accent-border)' : 'none',
+                      borderColor: roleDropdownOpen ? 'var(--primary-color)' : 'var(--border-color)',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Rol</span>
+                    <span style={{ width: '1px', height: '14px', background: 'var(--border-color)', display: 'inline-block' }} />
+                    <span style={{ color: activeRole !== 'Todos' ? 'var(--primary-color)' : 'var(--text-primary)' }}>
+                      {ROLE_OPTIONS.find(r => r.key === activeRole)?.label || 'Todos los roles'}
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ marginLeft: '2px', transition: 'transform 0.2s', transform: roleDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', opacity: 0.5 }}>
+                      <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+
+                  {roleDropdownOpen && (
+                    <div style={{
+                      position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100,
+                      background: 'var(--bg)', border: '1px solid var(--border-color)',
+                      borderRadius: '10px', padding: '6px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+                      minWidth: '200px',
+                      animation: 'dropdownIn 0.15s ease-out',
+                    }}>
+                      <style>{`@keyframes dropdownIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }`}</style>
+                      {ROLE_OPTIONS.map(({ key, label }) => (
+                        <button key={key}
+                          onClick={() => { setActiveRole(key); setRoleDropdownOpen(false); }}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left',
+                            padding: '9px 12px', borderRadius: '7px', border: 'none',
+                            background: activeRole === key ? 'var(--accent-bg)' : 'transparent',
+                            color: activeRole === key ? 'var(--primary-color)' : 'var(--text-primary)',
+                            fontWeight: activeRole === key ? 700 : 500,
+                            fontSize: '0.875rem', cursor: 'pointer', transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={e => { if (activeRole !== key) e.target.style.background = 'var(--bg-secondary)'; }}
+                          onMouseLeave={e => { e.target.style.background = activeRole === key ? 'var(--accent-bg)' : 'transparent'; }}
+                        >
+                          {label}
+                          {activeRole === key && <span style={{ float: 'right', opacity: 0.7 }}>✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 6px' }}>
                 <thead>
                   <tr>
-                    {['Usuario', 'Correo Electrónico', 'Rol', 'Estado', 'Acciones'].map(h => (
+                    {['Usuario', 'Correo Electrónico', 'Rol', 'Última Conexión', 'Estado', 'Acciones'].map(h => (
                       <th key={h} style={{
                         padding: '8px 14px', fontSize: '10px', fontWeight: 700, letterSpacing: '1.2px',
                         textTransform: 'uppercase', color: 'var(--text-secondary)', textAlign: 'left',
@@ -471,25 +669,46 @@ const UsersManagementTab = ({ usuarioActual }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(u => (
+                  {filteredUsers.length === 0 ? (
+                     <tr>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '60px 20px' }}>
+                          <div style={{ fontSize: '3rem', marginBottom: '15px', opacity: 0.5 }}>📂</div>
+                          <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)', fontSize: '1.1rem' }}>No se encontraron usuarios</h4>
+                          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '300px', margin: '0 auto' }}>
+                            No hay registros que coincidan con los filtros seleccionados de "{activeTab}" y "{activeRole}".
+                          </p>
+                        </td>
+                     </tr>
+                  ) : paginatedUsers.map(u => (
                     <tr key={u.email}
                       style={{ borderRadius: '10px', transition: 'background 0.15s', cursor: 'default' }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <td style={{ padding: '13px 14px', borderRadius: '10px 0 0 10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {u.avatar ? (
+                            <img src={u.avatar} alt={u.nombre}
+                              style={{
+                                width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
+                                objectFit: 'cover',
+                                border: '2px solid var(--border-color)',
+                              }}
+                              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            />
+                          ) : null}
                           <div style={{
-                            width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'linear-gradient(135deg, var(--primary-color, #6366f1), #8b5cf6)',
+                            width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
+                            display: u.avatar ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'linear-gradient(135deg, #0d9488, #14b8a6)',
                             color: 'white', fontWeight: 700, fontSize: '0.88rem',
-                            boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
+                            border: '2px solid rgba(13,148,136,0.3)',
                           }}>{u.nombre?.charAt(0)?.toUpperCase() || '?'}</div>
                           <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{u.nombre}</span>
                         </div>
                       </td>
                       <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.86rem' }}>{u.email}</td>
                       <td style={{ padding: '13px 14px' }}><RoleBadge rol={u.rol} /></td>
+                      <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{formatTimeAgo(u.last_login)}</td>
                       <td style={{ padding: '13px 14px' }}><StatusBadge estado={u.estado} /></td>
                       <td style={{ padding: '13px 14px', borderRadius: '0 10px 10px 0' }}>
                         {actionLoading === u.email ? (
@@ -554,6 +773,92 @@ const UsersManagementTab = ({ usuarioActual }) => {
                 <div style={{ textAlign: 'center', padding: '56px 24px', color: 'var(--text-secondary)' }}>
                   <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>👥</div>
                   <p style={{ margin: 0, fontSize: '0.95rem' }}>No hay usuarios registrados aún.</p>
+                </div>
+              )}
+              {filteredUsers.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderTop: '1px solid var(--border-color)', marginTop: '10px' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Mostrando {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredUsers.length)} de {filteredUsers.length} usuarios
+                  </div>
+                  <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Filas por pág:</span>
+                      <div ref={pageSizeDropdownRef} style={{ position: 'relative' }}>
+                        <button 
+                          onClick={() => setPageSizeDropdownOpen(!pageSizeDropdownOpen)}
+                          style={{
+                            padding: '6px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                            color: 'var(--text-primary)', borderRadius: '6px', fontSize: '0.85rem', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '8px', minWidth: '65px', justifyContent: 'space-between',
+                            boxShadow: pageSizeDropdownOpen ? '0 0 0 2px var(--accent-border)' : 'none',
+                            transition: 'all 0.15s'
+                          }}
+                        >
+                          {pageSize}
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>▼</span>
+                        </button>
+                        {pageSizeDropdownOpen && (
+                          <div style={{
+                            position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, width: '100%', minWidth: '70px',
+                            background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                            borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', overflow: 'hidden', zIndex: 100,
+                            display: 'flex', flexDirection: 'column'
+                          }}>
+                            {[10, 50, 100].map(size => (
+                              <button key={size}
+                                onClick={() => { setPageSize(size); setPageSizeDropdownOpen(false); }}
+                                style={{
+                                  padding: '8px 12px', background: pageSize === size ? 'var(--accent-bg)' : 'transparent',
+                                  color: pageSize === size ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                  border: 'none', borderBottom: '1px solid rgba(255,255,255,0.02)', textAlign: 'left',
+                                  fontSize: '0.85rem', cursor: 'pointer', fontWeight: pageSize === size ? 600 : 500,
+                                  transition: 'background 0.15s'
+                                }}
+                                onMouseEnter={e => { if (pageSize !== size) e.target.style.background = 'rgba(255,255,255,0.03)'; }}
+                                onMouseLeave={e => { e.target.style.background = pageSize === size ? 'var(--accent-bg)' : 'transparent'; }}
+                              >
+                                {size}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        style={{ 
+                          padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-color)', 
+                          background: currentPage === 1 ? 'transparent' : 'var(--bg-secondary)', 
+                          color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-primary)', 
+                          cursor: currentPage === 1 ? 'not-allowed' : 'pointer', 
+                          opacity: currentPage === 1 ? 0.5 : 1, transition: 'all 0.15s',
+                          display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem'
+                        }}
+                        onMouseEnter={e => { if (currentPage !== 1) e.target.style.background = 'var(--bg-hover)'; }}
+                        onMouseLeave={e => { if (currentPage !== 1) e.target.style.background = 'var(--bg-secondary)'; }}
+                      >
+                        <span style={{ fontSize: '14px', lineHeight: 1 }}>«</span> Anterior
+                      </button>
+                      <button 
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages || totalPages === 0}
+                        style={{ 
+                          padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-color)', 
+                          background: (currentPage === totalPages || totalPages === 0) ? 'transparent' : 'var(--bg-secondary)', 
+                          color: (currentPage === totalPages || totalPages === 0) ? 'var(--text-muted)' : 'var(--text-primary)', 
+                          cursor: (currentPage === totalPages || totalPages === 0) ? 'not-allowed' : 'pointer', 
+                          opacity: (currentPage === totalPages || totalPages === 0) ? 0.5 : 1, transition: 'all 0.15s',
+                          display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem'
+                        }}
+                        onMouseEnter={e => { if (currentPage !== totalPages && totalPages !== 0) e.target.style.background = 'var(--bg-hover)'; }}
+                        onMouseLeave={e => { if (currentPage !== totalPages && totalPages !== 0) e.target.style.background = 'var(--bg-secondary)'; }}
+                      >
+                        Siguiente <span style={{ fontSize: '14px', lineHeight: 1 }}>»</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -820,7 +1125,7 @@ const KPIDashboard = ({ routes }) => {
         <KPICard title="Total Agentes" value={kpis.totalAgentes} color="#38bdf8" />
         <KPICard title="Flota Activa (Vehículos)" value={kpis.flotaActiva} color="#10B981" />
         <KPICard title="Rutas Programadas" value={kpis.rutasProgramadas} color="#f59e0b" />
-        <KPICard title="Tasa de Optimización" value={`${kpis.tasaOptimizacion}%`} color="#8b5cf6" />
+        <KPICard title="Tasa de Optimización" value={`${kpis.tasaOptimizacion}%`} color="#14b8a6" />
       </div> 
       {routes.length > 0 && (
       <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '20px'}}>
@@ -1222,7 +1527,7 @@ function App() {
   const [theme, setTheme] = useState(localStorage.getItem('kapital_theme') || 'dark');
 
   useEffect(() => {
-    document.body.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('kapital_theme', theme);
   }, [theme]);
 

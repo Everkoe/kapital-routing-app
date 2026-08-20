@@ -273,6 +273,11 @@ class DriverProfilePayload(BaseModel):
     email: EmailStr
     perfilData: dict
 
+class BulkActionPayload(BaseModel):
+    admin_email: str
+    target_emails: List[str]
+    action: str # "approve", "reject", "delete", "deactivate"
+
 # --- Endpoints de Autenticación y Verificación ---
 
 @app.get("/api/notifications")
@@ -362,6 +367,10 @@ async def login_user(usuario: UsuarioLogin):
     if user_in_db.get("estado", "Activo") == "Pendiente":
         raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por Administración.")
 
+    # Registrar última conexión
+    user_in_db["last_login"] = datetime.now().isoformat()
+    await persist_users_only()
+
     
     return {
         "identifier": user_in_db.get("identifier", usuario.identifier),
@@ -441,9 +450,30 @@ async def get_all_users(email: str):
             "nombre": v.get("nombre", "Usuario"),
             "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
-            "perfil_conductor": v.get("perfil_conductor", None)
+            "perfil_conductor": v.get("perfil_conductor", None),
+            "last_login": v.get("last_login", None),
+            "avatar": v.get("avatar", None)
         })
     return {"usuarios": lista_usuarios}
+
+@app.post("/api/admin/users/bulk")
+async def bulk_users_action(payload: BulkActionPayload):
+    await reload_db()
+    req_user = usuarios_db.get(payload.admin_email)
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    
+    for target in payload.target_emails:
+        if target in usuarios_db:
+            if payload.action == "approve":
+                usuarios_db[target]["estado"] = "Activo"
+            elif payload.action in ["reject", "deactivate"]:
+                usuarios_db[target]["estado"] = "Rechazado"
+            elif payload.action == "delete":
+                del usuarios_db[target]
+                
+    await persist_users_only()
+    return {"message": f"Acción '{payload.action}' aplicada a {len(payload.target_emails)} usuarios."}
 
 @app.put("/api/admin/users/approve/{target_email}")
 async def approve_user(target_email: str, admin_email: str):
