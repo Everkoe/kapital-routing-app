@@ -246,6 +246,7 @@ class FlotaRegistro(BaseModel):
     revision: str
     atu: str
     licencia: str
+    telefono: Optional[str] = None
     soat_doc: Optional[str] = None
     revision_doc: Optional[str] = None
     atu_doc: Optional[str] = None
@@ -870,7 +871,8 @@ async def add_flota(flota: FlotaRegistro):
         "soat": flota.soat,
         "revision": flota.revision,
         "atu": flota.atu,
-        "licencia": flota.licencia
+        "licencia": flota.licencia,
+        "telefono": flota.telefono
     }
     await persist()
     return {"message": "Unidad agregada exitosamente", "flota": conductores_db}
@@ -888,7 +890,8 @@ async def update_flota(placa: str, flota: FlotaRegistro):
         "soat": flota.soat,
         "revision": flota.revision,
         "atu": flota.atu,
-        "licencia": flota.licencia
+        "licencia": flota.licencia,
+        "telefono": flota.telefono
     }
     await persist()
     return {"message": "Unidad actualizada", "flota": conductores_db}

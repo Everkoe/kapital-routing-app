@@ -10,7 +10,7 @@ const FlotaView = ({ usuario }) => {
   
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
-    placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '',
+    placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '',
     soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
@@ -123,7 +123,7 @@ const FlotaView = ({ usuario }) => {
   };
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setShowModal(true);
   };
@@ -234,6 +234,9 @@ const FlotaView = ({ usuario }) => {
                 {!isCliente && (
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
+                    {vehiculo.telefono && (
+                      <a href={`https://wa.me/${vehiculo.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-icon" title="Contactar por WhatsApp" style={{ textDecoration: 'none' }}>💬</a>
+                    )}
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar">✏️</button>
                     <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar">🗑️</button>
                   </div>
@@ -334,6 +337,10 @@ const FlotaView = ({ usuario }) => {
               <div className="form-row">
                 <label>Nombre Chofer</label>
                 <input required value={formData.chofer} onChange={e => setFormData({...formData, chofer: e.target.value})} placeholder="Nombre completo" />
+              </div>
+              <div className="form-row">
+                <label>Teléfono WhatsApp (Opcional)</label>
+                <input value={formData.telefono || ''} onChange={e => setFormData({...formData, telefono: e.target.value})} placeholder="Ej. 51987654321" />
               </div>
               <div className="form-row">
                 <label>Tipo</label>
