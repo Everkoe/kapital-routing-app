@@ -20,7 +20,6 @@ const getDocStatus = (dateStr) => {
 export default function AdminDashboard({ onNavigate, usuario }) {
   const [flota, setFlota] = useState([]);
   const [users, setUsers] = useState([]);
-  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,10 +41,6 @@ export default function AdminDashboard({ onNavigate, usuario }) {
             setUsers(data.usuarios || []);
           }
         }
-        
-        // Fetch logs from localStorage
-        const localLogs = JSON.parse(localStorage.getItem('kapital_audit_logs') || '[]');
-        setLogs(localLogs);
       } catch (err) {
         console.error("Error cargando dashboard:", err);
       } finally {
@@ -292,29 +287,6 @@ export default function AdminDashboard({ onNavigate, usuario }) {
           )}
         </div>
       </div>
-
-      {/* ACTIVITY LOG */}
-      {logs.length > 0 && (
-        <div style={{ ...cardStyle }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: '1.05rem', fontWeight: 600 }}>
-            Actividad Reciente
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
-            {logs.slice(0, 10).map((log, i) => (
-              <div key={i} style={{ 
-                padding: '8px 12px', 
-                background: 'var(--bg-primary, #0f172a)', 
-                borderRadius: '6px', 
-                fontSize: '0.825rem',
-                color: 'var(--text-secondary)',
-              }}>
-                {log}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
