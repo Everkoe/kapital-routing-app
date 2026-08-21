@@ -65,23 +65,95 @@ const CopilotChat = () => {
     }
   };
 
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, isDragging: false });
+  const [isDismissed, setIsDismissed] = useState(false);
+
+  const handlePointerDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current.isDragging = true;
+    dragRef.current.startX = e.clientX;
+    dragRef.current.startY = e.clientY;
+    dragRef.current.initialX = position.x;
+    dragRef.current.initialY = position.y;
+    setIsDragging(false);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!dragRef.current.isDragging) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      setIsDragging(true);
+    }
+    
+    setPosition({
+      x: dragRef.current.initialX + dx,
+      y: dragRef.current.initialY + dy
+    });
+  };
+
+  const handlePointerUp = (e) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    dragRef.current.isDragging = false;
+  };
+
+  const handleToggleClick = () => {
+    if (!isDragging) {
+      setIsOpen(!isOpen);
+    }
+  };
+
+  if (isDismissed) return null;
+
   return (
     <>
-      <div 
-        onClick={toggleChat}
-        style={{
-          position: 'fixed', bottom: '30px', right: '30px', zIndex: 9999,
-          width: '60px', height: '60px', borderRadius: '50%',
-          backgroundColor: '#38bdf8', color: 'white', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
-          transition: 'transform 0.3s ease',
-          transform: isOpen ? 'scale(0)' : 'scale(1)'
-        }}
-      >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        </svg>
+      <div style={{
+        position: 'fixed', bottom: '30px', right: '30px', zIndex: 9999,
+        transform: `translate(${position.x}px, ${position.y}px)`,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end'
+      }}>
+        {!isOpen && (
+          <button 
+            onClick={() => setIsDismissed(true)}
+            style={{
+              position: 'absolute', top: '-6px', right: '-6px',
+              width: '22px', height: '22px', borderRadius: '50%',
+              backgroundColor: '#ef4444', color: 'white', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', fontSize: '11px', fontWeight: 'bold',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.2)', zIndex: 10000,
+              padding: 0
+            }}
+            title="Ocultar asistente"
+          >
+            ✕
+          </button>
+        )}
+        <div 
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onClick={handleToggleClick}
+          style={{
+            width: '60px', height: '60px', borderRadius: '50%',
+            backgroundColor: '#38bdf8', color: 'white', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', 
+            cursor: isDragging ? 'grabbing' : 'grab',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+            transition: isDragging ? 'none' : 'transform 0.3s ease',
+            transform: isOpen ? 'scale(0)' : 'scale(1)',
+            touchAction: 'none'
+          }}
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </div>
       </div>
 
       <div style={{
