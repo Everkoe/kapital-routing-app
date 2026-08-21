@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Shield, User, Moon, Sun } from 'lucide-react';
+import { Shield, User, Moon, Sun, LayoutDashboard } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
 import LiveMap from './LiveMap';
@@ -13,6 +13,7 @@ import GerentePortal from './GerentePortal';
 import CopilotChat from './CopilotChat';
 import VistaReportes from './VistaReportes';
 import ClientPortal from './ClientPortal';
+import AdminDashboard from './AdminDashboard';
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -280,7 +281,7 @@ const UsersManagementTab = ({ usuarioActual }) => {
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
   
   // CRM Features
-  const [activeTab, setActiveTab] = useState('Pendientes');
+  const [activeTab, setActiveTab] = useState('Todos');
   const [activeRole, setActiveRole] = useState('Todos');
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -581,10 +582,10 @@ const UsersManagementTab = ({ usuarioActual }) => {
                   borderRadius: '10px', padding: '4px'
                 }}>
                   {[
+                    { key: 'Todos', label: 'Todos', dot: null },
                     { key: 'Pendientes', label: 'Pendientes', dot: '#f59e0b' },
                     { key: 'Activos', label: 'Activos', dot: '#10b981' },
                     { key: 'Rechazados', label: 'Rechazados', dot: '#ef4444' },
-                    { key: 'Todos', label: 'Todos', dot: null },
                   ].map(({ key, label, dot }) => (
                     <button key={key}
                       className={`crm-tab-btn${activeTab === key ? ' active' : ''}`}
@@ -905,6 +906,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         
         {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
           <>
+           <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Resumen</a>
            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
              <Shield size={18} style={{ marginRight: '6px' }} /> Accesos
@@ -1621,10 +1623,6 @@ function App() {
   }, [usuarioActual, lastNotifId]);
 
   const renderVista = () => {
-    // If the user is Administración and they don't have dashboard, force them to 'usuarios'
-    if (['Administración', 'Administrador'].includes(usuarioActual?.rol) && vistaActual === 'dashboard') {
-      return <UsersManagementTab usuarioActual={usuarioActual} />;
-    }
 
     switch (vistaActual) {
       case 'flota': return <FlotaView usuario={usuarioActual} />;
@@ -1636,6 +1634,9 @@ function App() {
       default:
         if (usuarioActual?.rol === 'Cliente') {
           return <FlotaView usuario={usuarioActual} />;
+        }
+        if (['Administración', 'Administrador'].includes(usuarioActual?.rol)) {
+          return <AdminDashboard onNavigate={setVistaActual} usuario={usuarioActual} />;
         }
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }

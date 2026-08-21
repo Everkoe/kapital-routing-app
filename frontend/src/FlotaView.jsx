@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront } from 'lucide-react';
+
 import './App.css';
+
 
 const FlotaView = ({ usuario }) => {
   const isCliente = usuario?.rol === 'Cliente';
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -19,6 +23,26 @@ const FlotaView = ({ usuario }) => {
   const [isConductorModalOpen, setIsConductorModalOpen] = useState(false);
   const [conductorInfo, setConductorInfo] = useState(null);
   const [isLoadingConductor, setIsLoadingConductor] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [pageSizeDropdownOpen, setPageSizeDropdownOpen] = useState(false);
+  const pageSizeDropdownRef = React.useRef(null);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pageSize, searchTerm]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (pageSizeDropdownRef.current && !pageSizeDropdownRef.current.contains(e.target)) {
+        setPageSizeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleOpenConductor = async (unidadId) => {
     if (!unidadId) return;
@@ -74,7 +98,8 @@ const FlotaView = ({ usuario }) => {
 
   const getStatus = (dateString) => {
     if (!dateString) return { status: 'unknown', text: 'N/A' };
-    const today = new Date('2026-07-27T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const targetDate = new Date(dateString + 'T00:00:00');
     const diffTime = targetDate - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -178,21 +203,89 @@ const FlotaView = ({ usuario }) => {
   if (isLoading && flota.length === 0) return <div className="loading-indicator">Cargando datos de flota...</div>;
   if (error) return <div className="error-message">Error: {error}</div>;
 
+  const filteredFlota = flota.filter(vehiculo => 
+    (vehiculo.placa || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // KPIs calculations
+  const totalUnits = flota.length;
+  let expiringDocsCount = 0;
+  let expiredDocsCount = 0;
+
+  flota.forEach(vehiculo => {
+    const docs = [vehiculo.soat, vehiculo.revision, vehiculo.atu, vehiculo.licencia];
+    docs.forEach(docDate => {
+      const { status } = getStatus(docDate);
+      if (status === 'danger') expiredDocsCount++;
+      if (status === 'warning') expiringDocsCount++;
+    });
+  });
+
   return (
     <div className="card flota-view-card" style={{ maxWidth: '100%', overflowX: 'auto', position: 'relative' }}>
-      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>Control de Conformidad Legal y Flota</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn-secondary" onClick={handleExport} style={{ backgroundColor: '#10b981', color: 'white', border: 'none' }}>⬇️ Exportar Excel</button>
-          <button className="btn-secondary" onClick={fetchFlota}>Actualizar</button>
-          {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ backgroundColor: 'var(--kapital-accent-green)' }}>+ Nueva Unidad</button>}
+      <div className="card-header" style={{ marginBottom: '16px' }}>
+        {/* Fila 1: Título + Botones de acción */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn-secondary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}><Download size={14} /> Exportar Excel</button>
+            <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
+            {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
+          </div>
+        </div>
+        {/* Fila 2: Descripción + Buscador */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', flexWrap: 'wrap', gap: '10px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
+            Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
+          </p>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              placeholder="Buscar unidad o conductor..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ padding: '7px 12px 7px 32px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', width: '380px', fontSize: '0.875rem', transition: 'border-color 0.2s' }}
+            />
+          </div>
         </div>
       </div>
       
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
-        Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
-      </p>
+      {!isCliente && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px', marginTop: '10px' }}>
+          <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <div style={{ padding: '10px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', borderRadius: '8px' }}><CarFront size={24} /></div>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Total Unidades</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalUnits}</div>
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <div style={{ padding: '10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', borderRadius: '8px' }}><FileCheck size={24} /></div>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Doc. Vigentes</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalUnits * 4 - expiringDocsCount - expiredDocsCount}</div>
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px', borderColor: expiringDocsCount > 0 ? 'rgba(234, 179, 8, 0.3)' : 'var(--border-color)' }}>
+            <div style={{ padding: '10px', background: 'rgba(234, 179, 8, 0.1)', color: '#eab308', borderRadius: '8px' }}><AlertTriangle size={24} /></div>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Por Vencer (15d)</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#eab308' }}>{expiringDocsCount}</div>
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px', borderColor: expiredDocsCount > 0 ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)' }}>
+            <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '8px' }}><AlertTriangle size={24} /></div>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Vencidos</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444' }}>{expiredDocsCount}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
+      {/* Flota table */}
       <table className="flota-table">
         <thead>
           <tr>
@@ -207,7 +300,21 @@ const FlotaView = ({ usuario }) => {
           </tr>
         </thead>
         <tbody>
-          {flota.map((vehiculo, index) => {
+          {(() => {
+            const totalPages = Math.ceil(filteredFlota.length / pageSize);
+            const paginatedFlota = filteredFlota.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+            
+            if (filteredFlota.length === 0) {
+              return (
+                <tr>
+                  <td colSpan={isCliente ? 6 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                    No se encontraron unidades que coincidan con la búsqueda.
+                  </td>
+                </tr>
+              );
+            }
+
+            return paginatedFlota.map((vehiculo, index) => {
             const hasDanger = 
               getStatus(vehiculo.soat).status === 'danger' || 
               getStatus(vehiculo.revision).status === 'danger' ||
@@ -235,18 +342,78 @@ const FlotaView = ({ usuario }) => {
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
                     {vehiculo.telefono && (
-                      <a href={`https://wa.me/${vehiculo.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-icon" title="Contactar por WhatsApp" style={{ textDecoration: 'none' }}>💬</a>
+                      <a href={`https://wa.me/${vehiculo.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-icon" title="Contactar por WhatsApp" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><MessageCircle size={15} /></a>
                     )}
-                    <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar">✏️</button>
-                    <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar">🗑️</button>
+                    <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} /></button>
+                    <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
                   </div>
                 </td>
                 )}
               </tr>
             );
-          })}
+          });
+          })()}
         </tbody>
       </table>
+
+      {/* Pagination Controls */}
+      {filteredFlota.length > 0 && (() => {
+        const totalPages = Math.ceil(filteredFlota.length / pageSize);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 4px', borderTop: '1px solid var(--border-color)', marginTop: '10px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Mostrando {(currentPage - 1) * pageSize + 1} – {Math.min(currentPage * pageSize, filteredFlota.length)} de {filteredFlota.length} unidades
+            </div>
+            <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Filas por pág:</span>
+                <div ref={pageSizeDropdownRef} style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setPageSizeDropdownOpen(!pageSizeDropdownOpen)}
+                    style={{ padding: '6px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '6px', fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', minWidth: '65px', justifyContent: 'space-between', boxShadow: pageSizeDropdownOpen ? '0 0 0 2px var(--accent-border)' : 'none', transition: 'all 0.15s' }}
+                  >
+                    {pageSize} <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>▼</span>
+                  </button>
+                  {pageSizeDropdownOpen && (
+                    <div style={{ position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, width: '100%', minWidth: '70px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', overflow: 'hidden', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+                      {[10, 50, 100].map(size => (
+                        <button key={size}
+                          onClick={() => { setPageSize(size); setPageSizeDropdownOpen(false); }}
+                          style={{ padding: '8px 12px', background: pageSize === size ? 'var(--accent-bg)' : 'transparent', color: pageSize === size ? 'var(--primary-color)' : 'var(--text-secondary)', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.02)', textAlign: 'left', fontSize: '0.85rem', cursor: 'pointer', fontWeight: pageSize === size ? 600 : 500, transition: 'background 0.15s' }}
+                          onMouseEnter={e => { if (pageSize !== size) e.target.style.background = 'rgba(255,255,255,0.03)'; }}
+                          onMouseLeave={e => { e.target.style.background = pageSize === size ? 'var(--accent-bg)' : 'transparent'; }}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-color)', background: currentPage === 1 ? 'transparent' : 'var(--bg-secondary)', color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-primary)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
+                  onMouseEnter={e => { if (currentPage !== 1) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                  onMouseLeave={e => { if (currentPage !== 1) e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                >
+                  <span style={{ fontSize: '14px', lineHeight: 1 }}>«</span> Anterior
+                </button>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-color)', background: (currentPage === totalPages || totalPages === 0) ? 'transparent' : 'var(--bg-secondary)', color: (currentPage === totalPages || totalPages === 0) ? 'var(--text-muted)' : 'var(--text-primary)', cursor: (currentPage === totalPages || totalPages === 0) ? 'not-allowed' : 'pointer', opacity: (currentPage === totalPages || totalPages === 0) ? 0.5 : 1, transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
+                  onMouseEnter={e => { if (currentPage !== totalPages && totalPages !== 0) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                  onMouseLeave={e => { if (currentPage !== totalPages && totalPages !== 0) e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                >
+                  Siguiente <span style={{ fontSize: '14px', lineHeight: 1 }}>»</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Driver Profile Modal */}
       {isConductorModalOpen && (
@@ -254,9 +421,11 @@ const FlotaView = ({ usuario }) => {
           <div className="conductor-profile" onClick={e => e.stopPropagation()}>
             <button className="close-btn" onClick={closeConductorModal}>&times;</button>
             {isLoadingConductor ? (
-              <div style={{ padding: '50px', textAlign: 'center' }}>
-                <div className="loading-spinner" style={{ fontSize: '2rem', animation: 'spin 1s linear infinite' }}>⚙️</div>
-                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <div style={{ padding: '50px', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', opacity: 0.5 }}>
+                    <Loader size={32} style={{ animation: 'spin 1s linear infinite' }} />
+                  </div>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                 <p>Cargando perfil del conductor...</p>
               </div>
             ) : conductorInfo ? (
@@ -266,7 +435,7 @@ const FlotaView = ({ usuario }) => {
                     {conductorInfo.usuario.avatar ? (
                       <img src={conductorInfo.usuario.avatar} alt="Conductor" />
                     ) : (
-                      <div className="avatar-placeholder">👤</div>
+                      <div className="avatar-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={40} strokeWidth={1.5} /></div>
                     )}
                   </div>
                   <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
@@ -511,6 +680,15 @@ const FlotaView = ({ usuario }) => {
           font-size: 1.1rem;
           opacity: 0.7;
           transition: 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          border-radius: 6px;
+          padding: 0;
+          color: var(--text-secondary);
+          flex-shrink: 0;
         }
         .btn-icon:hover {
           opacity: 1;
