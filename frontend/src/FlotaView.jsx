@@ -227,9 +227,9 @@ const FlotaView = ({ usuario }) => {
     <div className="card flota-view-card" style={{ maxWidth: '100%', overflowX: 'auto', position: 'relative' }}>
       <div className="card-header" style={{ marginBottom: '16px' }}>
         {/* Header content: Left (Title + Desc) / Right (Buttons + Search) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px' }}>
+        <div className="flota-header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px' }}>
           {/* Left Column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1 1 300px' }}>
+          <div className="flota-header-left" style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1 1 300px' }}>
             <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
               Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
@@ -237,8 +237,8 @@ const FlotaView = ({ usuario }) => {
           </div>
           
           {/* Right Column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'stretch', flex: '0 0 auto' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div className="flota-header-right" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'stretch', flex: '0 0 auto' }}>
+            <div className="flota-header-buttons" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <button className="btn-secondary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}><Download size={14} /> Exportar Excel</button>
               <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
               {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
@@ -260,7 +260,7 @@ const FlotaView = ({ usuario }) => {
       </div>
       
       {!isCliente && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px', marginTop: '10px' }}>
+        <div className="flota-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px', marginTop: '10px' }}>
           <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px' }}>
             <div style={{ padding: '10px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', borderRadius: '8px' }}><CarFront size={24} /></div>
             <div>

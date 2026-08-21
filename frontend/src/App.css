@@ -971,3 +971,34 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
     box-sizing: border-box;
   }
 }
+
+/* --- Estilos Responsive para FlotaView --- */
+@media (max-width: 768px) {
+  .flota-header-container {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .flota-header-left {
+    align-items: center !important;
+    text-align: center !important;
+    flex: 1 1 auto !important;
+  }
+  .flota-header-right {
+    width: 100% !important;
+    flex: 1 1 auto !important;
+  }
+  .flota-header-buttons {
+    justify-content: space-between !important;
+    gap: 6px !important;
+  }
+  .flota-header-buttons button {
+    flex: 1 !important;
+    padding: 8px 4px !important;
+    font-size: 0.75rem !important;
+    justify-content: center !important;
+  }
+  .flota-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
