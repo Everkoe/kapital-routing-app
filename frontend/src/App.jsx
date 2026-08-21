@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Shield, User, Moon, Sun, LayoutDashboard } from 'lucide-react';
+import { Shield, User, Moon, Sun, LayoutDashboard, Truck, FileText, Settings, LogOut } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
 import LiveMap from './LiveMap';
@@ -14,6 +14,21 @@ import CopilotChat from './CopilotChat';
 import VistaReportes from './VistaReportes';
 import ClientPortal from './ClientPortal';
 import AdminDashboard from './AdminDashboard';
+
+// --- Componente GlobalLoader ---
+export const GlobalLoader = ({ text = "Cargando..." }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px', width: '100%', height: '100%', minHeight: '300px', boxSizing: 'border-box' }}>
+    <svg width="48" height="48" viewBox="0 0 48 48" style={{ margin: '0 auto', display: 'block' }}>
+      <circle cx="24" cy="24" r="20" fill="none" strokeWidth="4" stroke="var(--kapital-nav-link-active)" strokeLinecap="round" strokeDasharray="90 35.66">
+        <animate attributeName="stroke-dashoffset" from="0" to="-125.66" dur="1.2s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="24" cy="24" r="12" fill="none" strokeWidth="4" stroke="var(--kapital-accent-green)" strokeLinecap="round" strokeDasharray="40 35.40">
+        <animate attributeName="stroke-dashoffset" from="0" to="75.40" dur="0.8s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+    <p style={{ marginTop: '20px', color: 'var(--text-secondary)', fontSize: '1rem', fontWeight: 500, animation: 'pulseText 1.5s infinite' }}>{text}</p>
+  </div>
+);
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -442,6 +457,14 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     </div>
   );
 
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: '60px', textAlign: 'center' }}>
+        <GlobalLoader text="Cargando usuarios..." />
+      </div>
+    );
+  }
+
   return (
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
@@ -521,16 +544,9 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
 
         {/* Content */}
         <div style={{ padding: '24px 28px' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-secondary)' }}>
-              <div style={{ fontSize: '2rem', marginBottom: '12px', animation: 'spin 1s linear infinite' }}>⚙️</div>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-              <p style={{ margin: 0 }}>Cargando usuarios...</p>
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              {/* Filters Bar */}
-              <style>{`
+          <div style={{ overflowX: 'auto' }}>
+            {/* Filters Bar */}
+            <style>{`
                 .crm-tab-btn {
                   background: transparent;
                   border: none;
@@ -781,7 +797,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                 </div>
               )}
               {filteredUsers.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 20px', borderTop: '1px solid var(--border-color)', marginTop: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 4px', borderTop: '1px solid var(--border-color)', marginTop: '10px', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                     Mostrando {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredUsers.length)} de {filteredUsers.length} usuarios
                   </div>
@@ -867,7 +883,6 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                 </div>
               )}
             </div>
-          )}
         </div>
       </div>
     </>
@@ -877,59 +892,121 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
 
 const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usuarioActual }) => {
   const [isOpen, setIsOpen] = useState(false);
-  
+
   const handleNav = (vista) => {
     setVistaActual(vista);
     setIsOpen(false);
   };
 
   return (
-    <nav className="navbar">
-      <div className="navbar-left">
-        <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" onClick={() => handleNav('dashboard')} />
-      </div>
-      
-      <button className="hamburger-menu" onClick={() => setIsOpen(!isOpen)}>
-        {isOpen ? '✕' : '☰'}
-      </button>
+    <>
+      <nav className="navbar">
+        <div className="navbar-left">
+          <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" onClick={() => handleNav('dashboard')} />
+        </div>
 
+        {/* Desktop nav links — hidden on mobile via CSS */}
+        <div className="nav-links-desktop">
+          {usuarioActual?.rol === 'Programador de rutas' && (
+            <>
+              <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
+              <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
+              <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+            </>
+          )}
+          {usuarioActual?.rol === 'Cliente' && (
+            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
+          )}
+          {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
+            <>
+              <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Resumen</a>
+              <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
+              <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
+                <Shield size={18} /> Accesos
+              </a>
+            </>
+          )}
+          <span className="nav-separator">|</span>
+          <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'}>
+            <User size={18} style={{ marginRight: '6px' }} /> Mi Perfil
+          </a>
+          <a onClick={() => { onLogout(); }} className="nav-link">Cerrar Sesión</a>
+          <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
+          </button>
+        </div>
+
+        {/* Botón hamburguesa — solo visible en mobile */}
+        <button className="hamburger-menu" onClick={() => setIsOpen(!isOpen)} aria-label="Menú">
+          {isOpen ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/>
+            </svg>
+          )}
+        </button>
+      </nav>
+
+      {/* Overlay oscuro y Menu Lateral (Drawer) */}
+      <div className={`nav-overlay ${isOpen ? 'open' : ''}`} onClick={() => setIsOpen(false)} />
       <div className={`nav-links ${isOpen ? 'open' : ''}`}>
         {usuarioActual?.rol === 'Programador de rutas' && (
           <>
-            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
-            <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
-            <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
+              <LayoutDashboard size={20} />
+              <span>Tablero</span>
+            </a>
+            <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>
+              <FileText size={20} />
+              <span>Reportes</span>
+            </a>
+            <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>
+              <Settings size={20} />
+              <span>Configuración</span>
+            </a>
           </>
         )}
-        
         {usuarioActual?.rol === 'Cliente' && (
-          <>
-            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
-          </>
+          <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
+            <Truck size={20} />
+            <span>Conformidad</span>
+          </a>
         )}
-        
         {['Administración', 'Administrador'].includes(usuarioActual?.rol) && (
           <>
-           <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Resumen</a>
-           <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Gestión de Flota</a>
-           <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
-             <Shield size={18} style={{ marginRight: '6px' }} /> Accesos
-           </a>
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
+              <LayoutDashboard size={20} />
+              <span>Resumen</span>
+            </a>
+            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
+              <Truck size={20} />
+              <span>Gestión de Flota</span>
+            </a>
+            <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={vistaActual === 'usuarios' ? {color: '#38BDF8'} : {}}>
+              <Shield size={20} />
+              <span>Accesos B2B</span>
+            </a>
           </>
         )}
-        
-        <span className="nav-separator">|</span>
-        
-        <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'}>
-          <User size={18} style={{ marginRight: '6px' }} /> Mi Perfil
+        <span className="nav-separator" style={{display: 'none'}}>|</span>
+        <a onClick={() => handleNav('perfil')} className={vistaActual === 'perfil' ? 'nav-link active' : 'nav-link'}>
+          <User size={20} />
+          <span>Mi Perfil</span>
         </a>
-        <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link">Cerrar Sesión</a>
+        <a onClick={() => { onLogout(); setIsOpen(false); }} className="nav-link" style={{marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.05)', color: '#ef4444'}}>
+          <LogOut size={20} />
+          <span>Cerrar Sesión</span>
+        </a>
         
-        <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
+        <a onClick={toggleTheme} className="nav-link" style={{cursor: 'pointer'}}>
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
-        </button>
+          <span>Tema {theme === 'dark' ? 'Claro' : 'Oscuro'}</span>
+        </a>
       </div>
-    </nav>
+    </>
   );
 };
 

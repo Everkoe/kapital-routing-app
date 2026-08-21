@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
+import { GlobalLoader } from './App';
 
 const getDocStatus = (dateStr) => {
   if (!dateStr || dateStr === 'N/A') return { status: 'neutral', text: 'N/A', days: null };
@@ -53,7 +54,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
   if (loading) {
     return (
       <div className="card" style={{ padding: '60px', textAlign: 'center' }}>
-        <div style={{ color: 'var(--text-secondary)', fontSize: '1.1rem' }}>Cargando datos del sistema...</div>
+        <GlobalLoader text="Cargando datos del sistema..." />
       </div>
     );
   }
@@ -113,10 +114,22 @@ export default function AdminDashboard({ onNavigate, usuario }) {
     { name: 'Vencidos', value: expiredDocs, color: '#ef4444' }
   ].filter(d => d.value > 0);
 
+  const getRoleAbbr = (rol) => {
+    if (!rol) return 'S/R';
+    const r = rol.toLowerCase();
+    if (r.includes('conductor')) return 'Cond.';
+    if (r.includes('cliente')) return 'Cli.';
+    if (r.includes('programador')) return 'Prog.';
+    if (r.includes('gerente')) return 'Gerente';
+    if (r.includes('admin')) return 'Admin.';
+    return rol.substring(0, 8);
+  };
+
   const rolesSet = new Set(users.map(u => u.rol || 'Sin Rol'));
   const rolesData = Array.from(rolesSet).map(rol => {
     return {
-      name: rol,
+      name: getRoleAbbr(rol),
+      fullName: rol,
       activos: users.filter(u => (u.rol || 'Sin Rol') === rol && !(u.estado || '').toLowerCase().includes('pendiente')).length,
       pendientes: users.filter(u => (u.rol || 'Sin Rol') === rol && (u.estado || '').toLowerCase().includes('pendiente')).length
     };
@@ -141,12 +154,12 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       </div>
 
       {/* KPI ROW - 4 cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+      <div className="admin-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         
         {/* KPI: Total Usuarios */}
         <div 
           style={{ ...cardStyle, cursor: 'pointer', transition: 'border-color 0.2s' }} 
-          onClick={() => onNavigate('usuarios')}
+          onClick={() => onNavigate('usuarios', { tab: 'Pendientes' })}
           onMouseEnter={e => e.currentTarget.style.borderColor = '#38bdf8'}
           onMouseLeave={e => e.currentTarget.style.borderColor = ''}
         >
@@ -155,23 +168,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
             <div style={{ padding: '8px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', borderRadius: '10px' }}><Users size={20} /></div>
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '8px' }}>{totalUsers}</div>
-          <div 
-            style={{ 
-              display: 'inline-flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              fontSize: '0.8rem', 
-              color: pendingUsers > 0 ? '#f59e0b' : '#10b981',
-              cursor: pendingUsers > 0 ? 'pointer' : 'default',
-              textDecoration: pendingUsers > 0 ? 'underline' : 'none'
-            }}
-            onClick={(e) => {
-              if (pendingUsers > 0) {
-                e.stopPropagation();
-                onNavigate('usuarios', { tab: 'Pendientes' });
-              }
-            }}
-          >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: pendingUsers > 0 ? '#f59e0b' : '#10b981' }}>
             {pendingUsers > 0 ? <Clock size={14} /> : <CheckCircle size={14} />}
             <span>{pendingUsers > 0 ? `${pendingUsers} pendiente${pendingUsers > 1 ? 's' : ''}` : 'Sin pendientes'}</span>
           </div>
@@ -223,7 +220,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       </div>
 
       {/* CHARTS ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div className="admin-charts-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         
         {/* Donut: Documentación */}
         <div style={{ ...cardStyle }}>
@@ -260,7 +257,29 @@ export default function AdminDashboard({ onNavigate, usuario }) {
                 <XAxis dataKey="name" stroke="var(--text-secondary)" tick={{ fill: 'var(--text-secondary)', fontSize: 13 }} />
                 <YAxis stroke="var(--text-secondary)" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} allowDecimals={false} />
                 <RechartsTooltip 
-                  contentStyle={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)' }}
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div style={{
+                          backgroundColor: 'var(--bg-secondary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          color: 'var(--text-primary)',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+                        }}>
+                          <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', fontSize: '0.95rem' }}>{data.fullName}</p>
+                          {payload.map((entry, index) => (
+                            <p key={index} style={{ margin: '4px 0', color: entry.color, fontSize: '0.85rem' }}>
+                              {entry.name} : {entry.value}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
                   cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '0.85rem' }} />

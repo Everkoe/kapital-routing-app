@@ -110,7 +110,6 @@ body, #root {
   justify-content: space-between;
   align-items: center;
   background-color: #0f172a; /* Slate 900 */
-  backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255,255,255,0.05);
   color: #ffffff;
   padding: 15px 40px;
@@ -152,9 +151,9 @@ body, #root {
   transform: scale(1.1);
 }
 .navbar-title { font-size: 1.8rem; font-weight: 800; color: #ffffff; }
-.nav-links { display: flex; align-items: center; }
-.nav-links a {
-  color: #94a3b8; /* Slate 400 */
+.nav-links-desktop { display: flex; align-items: center; }
+.nav-links-desktop a {
+  color: #94a3b8;
   text-decoration: none;
   font-weight: 500;
   margin-left: 24px;
@@ -163,16 +162,18 @@ body, #root {
   padding-bottom: 5px;
   font-size: 0.95rem;
 }
-.nav-links a.nav-link-icon {
+.nav-links-desktop a.nav-link-icon {
   display: inline-flex;
   align-items: center;
 }
-.nav-links a:hover { color: #f8fafc; }
-.nav-links a.active {
-  color: #38BDF8 !important; /* Sky 400 */
+.nav-links-desktop a:hover { color: #f8fafc; }
+.nav-links-desktop a.active {
+  color: #38BDF8 !important;
   border-bottom: 2px solid #38BDF8;
   font-weight: 600;
 }
+/* Mobile-only drawer — hidden on desktop */
+.nav-links { display: none; }
 .nav-separator {
   color: #334155; /* Slate 700 */
   margin-left: 24px;
@@ -367,32 +368,90 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   .controls-container { flex-direction: column; align-items: stretch; }
   .emergency-form { flex-direction: column; align-items: stretch; }
   .app-container { padding: 15px; }
+  
+  /* ---- NAVBAR MOBILE DRAWER ---- */
+  .navbar { position: relative; padding: 14px 20px; }
+  .nav-links-desktop { display: none !important; }
 
-  /* Navbar Hamburguesa */
-  .navbar { position: relative; padding: 15px 20px; }
   .hamburger-menu {
-    display: block !important;
-    font-size: 1.8rem;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
     cursor: pointer;
-    background: none;
-    border: none;
-    color: white;
-    padding: 0;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 8px;
+    color: #f1f5f9;
+    transition: background 0.2s;
+    flex-shrink: 0;
   }
+  .hamburger-menu:hover { background: rgba(255,255,255,0.14); }
+
+  /* Overlay oscuro al abrir el drawer */
+  .nav-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+  }
+  .nav-overlay.open { display: block; }
+
+  /* Drawer lateral — oculto por defecto */
   .nav-links {
     display: none;
     flex-direction: column;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100%;
-    background-color: #0A2540;
-    padding: 10px 0;
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 78%;
+    max-width: 290px;
+    height: 100%;
+    background-color: #0f172a;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    padding: 0;
     z-index: 1001;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    box-shadow: -6px 0 30px rgba(0,0,0,0.4);
+    overflow-y: auto;
+    align-items: stretch;
   }
-  .nav-links.open { display: flex; }
-  .nav-links a { margin: 10px 0; padding: 10px 20px; text-align: center; width: 100%; box-sizing: border-box; }
+
+  /* Drawer visible con animación de deslizamiento */
+  .nav-links.open {
+    display: flex;
+    animation: slideInDrawer 0.26s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+
+  @keyframes slideInDrawer {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+  }
+
+  /* Links dentro del drawer (ahora con iconos) */
+  .nav-links a {
+    margin: 0;
+    padding: 16px 22px;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.95rem;
+    color: #cbd5e1;
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .nav-links a:hover { background: rgba(255,255,255,0.05); color: #f1f5f9; }
+  .nav-links a.active {
+    color: #38BDF8 !important;
+    background: rgba(56,189,248,0.08);
+    border-left: 3px solid #38BDF8;
+    padding-left: 19px;
+  }
+
   .nav-separator { display: none; }
 }
 
@@ -821,3 +880,94 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pulseText {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+/* ============================================================
+   RESPONSIVE MOBILE - todas las secciones
+   ============================================================ */
+
+@media (max-width: 768px) {
+
+  /* LAYOUT GENERAL */
+  .app-container { padding: 12px; gap: 14px; }
+  .card { padding: 16px; border-radius: 12px; }
+  .premium-card-header { padding: 18px 16px; }
+
+  /* NAVBAR */
+  .navbar { padding: 12px 16px; }
+  .nav-links a { margin-left: 10px; font-size: 0.85rem; }
+
+  /* ADMIN DASHBOARD - KPIs 4 col to 2 col */
+  .admin-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  /* ADMIN DASHBOARD - Charts 2 col to 1 col */
+  .admin-charts-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* FLOTA TABLE */
+  .flota-table { font-size: 0.82rem; }
+  .flota-table th, .flota-table td { padding: 8px 10px; }
+
+  /* PROFILE */
+  .profile-content { padding: 20px 16px; }
+  .profile-layout-grid { grid-template-columns: 1fr; gap: 20px; }
+
+  /* FORMS */
+  .form-grid { grid-template-columns: 1fr; }
+  .emergency-form { flex-direction: column; align-items: stretch; }
+  .controls-container { flex-direction: column; align-items: stretch; }
+
+  /* WIZARD */
+  .onboarding-wizard { padding: 20px 16px; }
+  .wizard-header h2 { font-size: 1.5rem; }
+  .accordion-header { padding: 14px; font-size: 1rem; }
+  .wizard-footer { flex-direction: column; gap: 12px; }
+
+  /* FLOTA SEARCH */
+  .flota-search-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-top: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+
+  .admin-kpi-grid { grid-template-columns: 1fr !important; }
+  .navbar-logo { height: 30px; }
+  .card { padding: 12px; }
+}
+
+.flota-search-wrapper {
+  position: relative;
+  width: 380px;
+}
+@media (max-width: 768px) {
+  .flota-search-wrapper {
+    width: 100%;
+  }
+}
+
+.flota-search-input {
+  width: 380px;
+}
+@media (max-width: 768px) {
+  .flota-search-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}

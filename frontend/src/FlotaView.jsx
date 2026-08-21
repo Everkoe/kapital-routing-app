@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront } from 'lucide-react';
+import { GlobalLoader } from './App';
 
 import './App.css';
 
@@ -200,7 +201,7 @@ const FlotaView = ({ usuario }) => {
     }
   };
 
-  if (isLoading && flota.length === 0) return <div className="loading-indicator">Cargando datos de flota...</div>;
+  if (isLoading && flota.length === 0) return <div className="card" style={{ padding: '60px', textAlign: 'center' }}><GlobalLoader text="Cargando datos de flota..." /></div>;
   if (error) return <div className="error-message">Error: {error}</div>;
 
   const filteredFlota = flota.filter(vehiculo => 
@@ -225,29 +226,35 @@ const FlotaView = ({ usuario }) => {
   return (
     <div className="card flota-view-card" style={{ maxWidth: '100%', overflowX: 'auto', position: 'relative' }}>
       <div className="card-header" style={{ marginBottom: '16px' }}>
-        {/* Fila 1: Título + Botones de acción */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button className="btn-secondary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}><Download size={14} /> Exportar Excel</button>
-            <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
-            {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
+        {/* Header content: Left (Title + Desc) / Right (Buttons + Search) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px' }}>
+          {/* Left Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1 1 300px' }}>
+            <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
+              Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
+            </p>
           </div>
-        </div>
-        {/* Fila 2: Descripción + Buscador */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', flexWrap: 'wrap', gap: '10px' }}>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
-            Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
-          </p>
-          <div style={{ position: 'relative' }}>
-            <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
-            <input
-              type="text"
-              placeholder="Buscar unidad o conductor..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ padding: '7px 12px 7px 32px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', width: '380px', fontSize: '0.875rem', transition: 'border-color 0.2s' }}
-            />
+          
+          {/* Right Column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'stretch', flex: '0 0 auto' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <button className="btn-secondary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}><Download size={14} /> Exportar Excel</button>
+              <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
+              {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
+            </div>
+            
+            <div style={{ position: 'relative', width: '100%' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Buscar unidad o conductor..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flota-search-input-override"
+                style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.875rem', transition: 'border-color 0.2s', boxSizing: 'border-box' }}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -262,7 +269,7 @@ const FlotaView = ({ usuario }) => {
             </div>
           </div>
           <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <div style={{ padding: '10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', borderRadius: '8px' }}><FileCheck size={24} /></div>
+            <div style={{ padding: '10px', background: 'rgba(10, 185, 129, 0.1)', color: '#10b981', borderRadius: '8px' }}><FileCheck size={24} /></div>
             <div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Doc. Vigentes</div>
               <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalUnits * 4 - expiringDocsCount - expiredDocsCount}</div>
@@ -285,7 +292,8 @@ const FlotaView = ({ usuario }) => {
         </div>
       )}
 
-      {/* Flota table */}
+      {/* Flota table - scrollable on mobile */}
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <table className="flota-table">
         <thead>
           <tr>
@@ -355,6 +363,7 @@ const FlotaView = ({ usuario }) => {
           })()}
         </tbody>
       </table>
+      </div>{/* end scrollable table wrapper */}
 
       {/* Pagination Controls */}
       {filteredFlota.length > 0 && (() => {
@@ -585,7 +594,7 @@ const FlotaView = ({ usuario }) => {
           </div>
         </div>
       )}
-      <style jsx>{`
+      <style>{`
         /* Modal Profile CSS */
         .conductor-profile {
           background: #1a1a24; border-radius: 16px; padding: 30px;
