@@ -273,7 +273,7 @@ const StatusBadge = ({ estado }) => {
 };
 
 // --- Users Management Tab ---
-const UsersManagementTab = ({ usuarioActual }) => {
+const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
@@ -281,7 +281,11 @@ const UsersManagementTab = ({ usuarioActual }) => {
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
   
   // CRM Features
-  const [activeTab, setActiveTab] = useState('Todos');
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   const [activeRole, setActiveRole] = useState('Todos');
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1510,6 +1514,12 @@ function App() {
   const [usuarioActual, setUsuarioActual] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
+  const [vistaParams, setVistaParams] = useState({});
+
+  const handleNavigate = (vista, params = {}) => {
+    setVistaActual(vista);
+    setVistaParams(params);
+  };
   const [routes, setRoutes] = useState(() => {
     // Restore saved session if it exists
     try {
@@ -1628,7 +1638,7 @@ function App() {
       case 'flota': return <FlotaView usuario={usuarioActual} />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
-      case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} />;
+      case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} initialTab={vistaParams?.tab || 'Todos'} />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
@@ -1636,7 +1646,7 @@ function App() {
           return <FlotaView usuario={usuarioActual} />;
         }
         if (['Administración', 'Administrador'].includes(usuarioActual?.rol)) {
-          return <AdminDashboard onNavigate={setVistaActual} usuario={usuarioActual} />;
+          return <AdminDashboard onNavigate={handleNavigate} usuario={usuarioActual} />;
         }
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }

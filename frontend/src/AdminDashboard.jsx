@@ -155,7 +155,23 @@ export default function AdminDashboard({ onNavigate, usuario }) {
             <div style={{ padding: '8px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', borderRadius: '10px' }}><Users size={20} /></div>
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '8px' }}>{totalUsers}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: pendingUsers > 0 ? '#f59e0b' : '#10b981' }}>
+          <div 
+            style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.8rem', 
+              color: pendingUsers > 0 ? '#f59e0b' : '#10b981',
+              cursor: pendingUsers > 0 ? 'pointer' : 'default',
+              textDecoration: pendingUsers > 0 ? 'underline' : 'none'
+            }}
+            onClick={(e) => {
+              if (pendingUsers > 0) {
+                e.stopPropagation();
+                onNavigate('usuarios', { tab: 'Pendientes' });
+              }
+            }}
+          >
             {pendingUsers > 0 ? <Clock size={14} /> : <CheckCircle size={14} />}
             <span>{pendingUsers > 0 ? `${pendingUsers} pendiente${pendingUsers > 1 ? 's' : ''}` : 'Sin pendientes'}</span>
           </div>
