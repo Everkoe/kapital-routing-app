@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
-import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle } from 'lucide-react';
+import SwipeablePassenger from './components/SwipeablePassenger';
+import ZenModeView from './components/ZenModeView';
+import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import './App.css';
 
@@ -13,6 +15,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || false);
 
   const [conductorId, setConductorId] = useState(usuario.unidad_id || 'KAP-001');
+  
+  // Estado para Modo Conducción
+  const [activeZenRouteIndex, setActiveZenRouteIndex] = useState(null);
 
   // Poll for status changes if pending
   useEffect(() => {
@@ -230,8 +235,17 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
           🚨 BOTÓN DE EMERGENCIA (SOS)
         </button>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kapital-border)', paddingBottom: '10px', marginBottom: '15px' }}>
-          <h3 style={{ margin: 0 }}>Mis Rutas de Hoy</h3>
+        {activeZenRouteIndex !== null ? (
+          <ZenModeView 
+            ruta={rutas[activeZenRouteIndex]}
+            conductorId={conductorId}
+            onExitZen={() => setActiveZenRouteIndex(null)}
+            onActualizarPasajero={actualizarEstadoPasajero}
+          />
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kapital-border)', paddingBottom: '10px', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0 }}>Mis Rutas de Hoy</h3>
           <button className="no-print" onClick={() => window.print()} style={{ background: 'var(--kapital-accent-green)', border: 'none', color: 'white', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
             🖨️ Imprimir Manifiesto
           </button>
@@ -254,62 +268,33 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
 
             <div className="driver-passengers-list">
               {ruta.agentes.map((agente, idx) => {
-                const isRecogido = agente.estado === 'Recogido';
-                const isAusente = agente.estado === 'Ausente';
-                const isCompletado = isRecogido || isAusente;
-                
-                // Encontrar el primer pasajero no completado para resaltarlo
+                const isCompletado = agente.estado === 'Recogido' || agente.estado === 'Ausente';
                 const firstPendingIdx = ruta.agentes.findIndex(a => a.estado !== 'Recogido' && a.estado !== 'Ausente');
                 const isNext = idx === firstPendingIdx;
 
                 return (
-                  <div key={idx} className={`driver-passenger-item ${isCompletado ? 'recogido' : ''} ${isNext ? 'next-passenger-glow' : ''}`}>
-                    <div className="driver-passenger-info" style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'inherit' }}>{agente.nombre}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)', marginTop: '4px' }}>🏠 {agente.direccion}</div>
-                      
-                      {/* Botones de acción rápida */}
-                      {!isCompletado && (
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }} className="no-print">
-                          <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente.direccion)}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze">
-                            <Navigation size={14} /> Waze
-                          </a>
-                          <a href={`https://wa.me/51${agente.telefono || ''}?text=${encodeURIComponent('Hola ' + agente.nombre + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp">
-                            <MessageCircle size={14} /> 
-                          </a>
-                          <a href={`tel:${agente.telefono || ''}`} className="quick-action-btn phone">
-                            <Phone size={14} />
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end', marginLeft: '10px' }}>
-                      <button 
-                        className={`driver-action-btn no-print ${isCompletado ? 'btn-recogido' : ''}`}
-                        disabled={isCompletado}
-                        onClick={() => actualizarEstadoPasajero(ruta.horario, agente.id, 'Recogido')}
-                      >
-                        {isRecogido ? '✓ Listo' : isAusente ? '❌ Ausente' : 'Recoger'}
-                      </button>
-                      {!isCompletado && (
-                        <button 
-                          className="driver-action-btn ausente-btn no-print"
-                          onClick={() => {
-                            if(window.confirm(`¿Seguro que ${agente.nombre} no se presentó?`)) {
-                              actualizarEstadoPasajero(ruta.horario, agente.id, 'Ausente');
-                            }
-                          }}
-                        >
-                          <AlertTriangle size={14} style={{ marginRight: '4px' }}/> Ausente
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <SwipeablePassenger 
+                    key={idx}
+                    agente={agente}
+                    isNext={isNext}
+                    isCompletado={isCompletado}
+                    onSwipeAction={(estado) => actualizarEstadoPasajero(ruta.horario, agente.id, estado)}
+                  />
                 );
               })}
             </div>
+            
+            <button 
+              className="no-print"
+              onClick={() => setActiveZenRouteIndex(index)}
+              style={{ width: '100%', marginTop: '15px', background: 'var(--kapital-blue-deep)', color: 'white', padding: '12px', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+            >
+              <Play size={18} /> INICIAR RUTA
+            </button>
           </div>
         ))}
+        </>
+        )}
       </main>
 
       <style jsx>{`
