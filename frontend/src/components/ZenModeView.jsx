@@ -23,24 +23,27 @@ const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => 
       {/* Zen Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--kapital-blue-deep)' }}>Próxima Parada</h2>
-          <span style={{ color: 'var(--kapital-text-secondary)' }}>Ruta {ruta.horario} - {ruta.zona}</span>
+          <h2 style={{ margin: 0, color: 'var(--kapital-text-primary)', fontSize: '1.5rem' }}>Próxima Parada</h2>
+          <span style={{ color: 'var(--kapital-text-secondary)', fontSize: '0.9rem' }}>
+            Ruta {ruta.horario} {ruta.zona ? `- ${ruta.zona}` : ''}
+          </span>
         </div>
-        <button onClick={onExitZen} style={{ background: 'transparent', border: '1px solid var(--kapital-border)', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--kapital-text-primary)' }}>
+        <button onClick={onExitZen} style={{ background: 'transparent', border: '1px solid var(--kapital-border)', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--kapital-text-primary)' }}>
           <XCircle size={18} /> Salir
         </button>
       </div>
 
       {/* Massive Passenger Card */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ background: 'var(--kapital-card-bg)', borderRadius: '24px', padding: '30px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', border: '2px solid var(--kapital-accent-green)', textAlign: 'center' }}>
+        <div style={{ background: 'var(--kapital-card-bg)', borderRadius: '24px', padding: '20px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', border: '2px solid var(--kapital-accent-green)', textAlign: 'center' }}>
           
-          <h1 style={{ fontSize: '2.5rem', margin: '0 0 10px 0', color: 'var(--kapital-text-primary)' }}>
+          <h1 style={{ fontSize: '1.8rem', lineHeight: '1.2', margin: '0 0 15px 0', color: 'var(--kapital-text-primary)', wordBreak: 'break-word' }}>
             {nextPassenger.nombre}
           </h1>
           
-          <div style={{ fontSize: '1.2rem', color: 'var(--kapital-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '30px' }}>
-            <MapPin size={20} color="#38BDF8" /> {nextPassenger.direccion}
+          <div style={{ fontSize: '1rem', lineHeight: '1.4', color: 'var(--kapital-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '25px', padding: '0 10px' }}>
+            <MapPin size={20} color="#38BDF8" style={{ flexShrink: 0 }} /> 
+            <span style={{ textAlign: 'left' }}>{nextPassenger.direccion}</span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '30px' }}>
