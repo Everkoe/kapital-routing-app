@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Phone, MessageCircle, Navigation, MapPin, XCircle, CheckCircle } from 'lucide-react';
 
 const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => {
+  const cameraInputRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
+
   // Find first passenger that is not 'Recogido' and not 'Ausente'
   const nextPassenger = ruta.agentes.find(a => a.estado !== 'Recogido' && a.estado !== 'Ausente');
 
@@ -68,14 +71,36 @@ const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => 
             
             <button 
               onClick={() => {
-                if(window.confirm(`¿Seguro que ${nextPassenger.nombre} no se presentó?`)) {
-                  onActualizarPasajero(ruta.horario, nextPassenger.id, 'Ausente');
+                if(window.confirm(`¿Seguro que ${nextPassenger.nombre} no se presentó?\n\nSe requiere una foto de evidencia. Presiona OK para abrir la cámara.`)) {
+                  if (cameraInputRef.current) {
+                    cameraInputRef.current.click();
+                  }
                 }
               }}
-              style={{ background: 'transparent', color: '#f59e0b', border: '2px solid #f59e0b', padding: '15px', borderRadius: '16px', fontSize: '1.2rem', fontWeight: 'bold', cursor: 'pointer' }}
+              disabled={isUploading}
+              style={{ background: 'transparent', color: '#f59e0b', border: '2px solid #f59e0b', padding: '15px', borderRadius: '16px', fontSize: '1.2rem', fontWeight: 'bold', cursor: 'pointer', opacity: isUploading ? 0.5 : 1 }}
             >
-              Marcar como Ausente
+              {isUploading ? 'Subiendo evidencia...' : 'Marcar como Ausente'}
             </button>
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment" 
+              ref={cameraInputRef}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setIsUploading(true);
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  const base64Str = event.target.result;
+                  onActualizarPasajero(ruta.horario, nextPassenger.id, 'Ausente', base64Str);
+                  setIsUploading(false);
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
           </div>
         </div>
       </div>

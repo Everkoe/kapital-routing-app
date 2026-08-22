@@ -914,6 +914,9 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
               <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
             </>
           )}
+          {usuarioActual?.rol === 'Conductor' && (
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Mis Rutas</a>
+          )}
           {usuarioActual?.rol === 'Cliente' && (
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
           )}
@@ -968,6 +971,12 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
               <span>Configuración</span>
             </a>
           </>
+        )}
+        {usuarioActual?.rol === 'Conductor' && (
+          <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
+            <Truck size={20} />
+            <span>Mis Rutas</span>
+          </a>
         )}
         {usuarioActual?.rol === 'Cliente' && (
           <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
@@ -1722,6 +1731,9 @@ function App() {
         if (usuarioActual?.rol === 'Cliente') {
           return <FlotaView usuario={usuarioActual} />;
         }
+        if (usuarioActual?.rol === 'Conductor') {
+          return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+        }
         if (['Administración', 'Administrador'].includes(usuarioActual?.rol)) {
           return <AdminDashboard onNavigate={handleNavigate} usuario={usuarioActual} />;
         }
@@ -1743,15 +1755,6 @@ function App() {
           }
         }} />
         <PantallaAuth onLogin={handleLogin} />
-      </>
-    );
-  }
-
-  if (usuarioActual.rol === 'Conductor') {
-    return (
-      <>
-        <Toaster position="top-right" />
-        <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
       </>
     );
   }

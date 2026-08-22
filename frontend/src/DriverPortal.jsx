@@ -148,89 +148,40 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
 
   if (!profileComplete) {
     return (
-      <div className="driver-portal">
-        <nav className="navbar no-print">
-          <div className="navbar-left">
-            <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
-          </div>
-          <div className="nav-links">
-            <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '20px' }}>¡Hola, {usuario.nombre}!</span>
-            <span className="nav-separator">|</span>
-            <a onClick={onLogout} className="nav-link nav-link-icon">
-              <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
-            </a>
-            <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
-            </button>
-          </div>
-        </nav>
-        <main style={{ padding: '20px' }}>
-          <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
-        </main>
-      </div>
+      <main style={{ padding: '20px' }}>
+        <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
+      </main>
     );
   }
 
   if (usuario.estado === 'Pendiente Revisión') {
     return (
-      <div className="driver-portal" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <nav className="navbar no-print">
-          <div className="navbar-left">
-            <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
-          </div>
-          <div className="nav-links">
-            <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '20px' }}>¡Hola, {usuario.nombre}!</span>
-            <span className="nav-separator">|</span>
-            <a onClick={onLogout} className="nav-link nav-link-icon">
-              <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
-            </a>
-            <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
-            </button>
-          </div>
-        </nav>
-        <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: 'var(--bg)', padding: '40px', borderRadius: '12px', boxShadow: 'var(--shadow)', textAlign: 'center', maxWidth: '500px' }}>
-            <h2 style={{ color: 'var(--kapital-blue-deep)', marginBottom: '15px' }}>⏳ Perfil en Revisión</h2>
-            <p style={{ color: 'var(--text)', lineHeight: '1.6' }}>
-              Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y documentos.
-            </p>
-            <p style={{ color: 'var(--text)', lineHeight: '1.6', marginTop: '10px' }}>
-              Por favor, regresa más tarde. Podrás acceder a tus rutas asignadas una vez que tu perfil sea aprobado.
-            </p>
-          </div>
-        </main>
-      </div>
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+        <div style={{ background: 'var(--bg)', padding: '40px', borderRadius: '12px', boxShadow: 'var(--shadow)', textAlign: 'center', maxWidth: '500px' }}>
+          <h2 style={{ color: 'var(--kapital-blue-deep)', marginBottom: '15px' }}>⏳ Perfil en Revisión</h2>
+          <p style={{ color: 'var(--text)', lineHeight: '1.6' }}>
+            Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y documentos.
+          </p>
+          <p style={{ color: 'var(--text)', lineHeight: '1.6', marginTop: '10px' }}>
+            Por favor, regresa más tarde. Podrás acceder a tus rutas asignadas una vez que tu perfil sea aprobado.
+          </p>
+        </div>
+      </main>
     );
   }
 
   if (isLoading) return <div className="loading-indicator" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Cargando tus rutas...</div>;
 
   return (
-    <div className="driver-portal">
-      <nav className="navbar no-print">
-        <div className="navbar-left">
-          <img src="/logo.png" alt="Kapital Routing Logo" className="navbar-logo" />
-        </div>
-        <div className="nav-links">
-          <span style={{ color: '#f8fafc', fontWeight: 600, marginRight: '10px' }}>¡Hola, {usuario.nombre}!</span>
-          <span style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'flex', alignItems: 'center', marginRight: '20px' }}>
-            (Unidad: {conductorId})
-            <button onClick={cambiarUnidad} style={{ marginLeft: '6px', background: 'transparent', border: 'none', color: '#38BDF8', cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Cambiar Unidad">
-              <Pencil size={14} />
-            </button>
-          </span>
-          <span className="nav-separator">|</span>
-          <a onClick={onLogout} className="nav-link nav-link-icon">
-            <LogOut size={18} style={{ marginRight: '6px' }} /> Salir
-          </a>
-          <button onClick={toggleTheme} className="theme-toggle" title="Cambiar Tema">
-            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} color="#facc15" fill="#facc15" />}
+    <>
+      <main className="driver-content">
+        <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', color: 'var(--text-secondary)' }}>
+          <span style={{ fontSize: '0.9rem' }}>Unidad Asignada: <strong>{conductorId}</strong></span>
+          <button onClick={cambiarUnidad} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }} title="Cambiar Unidad">
+            <Pencil size={12} /> Cambiar
           </button>
         </div>
-      </nav>
 
-      <main className="driver-content">
         <button className="no-print" onClick={enviarSOS} style={{ width: '100%', background: '#dc2626', color: 'white', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '20px', boxShadow: '0 4px 6px rgba(220, 38, 38, 0.3)', cursor: 'pointer' }}>
           🚨 BOTÓN DE EMERGENCIA (SOS)
         </button>
@@ -411,9 +362,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
           .driver-content { padding: 0 !important; max-width: 100% !important; }
           h3 { color: black !important; }
           .driver-passenger-info div { color: black !important; }
-        }
-      `}</style>
-    </div>
+          }
+        `}</style>
+    </>
   );
 };
 

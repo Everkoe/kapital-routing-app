@@ -1,6 +1,7 @@
 # api/index.py
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body
+from fastapi.staticfiles import StaticFiles
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -11,6 +12,7 @@ import json
 import random
 import os
 from datetime import datetime
+import base64
 
 
 
@@ -200,7 +202,12 @@ async def persist_routes_summary(summary: list):
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
-app = FastAPI(title="Kapital Routing API (B2B)", description=description, version="5.0.0")
+app = FastAPI(title="Kapital Routing Backend (JSON DB + Polling)", version="2.0")
+
+# Asegurar que el directorio de uploads exista
+uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -828,6 +835,7 @@ class EstadoPasajeroUpdate(BaseModel):
     horario: str
     agente_id: str
     estado: str # "Recogido" u otro
+    evidencia_foto: Optional[str] = None
 
 @app.get("/api/mis-rutas/{conductor_id}")
 async def mis_rutas(conductor_id: str):
@@ -843,6 +851,27 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
         agente = next((a for a in ruta["agentes"] if a["id"] == data.agente_id), None)
         if agente:
             agente["estado"] = data.estado
+            
+            # Guardar evidencia si existe
+            if data.evidencia_foto:
+                try:
+                    uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+                    os.makedirs(uploads_dir, exist_ok=True)
+                    # Separar metadata del base64 (ej. "data:image/jpeg;base64,...")
+                    if "," in data.evidencia_foto:
+                        header, base64_str = data.evidencia_foto.split(",", 1)
+                    else:
+                        base64_str = data.evidencia_foto
+                    
+                    file_data = base64.b64decode(base64_str)
+                    filename = f"evidencia_{data.agente_id}_{int(datetime.now().timestamp())}.jpg"
+                    filepath = os.path.join(uploads_dir, filename)
+                    with open(filepath, "wb") as f:
+                        f.write(file_data)
+                    agente["evidencia_foto_url"] = f"/api/uploads/{filename}"
+                except Exception as e:
+                    print(f"Error guardando evidencia: {e}")
+            
             await persist()
             return {"message": "Estado del pasajero actualizado exitosamente."}
     raise HTTPException(status_code=404, detail="Ruta o agente no encontrado")
