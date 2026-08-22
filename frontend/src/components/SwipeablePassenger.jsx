@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle } from 'lucide-react';
+import { compressImage } from '../utils/imageUtils';
 
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -42,21 +43,24 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
   const isRecogido = agente.estado === 'Recogido';
   const isAusente = agente.estado === 'Ausente';
 
-  const handleCameraCapture = (e) => {
+  const handleCameraCapture = async (e) => {
     const file = e.target.files[0];
     if (!file) {
       animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
       return;
     }
     setIsProcessing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64Str = event.target.result;
-      await onSwipeAction('Ausente', base64Str);
+    try {
+      const compressedBase64Str = await compressImage(file, 800, 0.6); // 800px max width, 60% quality
+      await onSwipeAction('Ausente', compressedBase64Str);
       animate(x, 0, { duration: 0.3 });
+    } catch (error) {
+      console.error("Error compressing image:", error);
+      alert("Error al procesar la foto. Intenta nuevamente.");
+      animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
+    } finally {
       setIsProcessing(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   return (

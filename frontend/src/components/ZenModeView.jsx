@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Phone, MessageCircle, Navigation, MapPin, XCircle, CheckCircle } from 'lucide-react';
+import { compressImage } from '../utils/imageUtils';
 
 const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => {
   const cameraInputRef = useRef(null);
@@ -88,17 +89,19 @@ const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => 
               capture="environment" 
               ref={cameraInputRef}
               style={{ display: 'none' }}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 setIsUploading(true);
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                  const base64Str = event.target.result;
-                  onActualizarPasajero(ruta.horario, nextPassenger.id, 'Ausente', base64Str);
+                try {
+                  const compressedBase64Str = await compressImage(file, 800, 0.6);
+                  onActualizarPasajero(ruta.horario, nextPassenger.id, 'Ausente', compressedBase64Str);
+                } catch (error) {
+                  console.error("Error compressing image:", error);
+                  alert("Error al procesar la foto. Intenta nuevamente.");
+                } finally {
                   setIsUploading(false);
-                };
-                reader.readAsDataURL(file);
+                }
               }}
             />
           </div>
