@@ -85,7 +85,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     }
   };
 
-  const actualizarEstadoPasajero = async (horario, agenteId, estado) => {
+  const actualizarEstadoPasajero = async (horario, agenteId, estado, evidenciaFoto = null) => {
     try {
       const response = await fetch('/api/actualizar-pasajero', {
         method: 'POST',
@@ -94,7 +94,8 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
           conductor_id: conductorId,
           horario: horario,
           agente_id: agenteId,
-          estado: estado
+          estado: estado,
+          evidencia_foto: evidenciaFoto
         })
       });
       if (response.ok) {
