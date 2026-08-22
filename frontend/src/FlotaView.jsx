@@ -602,14 +602,14 @@ const FlotaView = ({ usuario }) => {
       <style>{`
         /* Modal Profile CSS */
         .conductor-profile {
-          background: var(--bg-secondary, #ffffff); border-radius: 16px; padding: 30px;
-          width: 90%; max-width: 1000px; max-height: 90vh; overflow-y: auto;
+          background: var(--bg-secondary, #ffffff); border-radius: 16px; padding: 24px;
+          width: 90%; max-width: 900px; max-height: 90vh; overflow-y: auto;
           position: relative; color: var(--text-primary);
           box-shadow: 0 10px 40px rgba(0,0,0,0.3);
           border: 1px solid var(--border-color);
         }
         .close-btn {
-          position: absolute; top: 15px; right: 20px;
+          position: absolute; top: 12px; right: 16px;
           background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
           opacity: 0.7; transition: all 0.2s; padding: 4px; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
@@ -617,36 +617,36 @@ const FlotaView = ({ usuario }) => {
         .close-btn:hover { opacity: 1; color: var(--text-primary); background: var(--bg-hover); }
         
         .profile-layout {
-          display: flex; gap: 30px; margin-top: 10px;
+          display: flex; gap: 24px; margin-top: 5px;
         }
         @media (max-width: 768px) {
           .profile-layout { flex-direction: column; }
         }
         .profile-left {
-          flex: 0 0 280px; text-align: center;
+          flex: 0 0 240px; text-align: center;
         }
         .driver-photo {
-          width: 100%; aspect-ratio: 9/16; background: var(--bg, #f1f5f9); border-radius: 12px;
+          width: 100%; aspect-ratio: 1/1; background: var(--bg, #f1f5f9); border-radius: 12px;
           display: flex; align-items: center; justify-content: center; overflow: hidden;
-          margin-bottom: 20px; border: 1px solid var(--border-color);
+          margin-bottom: 16px; border: 1px solid var(--border-color);
         }
         .driver-photo img { width: 100%; height: 100%; object-fit: cover; }
         .avatar-placeholder { opacity: 0.5; color: var(--text-muted); }
-        .driver-id { font-size: 1.2rem; margin: 0 0 5px 0; color: var(--primary-color, #38bdf8); font-weight: 600; letter-spacing: 1px; }
-        .driver-name { font-size: 1.4rem; margin: 0; color: var(--text-primary); opacity: 0.9; }
+        .driver-id { font-size: 1.1rem; margin: 0 0 4px 0; color: var(--primary-color, #38bdf8); font-weight: 600; letter-spacing: 1px; }
+        .driver-name { font-size: 1.25rem; margin: 0; color: var(--text-primary); opacity: 0.9; }
         
         .profile-right {
-          flex: 1; display: flex; flex-direction: column; gap: 20px;
+          flex: 1; display: flex; flex-direction: column; gap: 16px;
         }
         .vehicle-photo {
-          width: 100%; aspect-ratio: 21/9; background: var(--bg, #f1f5f9); border-radius: 12px;
+          width: 100%; height: 140px; background: var(--bg, #f1f5f9); border-radius: 12px;
           display: flex; align-items: center; justify-content: center; overflow: hidden;
           border: 1px solid var(--border-color);
         }
-        .vehicle-placeholder { text-align: center; font-size: 24px; opacity: 0.5; color: var(--text-muted); }
+        .vehicle-placeholder { text-align: center; font-size: 20px; opacity: 0.5; color: var(--text-muted); }
         
         .info-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+          display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
         }
         @media (max-width: 500px) {
           .info-grid { grid-template-columns: 1fr; }
