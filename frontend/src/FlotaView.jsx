@@ -609,12 +609,14 @@ const FlotaView = ({ usuario }) => {
           border: 1px solid var(--border-color);
         }
         .close-btn {
-          position: absolute; top: 12px; right: 16px;
-          background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
-          opacity: 0.7; transition: all 0.2s; padding: 4px; border-radius: 50%;
+          position: absolute; top: 16px; right: 16px;
+          background: var(--bg-secondary, #ffffff); border: 1px solid var(--border-color); 
+          color: var(--text-secondary); cursor: pointer;
+          transition: all 0.2s; padding: 6px; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
+          z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
-        .close-btn:hover { opacity: 1; color: var(--text-primary); background: var(--bg-hover); }
+        .close-btn:hover { color: var(--primary-color); transform: scale(1.1); border-color: var(--primary-color); }
         
         .profile-layout {
           display: flex; gap: 24px; margin-top: 5px;
