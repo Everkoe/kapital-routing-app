@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle } from 'lucide-react';
 
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const cameraInputRef = useRef(null);
   const x = useMotionValue(0);
   const background = useTransform(
     x,
@@ -25,11 +26,10 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
       setIsProcessing(false);
     } else if (offset.x < -100) {
       // Swipe Left -> Ausente
-      if(window.confirm(`¿Seguro que ${agente.nombre} no se presentó?`)) {
-        setIsProcessing(true);
-        await onSwipeAction('Ausente');
-        animate(x, 0, { duration: 0.3 });
-        setIsProcessing(false);
+      if(window.confirm(`¿Seguro que ${agente.nombre} no se presentó?\n\nSe requiere foto de evidencia. Presiona OK para abrir la cámara.`)) {
+        if (cameraInputRef.current) {
+          cameraInputRef.current.click();
+        }
       } else {
         animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
       }
@@ -42,8 +42,33 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
   const isRecogido = agente.estado === 'Recogido';
   const isAusente = agente.estado === 'Ausente';
 
+  const handleCameraCapture = (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
+      return;
+    }
+    setIsProcessing(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Str = event.target.result;
+      await onSwipeAction('Ausente', base64Str);
+      animate(x, 0, { duration: 0.3 });
+      setIsProcessing(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '12px', marginBottom: '10px' }}>
+      <input 
+        type="file" 
+        accept="image/*" 
+        capture="environment" 
+        ref={cameraInputRef}
+        style={{ display: 'none' }}
+        onChange={handleCameraCapture}
+      />
       {/* Background Layer showing Action Icons */}
       <motion.div style={{
         position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
