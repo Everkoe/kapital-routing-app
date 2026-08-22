@@ -105,6 +105,21 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
           <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>
             🏠 {agente?.direccion || 'Sin dirección'}
           </div>
+          
+          {/* Botones de acción rápida */}
+          {!isCompletado && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }} className="no-print">
+              <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente?.direccion || '')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze" onPointerDown={e => e.stopPropagation()}>
+                <Navigation size={14} /> Waze
+              </a>
+              <a href={`https://wa.me/51${agente?.telefono || ''}?text=${encodeURIComponent('Hola ' + (agente?.nombre || '') + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp" onPointerDown={e => e.stopPropagation()}>
+                <MessageCircle size={14} /> 
+              </a>
+              <a href={`tel:${agente?.telefono || ''}`} className="quick-action-btn phone" onPointerDown={e => e.stopPropagation()}>
+                <Phone size={14} />
+              </a>
+            </div>
+          )}
         </div>
         
         {/* Photo Thumbnail for Ausente passengers */}
@@ -129,22 +144,6 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
             />
           </div>
         )}
-          
-        {/* Botones de acción rápida */}
-          {!isCompletado && (
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }} className="no-print">
-              <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente?.direccion || '')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze" onPointerDown={e => e.stopPropagation()}>
-                <Navigation size={14} /> Waze
-              </a>
-              <a href={`https://wa.me/51${agente?.telefono || ''}?text=${encodeURIComponent('Hola ' + (agente?.nombre || '') + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp" onPointerDown={e => e.stopPropagation()}>
-                <MessageCircle size={14} /> 
-              </a>
-              <a href={`tel:${agente?.telefono || ''}`} className="quick-action-btn phone" onPointerDown={e => e.stopPropagation()}>
-                <Phone size={14} />
-              </a>
-            </div>
-          )}
-        </div>
         
         {!isCompletado && !isProcessing && (
           <div className="swipe-hint" style={{ opacity: 0.5, display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: '0.7rem' }}>
