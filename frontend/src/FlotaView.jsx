@@ -639,7 +639,7 @@ const FlotaView = ({ usuario }) => {
           flex: 1; display: flex; flex-direction: column; gap: 16px;
         }
         .vehicle-photo {
-          width: 100%; height: 140px; background: var(--bg, #f1f5f9); border-radius: 12px;
+          width: 100%; aspect-ratio: 21/9; background: var(--bg, #f1f5f9); border-radius: 12px;
           display: flex; align-items: center; justify-content: center; overflow: hidden;
           border: 1px solid var(--border-color);
         }
