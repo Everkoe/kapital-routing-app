@@ -63,7 +63,7 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
         drag={isCompletado || isProcessing ? false : "x"}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.7}
-        style={{ x, background: 'var(--kapital-card-bg)', zIndex: 2, padding: '15px 20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kapital-border)' }}
+        style={{ position: 'relative', x, background: 'var(--kapital-card-bg)', zIndex: 2, padding: '15px 20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kapital-border)' }}
         onDragEnd={handleDragEnd}
         className={`driver-passenger-item-draggable ${isCompletado ? 'recogido' : ''} ${isNext ? 'next-passenger-glow' : ''}`}
       >
