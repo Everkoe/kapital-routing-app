@@ -67,26 +67,26 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
         onDragEnd={handleDragEnd}
         className={`driver-passenger-item-draggable ${isCompletado ? 'recogido' : ''} ${isNext ? 'next-passenger-glow' : ''}`}
       >
-        <div className="driver-passenger-info" style={{ flex: 1 }}>
-          <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'inherit' }}>
-            {agente.nombre}
+        <div className="driver-passenger-info" style={{ flex: 1, color: 'var(--kapital-text-primary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'var(--kapital-text-primary)' }}>
+            {agente?.nombre || 'Pasajero Sin Nombre'}
             {isRecogido && <span style={{marginLeft: '8px', color: '#10b981', fontSize: '0.8rem'}}>✓ Listo</span>}
             {isAusente && <span style={{marginLeft: '8px', color: '#f59e0b', fontSize: '0.8rem'}}>❌ Ausente</span>}
           </div>
-          <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)', marginTop: '4px' }}>
-            🏠 {agente.direccion}
+          <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>
+            🏠 {agente?.direccion || 'Sin dirección'}
           </div>
           
           {/* Botones de acción rápida */}
           {!isCompletado && (
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }} className="no-print">
-              <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente.direccion)}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze" onPointerDown={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }} className="no-print">
+              <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente?.direccion || '')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze" onPointerDown={e => e.stopPropagation()}>
                 <Navigation size={14} /> Waze
               </a>
-              <a href={`https://wa.me/51${agente.telefono || ''}?text=${encodeURIComponent('Hola ' + agente.nombre + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp" onPointerDown={e => e.stopPropagation()}>
+              <a href={`https://wa.me/51${agente?.telefono || ''}?text=${encodeURIComponent('Hola ' + (agente?.nombre || '') + ', tu transporte de Kapital Routing está afuera.')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn whatsapp" onPointerDown={e => e.stopPropagation()}>
                 <MessageCircle size={14} /> 
               </a>
-              <a href={`tel:${agente.telefono || ''}`} className="quick-action-btn phone" onPointerDown={e => e.stopPropagation()}>
+              <a href={`tel:${agente?.telefono || ''}`} className="quick-action-btn phone" onPointerDown={e => e.stopPropagation()}>
                 <Phone size={14} />
               </a>
             </div>
