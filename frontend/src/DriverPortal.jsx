@@ -18,6 +18,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   
   // Estado para Modo Conducción
   const [activeZenRouteIndex, setActiveZenRouteIndex] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null);
 
   // Poll for status changes if pending
   useEffect(() => {
@@ -229,7 +230,8 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
                     agente={agente}
                     isNext={isNext}
                     isCompletado={isCompletado}
-                    onSwipeAction={(estado) => actualizarEstadoPasajero(ruta.horario, agente.id, estado)}
+                    onSwipeAction={(estado, evidencia) => actualizarEstadoPasajero(ruta.horario, agente.id, estado, evidencia)}
+                    onImageClick={setPreviewImage}
                   />
                 );
               })}
@@ -247,6 +249,41 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         </>
         )}
       </main>
+
+      {/* Fullscreen Photo Preview Modal */}
+      {previewImage && (
+        <div 
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(10px)',
+            zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '20px', cursor: 'zoom-out'
+          }}
+          onClick={() => setPreviewImage(null)}
+        >
+          <img 
+            src={previewImage} 
+            alt="Evidencia" 
+            style={{
+              maxWidth: '100%', maxHeight: '100%', objectFit: 'contain',
+              borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
+            }} 
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button 
+            onClick={() => setPreviewImage(null)}
+            style={{
+              position: 'absolute', top: '20px', right: '20px',
+              background: 'white', color: 'black', border: 'none',
+              borderRadius: '50%', width: '40px', height: '40px',
+              fontWeight: 'bold', fontSize: '20px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <style jsx>{`
         .driver-portal {

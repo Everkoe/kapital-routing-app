@@ -3,7 +3,7 @@ import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle } from 'lucide-react';
 import { compressImage } from '../utils/imageUtils';
 
-const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => {
+const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onImageClick }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraInputRef = useRef(null);
   const x = useMotionValue(0);
@@ -105,8 +105,32 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction }) => 
           <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>
             🏠 {agente?.direccion || 'Sin dirección'}
           </div>
+        </div>
+        
+        {/* Photo Thumbnail for Ausente passengers */}
+        {isAusente && agente.evidencia_foto_url && (
+          <div 
+            onClick={() => onImageClick && onImageClick(agente.evidencia_foto_url)}
+            style={{ 
+              marginLeft: '15px',
+              cursor: 'zoom-in',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+              border: '2px solid rgba(255,255,255,0.1)',
+              width: '50px', height: '50px',
+              flexShrink: 0
+            }}
+          >
+            <img 
+              src={agente.evidencia_foto_url} 
+              alt="Evidencia" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        )}
           
-          {/* Botones de acción rápida */}
+        {/* Botones de acción rápida */}
           {!isCompletado && (
             <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }} className="no-print">
               <a href={`https://www.waze.com/ul?q=${encodeURIComponent(agente?.direccion || '')}`} target="_blank" rel="noopener noreferrer" className="quick-action-btn waze" onPointerDown={e => e.stopPropagation()}>
