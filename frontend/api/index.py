@@ -1,7 +1,6 @@
 # api/index.py
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body
-from fastapi.staticfiles import StaticFiles
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -130,6 +129,34 @@ async def reload_db():
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
 
+async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
+    """Sube una imagen Base64 al bucket 'evidencias' de Supabase Storage."""
+    try:
+        if "," in base64_str:
+            _, base64_str = base64_str.split(",", 1)
+        file_data = base64.b64decode(base64_str)
+        
+        # SUPABASE_URL es "https://[...].supabase.co/rest/v1"
+        storage_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/evidencias/{filename}"
+        
+        hdrs = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "image/jpeg"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.post(storage_url, headers=hdrs, content=file_data)
+            if res.status_code in [200, 201]:
+                public_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/public/evidencias/{filename}"
+                return public_url
+            else:
+                print(f"Supabase Storage Upload FAILED: {res.status_code} - {res.text}")
+                return ""
+    except Exception as e:
+        print(f"Error en upload_evidence_to_supabase: {e}")
+        return ""
+
 async def persist():
     try:
         payload = {
@@ -203,11 +230,6 @@ async def persist_routes_summary(summary: list):
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
 app = FastAPI(title="Kapital Routing Backend (JSON DB + Polling)", version="2.0")
-
-# Asegurar que el directorio de uploads exista
-uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
-os.makedirs(uploads_dir, exist_ok=True)
-app.mount("/api/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -852,23 +874,13 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
         if agente:
             agente["estado"] = data.estado
             
-            # Guardar evidencia si existe
+            # Guardar evidencia en Supabase Storage si existe
             if data.evidencia_foto:
                 try:
-                    uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
-                    os.makedirs(uploads_dir, exist_ok=True)
-                    # Separar metadata del base64 (ej. "data:image/jpeg;base64,...")
-                    if "," in data.evidencia_foto:
-                        header, base64_str = data.evidencia_foto.split(",", 1)
-                    else:
-                        base64_str = data.evidencia_foto
-                    
-                    file_data = base64.b64decode(base64_str)
                     filename = f"evidencia_{data.agente_id}_{int(datetime.now().timestamp())}.jpg"
-                    filepath = os.path.join(uploads_dir, filename)
-                    with open(filepath, "wb") as f:
-                        f.write(file_data)
-                    agente["evidencia_foto_url"] = f"/api/uploads/{filename}"
+                    public_url = await upload_evidence_to_supabase(data.evidencia_foto, filename)
+                    if public_url:
+                        agente["evidencia_foto_url"] = public_url
                 except Exception as e:
                     print(f"Error guardando evidencia: {e}")
             
