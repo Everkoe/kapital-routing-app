@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X } from 'lucide-react';
 import { GlobalLoader } from './App';
 
 import './App.css';
@@ -428,7 +428,7 @@ const FlotaView = ({ usuario }) => {
       {isConductorModalOpen && (
         <div className="modal-overlay" onClick={closeConductorModal}>
           <div className="conductor-profile" onClick={e => e.stopPropagation()}>
-            <button className="close-btn" onClick={closeConductorModal}>&times;</button>
+            <button className="close-btn" onClick={closeConductorModal} title="Cerrar"><X size={24} /></button>
             {isLoadingConductor ? (
                 <div style={{ padding: '50px', textAlign: 'center' }}>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', opacity: 0.5 }}>
@@ -483,9 +483,14 @@ const FlotaView = ({ usuario }) => {
                         { name: 'Revisión Técnica', file: conductorInfo.flota?.revision_doc || conductorInfo.usuario.perfil_conductor?.revisionTecnica }
                       ].map((doc, i) => (
                         <div key={i} className="doc-item">
-                          <span>{doc.name}{!doc.file && <span style={{color: '#f59e0b', marginLeft: '5px'}}>⏳ Falta</span>}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {doc.name}
+                            {!doc.file && <span style={{color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: '600', padding: '2px 6px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '4px'}}><Clock size={12} /> Falta</span>}
+                          </span>
                           {doc.file && (
-                            <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>👁️ Ver Archivo</button>
+                            <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>
+                              <Eye size={14} /> Ver Archivo
+                            </button>
                           )}
                         </div>
                       ))}
@@ -597,18 +602,19 @@ const FlotaView = ({ usuario }) => {
       <style>{`
         /* Modal Profile CSS */
         .conductor-profile {
-          background: #1a1a24; border-radius: 16px; padding: 30px;
+          background: var(--bg-secondary, #ffffff); border-radius: 16px; padding: 30px;
           width: 90%; max-width: 1000px; max-height: 90vh; overflow-y: auto;
-          position: relative; color: #fff;
+          position: relative; color: var(--text-primary);
           box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-          border: 1px solid rgba(255,255,255,0.1);
+          border: 1px solid var(--border-color);
         }
         .close-btn {
           position: absolute; top: 15px; right: 20px;
-          background: transparent; border: none; color: #fff; font-size: 24px; cursor: pointer;
-          opacity: 0.7; transition: opacity 0.2s;
+          background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
+          opacity: 0.7; transition: all 0.2s; padding: 4px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
         }
-        .close-btn:hover { opacity: 1; }
+        .close-btn:hover { opacity: 1; color: var(--text-primary); background: var(--bg-hover); }
         
         .profile-layout {
           display: flex; gap: 30px; margin-top: 10px;
@@ -620,24 +626,24 @@ const FlotaView = ({ usuario }) => {
           flex: 0 0 280px; text-align: center;
         }
         .driver-photo {
-          width: 100%; aspect-ratio: 9/16; background: #2a2a3c; border-radius: 12px;
+          width: 100%; aspect-ratio: 9/16; background: var(--bg, #f1f5f9); border-radius: 12px;
           display: flex; align-items: center; justify-content: center; overflow: hidden;
-          margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.05);
+          margin-bottom: 20px; border: 1px solid var(--border-color);
         }
         .driver-photo img { width: 100%; height: 100%; object-fit: cover; }
-        .avatar-placeholder { font-size: 80px; opacity: 0.5; }
-        .driver-id { font-size: 1.2rem; margin: 0 0 5px 0; color: #38bdf8; font-weight: 600; letter-spacing: 1px; }
-        .driver-name { font-size: 1.4rem; margin: 0; opacity: 0.9; }
+        .avatar-placeholder { opacity: 0.5; color: var(--text-muted); }
+        .driver-id { font-size: 1.2rem; margin: 0 0 5px 0; color: var(--primary-color, #38bdf8); font-weight: 600; letter-spacing: 1px; }
+        .driver-name { font-size: 1.4rem; margin: 0; color: var(--text-primary); opacity: 0.9; }
         
         .profile-right {
           flex: 1; display: flex; flex-direction: column; gap: 20px;
         }
         .vehicle-photo {
-          width: 100%; aspect-ratio: 21/9; background: #2a2a3c; border-radius: 12px;
+          width: 100%; aspect-ratio: 21/9; background: var(--bg, #f1f5f9); border-radius: 12px;
           display: flex; align-items: center; justify-content: center; overflow: hidden;
-          border: 1px solid rgba(255,255,255,0.05);
+          border: 1px solid var(--border-color);
         }
-        .vehicle-placeholder { text-align: center; font-size: 24px; opacity: 0.5; }
+        .vehicle-placeholder { text-align: center; font-size: 24px; opacity: 0.5; color: var(--text-muted); }
         
         .info-grid {
           display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
@@ -646,21 +652,21 @@ const FlotaView = ({ usuario }) => {
           .info-grid { grid-template-columns: 1fr; }
         }
         .info-section {
-          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.05);
+          background: var(--bg, #f9fafb); padding: 20px; border-radius: 12px;
+          border: 1px solid var(--border-color);
         }
         .info-section h4 {
-          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-secondary);
         }
-        .info-section p { margin: 8px 0; font-size: 0.9rem; opacity: 0.8; }
-        .info-section strong { color: #f4f4f5; font-weight: 600; opacity: 1; }
+        .info-section p { margin: 8px 0; font-size: 0.9rem; color: var(--text-secondary); }
+        .info-section strong { color: var(--text-primary); font-weight: 600; }
         
         .docs-section {
-          background: rgba(255,255,255,0.02); padding: 20px; border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.05);
+          background: var(--bg, #f9fafb); padding: 20px; border-radius: 12px;
+          border: 1px solid var(--border-color);
         }
         .docs-section h4 {
-          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; color: #a1a1aa;
+          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-secondary);
         }
         .docs-grid {
           display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
@@ -670,16 +676,22 @@ const FlotaView = ({ usuario }) => {
         }
         .doc-item {
           display: flex; justify-content: space-between; align-items: center;
-          background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px;
-          font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.03);
+          background: var(--bg-secondary, #ffffff); padding: 10px 14px; border-radius: 8px;
+          font-size: 0.85rem; border: 1px solid var(--border-color);
+          color: var(--text-primary); transition: border-color 0.2s;
         }
+        .doc-item:hover { border-color: var(--primary-color); }
         .text-green { color: #10b981; font-weight: 600; margin-left: 5px; }
         .btn-view-doc {
-          background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.3); color: #38bdf8;
-          padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;
+          background: var(--accent-bg, rgba(56,189,248,0.1)); 
+          border: 1px solid var(--accent-border, rgba(56,189,248,0.3)); 
+          color: var(--primary-color, #38bdf8);
+          padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; 
+          transition: all 0.2s; display: flex; align-items: center; gap: 6px; font-weight: 600;
         }
         .btn-view-doc:hover {
-          background: rgba(56,189,248,0.2);
+          background: var(--primary-color);
+          color: #ffffff;
         }
 
         .btn-icon {
