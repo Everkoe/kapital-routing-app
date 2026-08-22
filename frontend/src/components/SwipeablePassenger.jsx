@@ -51,7 +51,7 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
     }
     setIsProcessing(true);
     try {
-      const compressedBase64Str = await compressImage(file, 800, 0.6); // 800px max width, 60% quality
+      const compressedBase64Str = await compressImage(file); 
       await onSwipeAction('Ausente', compressedBase64Str);
       animate(x, 0, { duration: 0.3 });
     } catch (error) {

@@ -94,7 +94,7 @@ const ZenModeView = ({ ruta, conductorId, onExitZen, onActualizarPasajero }) => 
                 if (!file) return;
                 setIsUploading(true);
                 try {
-                  const compressedBase64Str = await compressImage(file, 800, 0.6);
+                  const compressedBase64Str = await compressImage(file);
                   onActualizarPasajero(ruta.horario, nextPassenger.id, 'Ausente', compressedBase64Str);
                 } catch (error) {
                   console.error("Error compressing image:", error);

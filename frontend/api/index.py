@@ -151,8 +151,8 @@ async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
                 public_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/public/evidencias/{filename}"
                 return public_url
             else:
-                print(f"Supabase Storage Upload FAILED: {res.status_code} - {res.text}")
-                return ""
+                print(f"Supabase Storage Upload Failed! Status: {res.status_code}, Body: {res.text}")
+                return None
     except Exception as e:
         print(f"Error en upload_evidence_to_supabase: {e}")
         return ""
