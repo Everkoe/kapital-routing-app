@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle, MapPin } from 'lucide-react';
 import { compressImage } from '../utils/imageUtils';
 
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onImageClick }) => {
@@ -96,14 +96,23 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
         onDragEnd={handleDragEnd}
         className={`driver-passenger-item-draggable ${isCompletado ? 'recogido' : ''} ${isNext ? 'next-passenger-glow' : ''}`}
       >
-        <div className="driver-passenger-info" style={{ flex: 1, color: 'var(--kapital-text-primary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'var(--kapital-text-primary)' }}>
+        <div className="driver-passenger-info" style={{ flex: 1, color: 'var(--kapital-text-primary)', display: 'flex', flexDirection: 'column', gap: '6px', textAlign: 'left' }}>
+          
+          {/* Status Badges */}
+          {(isRecogido || isAusente) && (
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '2px' }}>
+              {isRecogido && <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>✓ PASAJERO RECOGIDO</span>}
+              {isAusente && <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>❌ PASAJERO AUSENTE</span>}
+            </div>
+          )}
+
+          <div style={{ fontWeight: '800', fontSize: '1.05rem', color: isNext ? '#38BDF8' : 'var(--kapital-text-primary)', lineHeight: '1.3', wordBreak: 'break-word' }}>
             {agente?.nombre || 'Pasajero Sin Nombre'}
-            {isRecogido && <span style={{marginLeft: '8px', color: '#10b981', fontSize: '0.8rem'}}>✓ Listo</span>}
-            {isAusente && <span style={{marginLeft: '8px', color: '#f59e0b', fontSize: '0.8rem'}}>❌ Ausente</span>}
           </div>
-          <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)' }}>
-            🏠 {agente?.direccion || 'Sin dirección'}
+          
+          <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+            <MapPin size={14} style={{ marginTop: '2px', flexShrink: 0, color: 'var(--kapital-text-muted)' }} />
+            <span style={{ flex: 1, lineHeight: '1.4' }}>{agente?.direccion || 'Sin dirección'}</span>
           </div>
           
           {/* Botones de acción rápida */}
@@ -127,16 +136,20 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
           <div 
             onClick={() => onImageClick && onImageClick(agente.evidencia_foto_url)}
             style={{ 
-              marginLeft: '15px',
+              marginLeft: '12px',
               cursor: 'zoom-in',
-              borderRadius: '8px',
+              borderRadius: '12px',
               overflow: 'hidden',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
               border: '2px solid rgba(255,255,255,0.1)',
-              width: '50px', height: '50px',
-              flexShrink: 0
+              width: '65px', height: '65px',
+              flexShrink: 0,
+              position: 'relative'
             }}
           >
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.7)', color: 'white', fontSize: '0.55rem', textAlign: 'center', padding: '3px 0', fontWeight: 'bold', backdropFilter: 'blur(2px)' }}>
+              EVIDENCIA
+            </div>
             <img 
               src={agente.evidencia_foto_url} 
               alt="Evidencia" 
