@@ -603,7 +603,7 @@ const FlotaView = ({ usuario }) => {
         /* Modal Profile CSS */
         .conductor-profile {
           background: var(--bg-secondary, #ffffff); border-radius: 16px; padding: 24px;
-          width: 90%; max-width: 900px; max-height: 90vh; overflow-y: auto;
+          width: 95%; max-width: 1100px; max-height: 90vh; overflow-y: auto;
           position: relative; color: var(--text-primary);
           box-shadow: 0 10px 40px rgba(0,0,0,0.3);
           border: 1px solid var(--border-color);
@@ -648,7 +648,7 @@ const FlotaView = ({ usuario }) => {
         .info-grid {
           display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
         }
-        @media (max-width: 500px) {
+        @media (max-width: 600px) {
           .info-grid { grid-template-columns: 1fr; }
         }
         .info-section {
@@ -669,9 +669,12 @@ const FlotaView = ({ usuario }) => {
           font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-secondary);
         }
         .docs-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+          display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
         }
-        @media (max-width: 500px) {
+        @media (max-width: 900px) {
+          .docs-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
           .docs-grid { grid-template-columns: 1fr; }
         }
         .doc-item {
