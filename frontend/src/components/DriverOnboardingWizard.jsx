@@ -82,9 +82,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     soat: null,
     revisionTecnica: null,
 
-    // Requisitos de Empresa
-    certificadoEps: null,
-    seguroSctr: null,
   });
 
   // Calculate age automatically
@@ -379,24 +376,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               <FileUploadZone label="Revisión Técnica (Vigente)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
             </div>
           </div>
-          <div className="wizard-actions">
-            <button className="btn-secondary" onClick={() => toggleSection('requisitos')}>Siguiente Sección</button>
-          </div>
-        </AccordionItem>
-
-        <AccordionItem 
-          title="3. Requisitos de Empresa" 
-          isOpen={openSection === 'requisitos'} 
-          onToggle={() => toggleSection('requisitos')}
-          status={progress >= 95 ? 'complete' : 'incomplete'}
-        >
-          <div className="form-grid">
-            <div className="form-group full-width">
-              <FileUploadZone label="Certificado EPS (Opcional)" file={formData.certificadoEps} onFileSelect={(f) => handleFileChange('certificadoEps', f)} />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone label="Seguro SCTR (Salud y Pensión)" file={formData.seguroSctr} onFileSelect={(f) => handleFileChange('seguroSctr', f)} />
-            </div>
           </div>
         </AccordionItem>
       </div>
