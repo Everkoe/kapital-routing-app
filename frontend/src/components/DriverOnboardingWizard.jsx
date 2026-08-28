@@ -376,7 +376,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               <FileUploadZone label="Revisión Técnica (Vigente)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
             </div>
           </div>
-          </div>
         </AccordionItem>
       </div>
 
