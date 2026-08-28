@@ -60,9 +60,10 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     
     // Archivos (Files)
     comprobanteDomicilio: null,
+    dniScaneado: null,
     licenciaConducir: null,
     recordConductor: null,
-    antecedentesPenales: null,
+    antecedentesPoliciales: null,
     cv: null,
     certificadosTrabajo: null,
     referenciasLaborales: null,
@@ -123,9 +124,10 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.direccion) filled++;
     if (formData.telefonoDirecto) filled++;
     if (formData.comprobanteDomicilio) filled++;
+    if (formData.dniScaneado) filled++;
     if (formData.licenciaConducir) filled++;
     if (formData.recordConductor) filled++;
-    if (formData.antecedentesPenales) filled++;
+    if (formData.antecedentesPoliciales) filled++;
     if (formData.cv) filled++;
     if (formData.examenMedico) filled++;
     if (formData.examenToxicologico) filled++;
@@ -139,7 +141,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.soat) filled++;
     if (formData.revisionTecnica) filled++;
 
-    return Math.round((filled / 19) * 100); // Updated total required fields to 19
+    return Math.round((filled / 20) * 100); // Updated total required fields to 20
   };
 
   const handleSaveDraft = () => {
@@ -246,6 +248,13 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           <div className="form-grid">
             <div className="form-group full-width">
               <FileUploadZone 
+                label="DNI Escaneado (Ambos lados)" 
+                file={formData.dniScaneado} 
+                onFileSelect={(f) => handleFileChange('dniScaneado', f)} 
+              />
+            </div>
+            <div className="form-group full-width">
+              <FileUploadZone 
                 label="Licencia de Conducir (Vigente)" 
                 file={formData.licenciaConducir} 
                 onFileSelect={(f) => handleFileChange('licenciaConducir', f)} 
@@ -260,9 +269,9 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </div>
             <div className="form-group full-width">
               <FileUploadZone 
-                label="Certificado de Antecedentes (Penales, Policiales, Judiciales)" 
-                file={formData.antecedentesPenales} 
-                onFileSelect={(f) => handleFileChange('antecedentesPenales', f)} 
+                label="Certificado de Antecedentes Policiales" 
+                file={formData.antecedentesPoliciales} 
+                onFileSelect={(f) => handleFileChange('antecedentesPoliciales', f)} 
               />
             </div>
           </div>
