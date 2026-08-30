@@ -136,9 +136,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.vehiculoCapacidad) filled++;
     if (formData.tarjetaPropiedad) filled++;
     if (formData.soat) filled++;
-    if (formData.revisionTecnica) filled++;
 
-    return Math.round((filled / 20) * 100); // Updated total required fields to 20
+    return Math.round((filled / 19) * 100); // Updated total required fields to 19
   };
 
   const handleSaveDraft = () => {
@@ -373,7 +372,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)} />
             </div>
             <div className="form-group full-width">
-              <FileUploadZone label="Revisión Técnica (Vigente)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
+              <FileUploadZone label="Revisión Técnica (Opcional)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
             </div>
           </div>
         </AccordionItem>
