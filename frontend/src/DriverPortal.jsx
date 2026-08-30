@@ -86,6 +86,19 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   };
 
   const actualizarEstadoPasajero = async (horario, agenteId, estado, evidenciaFoto = null) => {
+    // Actualización Optimista
+    setRutas(prevRutas => prevRutas.map(ruta => {
+      if (ruta.horario === horario) {
+        return {
+          ...ruta,
+          agentes: ruta.agentes.map(agente => 
+            agente.id === agenteId ? { ...agente, estado: estado } : agente
+          )
+        };
+      }
+      return ruta;
+    }));
+
     try {
       const response = await fetch('/api/actualizar-pasajero', {
         method: 'POST',
@@ -99,7 +112,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         })
       });
       if (response.ok) {
-        fetchMisRutas();
+        // fetchMisRutas(); ya no recargamos de frente por el optimismo
         toast.success(`Pasajero marcado como ${estado}`);
       } else {
         toast.error("Error al actualizar pasajero");

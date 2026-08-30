@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle, MapPin } from 'lucide-react';
+import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle, MapPin, XCircle } from 'lucide-react';
 
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onImageClick }) => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -68,9 +68,19 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
           
           {/* Status Badges */}
           {(isRecogido || isAusente) && (
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '2px' }}>
-              {isRecogido && <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>✓ PASAJERO RECOGIDO</span>}
-              {isAusente && <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold' }}>❌ PASAJERO AUSENTE</span>}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+              {isRecogido && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', color: '#10b981', padding: '4px 8px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <CheckCircle size={12} strokeWidth={3} />
+                  <span>Recogido</span>
+                </div>
+              )}
+              {isAusente && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '4px 8px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <XCircle size={12} strokeWidth={3} />
+                  <span>Ausente</span>
+                </div>
+              )}
             </div>
           )}
 
