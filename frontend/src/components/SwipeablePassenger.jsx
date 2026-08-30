@@ -5,11 +5,6 @@ import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle, MapPin, X
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onImageClick }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const x = useMotionValue(0);
-  const background = useTransform(
-    x,
-    [-100, 0, 100],
-    ['#f59e0b', 'var(--kapital-card-bg)', '#10b981']
-  );
   
   const iconOpacityRight = useTransform(x, [0, 50], [0, 1]);
   const iconOpacityLeft = useTransform(x, [0, -50], [0, 1]);
@@ -42,18 +37,22 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
     <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '12px', marginBottom: '10px' }}>
 
       {/* Background Layer showing Action Icons */}
-      <motion.div style={{
+      <div style={{
         position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
-        background, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 20px', borderRadius: '12px'
+        borderRadius: '12px', overflow: 'hidden', backgroundColor: 'var(--kapital-card-bg)'
       }}>
-        <motion.div style={{ opacity: iconOpacityRight, color: 'white', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-          <CheckCircle size={24} /> Recogido
-        </motion.div>
-        <motion.div style={{ opacity: iconOpacityLeft, color: 'white', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-           Ausente <AlertTriangle size={24} />
-        </motion.div>
-      </motion.div>
+        <motion.div style={{ position: 'absolute', inset: 0, background: '#10b981', opacity: iconOpacityRight }} />
+        <motion.div style={{ position: 'absolute', inset: 0, background: '#f59e0b', opacity: iconOpacityLeft }} />
+        
+        <div style={{ position: 'relative', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px' }}>
+          <motion.div style={{ opacity: iconOpacityRight, color: 'white', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+            <CheckCircle size={24} /> Recogido
+          </motion.div>
+          <motion.div style={{ opacity: iconOpacityLeft, color: 'white', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+             Ausente <XCircle size={24} />
+          </motion.div>
+        </div>
+      </div>
 
       {/* Foreground Draggable Card */}
       <motion.div
