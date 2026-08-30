@@ -12,6 +12,9 @@ import random
 import os
 from datetime import datetime
 import base64
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 

@@ -1,11 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { Phone, MessageCircle, Navigation, CheckCircle, AlertTriangle, MapPin } from 'lucide-react';
-import { compressImage } from '../utils/imageUtils';
 
 const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onImageClick }) => {
   const [isProcessing, setIsProcessing] = useState(false);
-  const cameraInputRef = useRef(null);
   const x = useMotionValue(0);
   const background = useTransform(
     x,
@@ -27,13 +25,10 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
       setIsProcessing(false);
     } else if (offset.x < -100) {
       // Swipe Left -> Ausente
-      if(window.confirm(`¿Seguro que ${agente.nombre} no se presentó?\n\nSe requiere foto de evidencia. Presiona OK para abrir la cámara.`)) {
-        if (cameraInputRef.current) {
-          cameraInputRef.current.click();
-        }
-      } else {
-        animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
-      }
+      setIsProcessing(true);
+      await onSwipeAction('Ausente');
+      animate(x, 0, { duration: 0.3 });
+      setIsProcessing(false);
     } else {
       // Bounce back
       animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
@@ -43,36 +38,9 @@ const SwipeablePassenger = ({ agente, isNext, isCompletado, onSwipeAction, onIma
   const isRecogido = agente.estado === 'Recogido';
   const isAusente = agente.estado === 'Ausente';
 
-  const handleCameraCapture = async (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-      animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
-      return;
-    }
-    setIsProcessing(true);
-    try {
-      const compressedBase64Str = await compressImage(file); 
-      await onSwipeAction('Ausente', compressedBase64Str);
-      animate(x, 0, { duration: 0.3 });
-    } catch (error) {
-      console.error("Error compressing image:", error);
-      alert("Error al procesar la foto. Intenta nuevamente.");
-      animate(x, 0, { type: 'spring', stiffness: 300, damping: 20 });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   return (
     <div style={{ position: 'relative', overflow: 'hidden', borderRadius: '12px', marginBottom: '10px' }}>
-      <input 
-        type="file" 
-        accept="image/*" 
-        capture="environment" 
-        ref={cameraInputRef}
-        style={{ display: 'none' }}
-        onChange={handleCameraCapture}
-      />
+
       {/* Background Layer showing Action Icons */}
       <motion.div style={{
         position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
