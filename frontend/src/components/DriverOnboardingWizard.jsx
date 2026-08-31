@@ -85,14 +85,17 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   // Calculate age automatically
   useEffect(() => {
     if (formData.fechaNacimiento) {
-      const birthDate = new Date(formData.fechaNacimiento);
       const today = new Date();
+      const birthDate = new Date(formData.fechaNacimiento);
       let age = today.getFullYear() - birthDate.getFullYear();
       const m = today.getMonth() - birthDate.getMonth();
       if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
         age--;
       }
-      setFormData(prev => ({ ...prev, edad: age > 0 ? age.toString() : '' }));
+      const ageStr = age > 0 ? age.toString() : '';
+      if (formData.edad !== ageStr) {
+        setFormData(prev => ({ ...prev, edad: ageStr }));
+      }
     }
   }, [formData.fechaNacimiento]);
 

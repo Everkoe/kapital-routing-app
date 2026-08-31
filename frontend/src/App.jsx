@@ -287,6 +287,89 @@ const StatusBadge = ({ estado }) => {
   );
 };
 
+const DocumentVerification = ({ driver }) => {
+  const [verifying, setVerifying] = useState({});
+  const [results, setResults] = useState({});
+
+  const handleVerify = async (type, param) => {
+    if (!param) return toast.error(`Falta parámetro para verificar ${type}`);
+    setVerifying(prev => ({ ...prev, [type]: true }));
+    try {
+      const res = await fetch(`/api/verify/${type}/${encodeURIComponent(param)}`);
+      const data = await res.json();
+      setResults(prev => ({ ...prev, [type]: data }));
+    } catch (e) {
+      toast.error(`Error verificando ${type}`);
+    } finally {
+      setVerifying(prev => ({ ...prev, [type]: false }));
+    }
+  };
+
+  const renderBadge = (res) => {
+    if (!res) return null;
+    const isOk = res.valido;
+    const bg = isOk ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+    const color = isOk ? '#10b981' : '#ef4444';
+    return (
+      <div style={{ background: bg, border: `1px solid ${color}44`, color, padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem', marginTop: '6px' }}>
+        <strong>{res.mensaje}</strong>
+        {res.fechaVencimiento && <div>Vence: {res.fechaVencimiento}</div>}
+        {res.compania && <div>Compañía: {res.compania}</div>}
+        {res.centro && <div>Centro: {res.centro}</div>}
+      </div>
+    );
+  };
+
+  const placa = driver?.perfil_conductor?.vehiculoPlaca;
+  const doc = driver?.perfil_conductor?.numDoc;
+
+  return (
+    <div style={{ marginTop: '20px', background: 'rgba(255,255,255,0.02)', padding: '15px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+      <h4 style={{ margin: '0 0 15px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Shield size={16} color="#38BDF8" /> Centro de Validación (APESEG / MTC)
+      </h4>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+        {/* SOAT */}
+        <div style={{ background: 'var(--bg)', padding: '12px', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>SOAT (Placa: {placa || 'N/A'})</div>
+          <button 
+            disabled={!placa || verifying.soat}
+            onClick={() => handleVerify('soat', placa)}
+            style={{ width: '100%', padding: '6px', background: '#38BDF8', border: 'none', borderRadius: '6px', color: '#fff', cursor: placa && !verifying.soat ? 'pointer' : 'not-allowed', opacity: placa && !verifying.soat ? 1 : 0.5 }}
+          >
+            {verifying.soat ? 'Consultando...' : 'Verificar SOAT'}
+          </button>
+          {renderBadge(results.soat)}
+        </div>
+        {/* CITV */}
+        <div style={{ background: 'var(--bg)', padding: '12px', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>Rev. Técnica (Placa: {placa || 'N/A'})</div>
+          <button 
+            disabled={!placa || verifying.citv}
+            onClick={() => handleVerify('citv', placa)}
+            style={{ width: '100%', padding: '6px', background: '#38BDF8', border: 'none', borderRadius: '6px', color: '#fff', cursor: placa && !verifying.citv ? 'pointer' : 'not-allowed', opacity: placa && !verifying.citv ? 1 : 0.5 }}
+          >
+            {verifying.citv ? 'Consultando...' : 'Verificar CITV'}
+          </button>
+          {renderBadge(results.citv)}
+        </div>
+        {/* LICENCIA */}
+        <div style={{ background: 'var(--bg)', padding: '12px', borderRadius: '8px' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>Licencia (Doc: {doc || 'N/A'})</div>
+          <button 
+            disabled={!doc || verifying.licencia}
+            onClick={() => handleVerify('licencia', doc)}
+            style={{ width: '100%', padding: '6px', background: '#38BDF8', border: 'none', borderRadius: '6px', color: '#fff', cursor: doc && !verifying.licencia ? 'pointer' : 'not-allowed', opacity: doc && !verifying.licencia ? 1 : 0.5 }}
+          >
+            {verifying.licencia ? 'Consultando...' : 'Verificar Licencia'}
+          </button>
+          {renderBadge(results.licencia)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Users Management Tab ---
 const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [users, setUsers] = useState([]);
@@ -495,6 +578,8 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                 {renderDocRow('SOAT', driverModal.user.perfil_conductor?.soat)}
                 {renderDocRow('Revisión Técnica', driverModal.user.perfil_conductor?.revisionTecnica)}
               </div>
+              
+              <DocumentVerification driver={driverModal.user} />
             </div>
             
             <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>

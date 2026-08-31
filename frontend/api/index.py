@@ -980,6 +980,51 @@ async def delete_flota(placa: str):
         return {"message": "Unidad eliminada", "flota": conductores_db}
     raise HTTPException(status_code=404, detail="Unidad no encontrada")
 
+import asyncio
+
+@app.get("/api/verify/soat/{placa}")
+async def verify_soat(placa: str):
+    # Simular una llamada a APESEG con httpx que demore un poco simulando scraping
+    await asyncio.sleep(1.2)
+    # Fallback / Simulación inteligente:
+    if "XXX" in placa.upper():
+        return {"valido": False, "mensaje": "Placa inválida o SOAT vencido (Simulación)", "fechaVencimiento": None}
+    
+    return {
+        "valido": True,
+        "mensaje": "SOAT VIGENTE (Simulación activa)",
+        "compania": "La Positiva",
+        "fechaVencimiento": "2027-12-31"
+    }
+
+@app.get("/api/verify/citv/{placa}")
+async def verify_citv(placa: str):
+    # Simular llamada a MTC CITV
+    await asyncio.sleep(1.0)
+    if "XXX" in placa.upper():
+        return {"valido": False, "mensaje": "Revisión Técnica vencida (Simulación)", "fechaVencimiento": None}
+    
+    return {
+        "valido": True,
+        "mensaje": "CITV VIGENTE (Simulación activa)",
+        "centro": "Farenet",
+        "fechaVencimiento": "2027-10-15"
+    }
+
+@app.get("/api/verify/licencia/{doc}")
+async def verify_licencia(doc: str):
+    # Simular llamada a MTC Licencias
+    await asyncio.sleep(1.5)
+    if doc.startswith("000"):
+        return {"valido": False, "mensaje": "Licencia Retenida (Simulación)", "claseCategoria": None}
+    
+    return {
+        "valido": True,
+        "mensaje": "LICENCIA VIGENTE (Simulación activa)",
+        "claseCategoria": "A-IIb",
+        "fechaVencimiento": "2028-05-20"
+    }
+
 @app.post("/api/clear-routes")
 async def clear_routes():
     await reload_db()
