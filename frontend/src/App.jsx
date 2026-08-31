@@ -56,7 +56,7 @@ const PantallaAuth = ({ onLogin }) => {
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const registerIdentifier = formData.rol === 'Conductor' ? formData.dni : formData.email;
-    const payload = isLogin ? { identifier: formData.identifier, password: formData.password } : { ...formData, identifier: registerIdentifier };
+    const payload = isLogin ? { identifier: formData.identifier.trim(), password: formData.password } : { ...formData, identifier: registerIdentifier.trim() };
 
     setIsAuthLoading(true);
     try {
@@ -316,6 +316,7 @@ const DocumentVerification = ({ driver }) => {
         {res.fechaVencimiento && <div>Vence: {res.fechaVencimiento}</div>}
         {res.compania && <div>Compañía: {res.compania}</div>}
         {res.centro && <div>Centro: {res.centro}</div>}
+        {res.claseCategoria && <div>Clase: {res.claseCategoria}</div>}
       </div>
     );
   };

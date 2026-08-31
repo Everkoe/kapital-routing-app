@@ -79,8 +79,22 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     tarjetaPropiedad: null,
     soat: null,
     revisionTecnica: null,
-
   });
+
+  useEffect(() => {
+    const saved = localStorage.getItem('driver_onboarding_progress');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Only load if it matches the current user's DNI to avoid loading someone else's draft
+        if (!parsed.numDoc || parsed.numDoc === usuario?.nombre || parsed.numDoc === usuario?.identifier) {
+          setFormData(parsed);
+        }
+      } catch (e) {
+        console.error("Error loading draft", e);
+      }
+    }
+  }, [usuario]);
 
   // Calculate age automatically
   useEffect(() => {

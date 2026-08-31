@@ -302,7 +302,7 @@ class UsuarioUpdate(BaseModel):
     rol: Optional[str] = None
 
 class DriverProfilePayload(BaseModel):
-    email: EmailStr
+    email: str
     perfilData: dict
 
 class BulkActionPayload(BaseModel):
@@ -982,24 +982,54 @@ async def delete_flota(placa: str):
 
 import asyncio
 
+JSON_PE_TOKEN = os.environ.get("JSON_PE_TOKEN", "0cea1f04743e822b1605856b5ca5e1c3912f5bcb228e661aa8878bc8da36")
+
 @app.get("/api/verify/soat/{placa}")
 async def verify_soat(placa: str):
-    # Simular una llamada a APESEG con httpx que demore un poco simulando scraping
-    await asyncio.sleep(1.2)
-    # Fallback / Simulación inteligente:
+    placa_limpia = placa.replace("-", "").strip()
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://api.json.pe/api/soat",
+                headers={"Authorization": f"Bearer {JSON_PE_TOKEN}", "Content-Type": "application/json"},
+                json={"placa": placa_limpia},
+                timeout=10.0
+            )
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("success"):
+                    info = data.get("data", {})
+                    # Verificar si la fecha_fin es mayor a la actual
+                    fecha_fin_str = info.get("fecha_fin")
+                    valido = True
+                    mensaje = f"SOAT VIGENTE ({info.get('nombre_compania')})"
+                    if fecha_fin_str:
+                        try:
+                            vencimiento = datetime.strptime(fecha_fin_str, "%d/%m/%Y")
+                            if vencimiento < datetime.now():
+                                valido = False
+                                mensaje = "SOAT VENCIDO"
+                        except:
+                            pass
+                    
+                    return {
+                        "valido": valido,
+                        "mensaje": mensaje,
+                        "compania": info.get("nombre_compania", "Desconocida"),
+                        "fechaVencimiento": fecha_fin_str
+                    }
+    except Exception as e:
+        print("JSON.PE SOAT Error:", e)
+        
+    # Fallback inteligente en caso de error de API o falta de saldo
+    await asyncio.sleep(1.0)
     if "XXX" in placa.upper():
-        return {"valido": False, "mensaje": "Placa inválida o SOAT vencido (Simulación)", "fechaVencimiento": None}
-    
-    return {
-        "valido": True,
-        "mensaje": "SOAT VIGENTE (Simulación activa)",
-        "compania": "La Positiva",
-        "fechaVencimiento": "2027-12-31"
-    }
+        return {"valido": False, "mensaje": "SOAT vencido (Simulación/Fallback)", "fechaVencimiento": None}
+    return {"valido": True, "mensaje": "SOAT VIGENTE (Fallback)", "compania": "La Positiva", "fechaVencimiento": "2027-12-31"}
 
 @app.get("/api/verify/citv/{placa}")
 async def verify_citv(placa: str):
-    # Simular llamada a MTC CITV
+    # JSON.pe no provee CITV, mantenemos simulación inteligente pura
     await asyncio.sleep(1.0)
     if "XXX" in placa.upper():
         return {"valido": False, "mensaje": "Revisión Técnica vencida (Simulación)", "fechaVencimiento": None}
@@ -1013,14 +1043,41 @@ async def verify_citv(placa: str):
 
 @app.get("/api/verify/licencia/{doc}")
 async def verify_licencia(doc: str):
-    # Simular llamada a MTC Licencias
-    await asyncio.sleep(1.5)
+    doc_limpio = doc.strip()
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://api.json.pe/api/licencia",
+                headers={"Authorization": f"Bearer {JSON_PE_TOKEN}", "Content-Type": "application/json"},
+                json={"dni": doc_limpio},
+                timeout=10.0
+            )
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("success"):
+                    info = data.get("data", {})
+                    lic_info = info.get("licencia", {})
+                    estado = lic_info.get("estado", "")
+                    
+                    valido = estado.upper() == "VIGENTE"
+                    
+                    return {
+                        "valido": valido,
+                        "mensaje": f"LICENCIA {estado} ({lic_info.get('restricciones', '')})",
+                        "claseCategoria": lic_info.get("categoria", ""),
+                        "fechaVencimiento": lic_info.get("fecha_vencimiento", "")
+                    }
+    except Exception as e:
+         print("JSON.PE Licencia Error:", e)
+         
+    # Fallback inteligente en caso de error
+    await asyncio.sleep(1.0)
     if doc.startswith("000"):
-        return {"valido": False, "mensaje": "Licencia Retenida (Simulación)", "claseCategoria": None}
+        return {"valido": False, "mensaje": "Licencia Retenida (Simulación/Fallback)", "claseCategoria": None}
     
     return {
         "valido": True,
-        "mensaje": "LICENCIA VIGENTE (Simulación activa)",
+        "mensaje": "LICENCIA VIGENTE (Fallback)",
         "claseCategoria": "A-IIb",
         "fechaVencimiento": "2028-05-20"
     }
