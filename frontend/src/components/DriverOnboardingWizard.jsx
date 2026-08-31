@@ -67,9 +67,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     cv: null,
     certificadosTrabajo: null,
     referenciasLaborales: null,
-    examenMedico: null,
-    examenToxicologico: null,
-    evaluacionPsicologica: null,
+    cuestionarioManejoDefensivo: null,
 
     // Datos Vehiculares
     vehiculoMarca: '',
@@ -112,7 +110,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   };
 
   const calculateProgress = () => {
-    const totalFields = 16; // Adjust based on required fields
+    const totalFields = 16;
     let filled = 0;
     
     if (formData.nombres) filled++;
@@ -125,10 +123,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.licenciaConducir) filled++;
     if (formData.recordConductor) filled++;
     if (formData.antecedentesPoliciales) filled++;
-    if (formData.cv) filled++;
-    if (formData.examenMedico) filled++;
-    if (formData.examenToxicologico) filled++;
-    if (formData.evaluacionPsicologica) filled++;
+    
+    if (formData.cuestionarioManejoDefensivo) filled++;
     
     // Vehiculares
     if (formData.vehiculoMarca) filled++;
@@ -137,7 +133,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.tarjetaPropiedad) filled++;
     if (formData.soat) filled++;
 
-    return Math.round((filled / 19) * 100); // Updated total required fields to 19
+    return Math.round((filled / totalFields) * 100);
   };
 
   const handleSaveDraft = () => {
@@ -273,20 +269,20 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           </div>
 
           <div className="section-divider">
-            <h3>Experiencia y Perfil Profesional</h3>
+            <h3>Experiencia y Perfil Profesional (Opcional)</h3>
           </div>
 
           <div className="form-grid">
             <div className="form-group full-width">
               <FileUploadZone 
-                label="Curriculum Vitae (CV) Actualizado" 
+                label="Curriculum Vitae (CV) Actualizado (Opcional)" 
                 file={formData.cv} 
                 onFileSelect={(f) => handleFileChange('cv', f)} 
               />
             </div>
             <div className="form-group full-width">
               <FileUploadZone 
-                label="Certificados de Trabajo" 
+                label="Certificados de Trabajo (Opcional)" 
                 file={formData.certificadosTrabajo} 
                 onFileSelect={(f) => handleFileChange('certificadosTrabajo', f)} 
               />
@@ -296,34 +292,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="Referencias Laborales (Opcional)" 
                 file={formData.referenciasLaborales} 
                 onFileSelect={(f) => handleFileChange('referenciasLaborales', f)} 
-              />
-            </div>
-          </div>
-
-          <div className="section-divider">
-            <h3>Evaluación Médica y Salud</h3>
-          </div>
-
-          <div className="form-grid">
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Examen Médico Ocupacional" 
-                file={formData.examenMedico} 
-                onFileSelect={(f) => handleFileChange('examenMedico', f)} 
-              />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Examen Toxicológico" 
-                file={formData.examenToxicologico} 
-                onFileSelect={(f) => handleFileChange('examenToxicologico', f)} 
-              />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Evaluación Psicológica y Psicosomática" 
-                file={formData.evaluacionPsicologica} 
-                onFileSelect={(f) => handleFileChange('evaluacionPsicologica', f)} 
               />
             </div>
           </div>
@@ -373,6 +341,26 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </div>
             <div className="form-group full-width">
               <FileUploadZone label="Revisión Técnica (Opcional)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
+            </div>
+          </div>
+          <div className="wizard-actions">
+            <button className="btn-secondary" onClick={() => toggleSection('manejo')}>Siguiente Sección</button>
+          </div>
+        </AccordionItem>
+
+        <AccordionItem 
+          title="3. Cuestionario de Manejo Defensivo" 
+          isOpen={openSection === 'manejo'} 
+          onToggle={() => toggleSection('manejo')}
+          status={formData.cuestionarioManejoDefensivo ? 'complete' : 'incomplete'}
+        >
+          <div className="form-grid">
+            <div className="form-group full-width">
+              <FileUploadZone 
+                label="Certificado o Cuestionario de Manejo Defensivo" 
+                file={formData.cuestionarioManejoDefensivo} 
+                onFileSelect={(f) => handleFileChange('cuestionarioManejoDefensivo', f)} 
+              />
             </div>
           </div>
         </AccordionItem>
