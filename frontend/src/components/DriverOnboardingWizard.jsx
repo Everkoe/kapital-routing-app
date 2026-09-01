@@ -41,9 +41,24 @@ const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
 };
 
 const DriverOnboardingWizard = ({ usuario, onComplete }) => {
-  const [openSection, setOpenSection] = useState('personales'); // 'personales', 'vehiculares', 'manejo'
+  const [openSection, setOpenSection] = useState('personales');
   const [isSaving, setIsSaving] = useState(false);
-  const [quizResult, setQuizResult] = useState(null);
+
+  // Load quiz result from localStorage
+  const loadQuizFromStorage = () => {
+    try {
+      const saved = localStorage.getItem(`driver_quiz_${usuario?.identifier}`);
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  };
+  const [quizResult, setQuizResultState] = useState(() => loadQuizFromStorage());
+
+  const setQuizResult = (result) => {
+    setQuizResultState(result);
+    if (result) {
+      localStorage.setItem(`driver_quiz_${usuario?.identifier}`, JSON.stringify(result));
+    }
+  };
 
   // Check if the registered name is actually a DNI (digits only)
   const isRegisteredNameDni = usuario?.nombre && /^\d+$/.test(usuario.nombre);
@@ -157,7 +172,12 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
   const handleSaveDraft = () => {
     setIsSaving(true);
+    // Save form data
     localStorage.setItem('driver_onboarding_progress', JSON.stringify(formData));
+    // Also persist quiz separately (already auto-saved, but explicit save here too)
+    if (quizResult) {
+      localStorage.setItem(`driver_quiz_${usuario?.identifier}`, JSON.stringify(quizResult));
+    }
     toast.success('Progreso guardado correctamente. Puedes volver más tarde.');
     setIsSaving(false);
   };
@@ -395,6 +415,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </motion.div>
           )}
           <QuizManejoDefensivo
+            initialData={quizResult}
             onComplete={(result) => {
               setQuizResult(result);
               toast.success(`Evaluación completada: ${result.puntaje}/20 – ${result.estado}`);

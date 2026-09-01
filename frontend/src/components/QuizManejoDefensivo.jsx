@@ -161,15 +161,20 @@ const getCategoriaColor = (cat) => {
 
 const QuizManejoDefensivo = ({ onComplete, initialData }) => {
   const [respuestas, setRespuestas] = useState(initialData?.respuestas || {});
-  const [submitted, setSubmitted] = useState(initialData ? true : false);
+  const [submitted, setSubmitted] = useState(!!initialData);
   const [currentCat, setCurrentCat] = useState(null);
 
+  // Re-hydrate every time this component mounts (accordion open/close unmounts it)
   useEffect(() => {
     if (initialData) {
       setRespuestas(initialData.respuestas || {});
       setSubmitted(true);
+    } else {
+      setRespuestas({});
+      setSubmitted(false);
     }
-  }, [initialData]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run only on mount
 
   const categorias = [...new Set(PREGUNTAS.map((p) => p.categoria))];
 
