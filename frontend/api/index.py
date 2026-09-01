@@ -298,6 +298,7 @@ class UsuarioUpdate(BaseModel):
     current_password: Optional[str] = None
     new_password: Optional[str] = None
     avatar: Optional[str] = None
+    fotoVehiculo: Optional[str] = None
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
 
@@ -461,6 +462,10 @@ async def update_profile(update_data: UsuarioUpdate):
 
     if update_data.nombre: user["nombre"] = update_data.nombre
     if update_data.avatar: user["avatar"] = update_data.avatar
+    if update_data.fotoVehiculo:
+        if "perfil_conductor" not in user:
+            user["perfil_conductor"] = {}
+        user["perfil_conductor"]["fotoVehiculo"] = update_data.fotoVehiculo
     if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
     if update_data.rol: user["rol"] = update_data.rol
 
@@ -469,6 +474,7 @@ async def update_profile(update_data: UsuarioUpdate):
         "identifier": user.get("identifier", update_data.identifier),
         "email": user.get("email"),
         "dni": user.get("dni"),
+        "perfil_conductor": user.get("perfil_conductor", {}),
         "nombre": user.get("nombre", "Usuario"),
         "rol": user.get("rol", "Usuario"),
         "unidad_id": user.get("unidad_id"),

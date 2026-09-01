@@ -1046,6 +1046,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   const [activeTab, setActiveTab] = useState('personal');
   const [formData, setFormData] = useState({ nombre: usuario.nombre, current_password: '', new_password: '' });
   const [avatar, setAvatar] = useState(usuario.avatar || null);
+  const [fotoVehiculo, setFotoVehiculo] = useState(usuario.perfil_conductor?.fotoVehiculo || null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
@@ -1059,6 +1060,16 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   };
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: {'image/*': []}, maxFiles: 1 });
 
+  const onDropVehiculo = (acceptedFiles) => {
+    const file = acceptedFiles[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setFotoVehiculo(e.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+  const { getRootProps: getRootPropsVehiculo, getInputProps: getInputPropsVehiculo, isDragActive: isDragActiveVehiculo } = useDropzone({ onDrop: onDropVehiculo, accept: {'image/*': []}, maxFiles: 1 });
+
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSave = async (e) => {
@@ -1071,7 +1082,8 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         nombre: formData.nombre !== usuario.nombre ? formData.nombre : undefined,
         current_password: formData.current_password || undefined,
         new_password: formData.new_password || undefined,
-        avatar: avatar !== usuario.avatar ? avatar : undefined
+        avatar: avatar !== usuario.avatar ? avatar : undefined,
+        fotoVehiculo: fotoVehiculo !== usuario.perfil_conductor?.fotoVehiculo ? fotoVehiculo : undefined
       };
       
       const res = await fetch('/api/user/profile', {
@@ -1126,6 +1138,28 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                 <p className="dropzone-text">{isDragActive ? 'Suelta aquí' : 'Cambiar Foto'}</p>
               </div>
               <p className="avatar-hint">Formatos: JPG, PNG (Max 2MB)</p>
+
+              {usuario.rol === 'Conductor' && (
+                <>
+                  <div {...getRootPropsVehiculo()} className={`dropzone ${isDragActiveVehiculo ? 'active' : ''} profile-dropzone`} style={{marginTop: '24px'}}>
+                    <input {...getInputPropsVehiculo()} />
+                    <div className="avatar-preview-container" style={{borderRadius: '12px', width: '120px', height: '120px'}}>
+                      {fotoVehiculo ? (
+                        <img src={fotoVehiculo} alt="Vehículo" style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px'}} />
+                      ) : (
+                        <div className="profile-avatar" style={{borderRadius: '12px', width: '100%', height: '100%', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8'}}>
+                          <Truck size={40} />
+                        </div>
+                      )}
+                      <div className="avatar-overlay" style={{borderRadius: '12px'}}>
+                        <span className="camera-icon">📷</span>
+                      </div>
+                    </div>
+                    <p className="dropzone-text">{isDragActiveVehiculo ? 'Suelta aquí' : 'Foto del Vehículo'}</p>
+                  </div>
+                  <p className="avatar-hint">Sube una foto clara de tu vehículo</p>
+                </>
+              )}
             </div>
 
             
@@ -1136,8 +1170,15 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                   <label>Nombre Completo</label>
                   <input type="text" name="nombre" value={formData.nombre} onChange={handleChange} className="form-input" required />
                 </div>
+                {usuario.rol === 'Conductor' && usuario.perfil_conductor?.numDoc && (
+                  <div className="form-group">
+                    <label>DNI</label>
+                    <input type="text" value={usuario.perfil_conductor.numDoc} className="form-input disabled-input" disabled />
+                    <span className="input-hint">Validado por RENIEC.</span>
+                  </div>
+                )}
                 <div className="form-group">
-                  <label>{usuario.rol === 'Conductor' ? 'DNI' : 'Correo Electrónico'}</label>
+                  <label>{usuario.identifier.includes('@') ? 'Correo Electrónico' : 'Identificador de Cuenta'}</label>
                   <input type="text" value={usuario.identifier} className="form-input disabled-input" disabled />
                   <span className="input-hint">No puede modificarse por seguridad.</span>
                 </div>
