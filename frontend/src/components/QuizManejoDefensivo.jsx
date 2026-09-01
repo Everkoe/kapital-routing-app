@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, XCircle, AlertTriangle, ChevronRight, RotateCcw, Award } from 'lucide-react';
 
@@ -163,6 +163,13 @@ const QuizManejoDefensivo = ({ onComplete, initialData }) => {
   const [respuestas, setRespuestas] = useState(initialData?.respuestas || {});
   const [submitted, setSubmitted] = useState(initialData ? true : false);
   const [currentCat, setCurrentCat] = useState(null);
+
+  useEffect(() => {
+    if (initialData) {
+      setRespuestas(initialData.respuestas || {});
+      setSubmitted(true);
+    }
+  }, [initialData]);
 
   const categorias = [...new Set(PREGUNTAS.map((p) => p.categoria))];
 
