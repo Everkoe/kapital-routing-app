@@ -98,20 +98,45 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     revisionTecnica: null,
   });
 
+  // Draft key unique per user so different users don't share drafts
+  const draftKey = `driver_onboarding_draft_${usuario?.identifier || 'unknown'}`;
+
   useEffect(() => {
-    const saved = localStorage.getItem('driver_onboarding_progress');
+    const saved = localStorage.getItem(draftKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Only load if it matches the current user's DNI to avoid loading someone else's draft
-        if (!parsed.numDoc || parsed.numDoc === usuario?.nombre || parsed.numDoc === usuario?.identifier) {
-          setFormData(parsed);
-        }
+        setFormData(prev => ({
+          ...prev,
+          ...parsed,
+          // Never override file objects from storage (they can't be serialized)
+          comprobanteDomicilio: null,
+          dniScaneado: null,
+          licenciaConducir: null,
+          recordConductor: null,
+          antecedentesPoliciales: null,
+          cv: null,
+          certificadosTrabajo: null,
+          referenciasLaborales: null,
+          tarjetaPropiedad: null,
+          soat: null,
+          revisionTecnica: null,
+        }));
       } catch (e) {
-        console.error("Error loading draft", e);
+        console.error('Error loading draft', e);
       }
     }
-  }, [usuario]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
+
+  // Auto-save text fields on every change (exclude non-serializable File objects)
+  useEffect(() => {
+    const toSave = { ...formData };
+    // Remove File objects - they can't be JSON serialized
+    const fileFields = ['comprobanteDomicilio','dniScaneado','licenciaConducir','recordConductor','antecedentesPoliciales','cv','certificadosTrabajo','referenciasLaborales','cuestionarioManejoDefensivo','tarjetaPropiedad','soat','revisionTecnica'];
+    fileFields.forEach(f => delete toSave[f]);
+    localStorage.setItem(draftKey, JSON.stringify(toSave));
+  }, [formData, draftKey]);
 
   // Calculate age automatically
   useEffect(() => {
@@ -172,9 +197,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
   const handleSaveDraft = () => {
     setIsSaving(true);
-    // Save form data
-    localStorage.setItem('driver_onboarding_progress', JSON.stringify(formData));
-    // Also persist quiz separately (already auto-saved, but explicit save here too)
+    // formData is already auto-saved, just show confirmation
     if (quizResult) {
       localStorage.setItem(`driver_quiz_${usuario?.identifier}`, JSON.stringify(quizResult));
     }
