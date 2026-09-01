@@ -343,7 +343,19 @@ async def add_notification(notif: dict):
 @app.post("/api/auth/register")
 async def register_user(usuario: UsuarioRegistro):
     await reload_db()
-    if usuario.identifier in usuarios_db:
+
+    # Validaciones básicas para evitar 500
+    if not usuario.identifier or not usuario.identifier.strip():
+        raise HTTPException(status_code=400, detail="El identificador (DNI o Correo) no puede estar vacío.")
+    if not usuario.nombre or not usuario.nombre.strip():
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío.")
+    if not usuario.password or len(usuario.password) < 4:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres.")
+    if usuario.rol == "Conductor" and (not usuario.unidad_id or not usuario.unidad_id.strip()):
+        raise HTTPException(status_code=400, detail="Los conductores deben proporcionar un ID de unidad.")
+
+    identifier_clean = usuario.identifier.strip()
+    if identifier_clean in usuarios_db:
         raise HTTPException(status_code=400, detail="El usuario ya está registrado.")
     
     ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones", "Cliente"]
@@ -353,19 +365,19 @@ async def register_user(usuario: UsuarioRegistro):
     estado = "Activo" if len(usuarios_db) == 0 else "Pendiente"
     
     nuevo_usuario = {
-        "identifier": usuario.identifier,
-        "email": usuario.identifier if usuario.rol != 'Conductor' else None,
-        "dni": usuario.identifier if usuario.rol == 'Conductor' else None,
+        "identifier": identifier_clean,
+        "email": identifier_clean if usuario.rol != 'Conductor' else None,
+        "dni": identifier_clean if usuario.rol == 'Conductor' else None,
         "password": usuario.password,
-        "nombre": usuario.nombre,
+        "nombre": usuario.nombre.strip(),
         "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
-        "unidad_id": usuario.unidad_id,
+        "unidad_id": usuario.unidad_id.strip() if usuario.unidad_id else None,
         "empresa_id": usuario.empresa_id,
         "avatar": usuario.avatar,
         "estado": estado
     }
-    usuarios_db[usuario.identifier] = nuevo_usuario
+    usuarios_db[identifier_clean] = nuevo_usuario
     
     if rol_solicitado == "Conductor" and usuario.unidad_id:
         if usuario.unidad_id not in conductores_db:
