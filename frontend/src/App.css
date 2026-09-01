@@ -219,7 +219,7 @@ body, #root {
   border-radius: 12px;
   border: 1px solid var(--kapital-border);
 }
-.profile-dropzone { 
+.profile-dropzone { }
 
 /* ---- Premium Photo Upload Cards ---- */
 .photo-upload-card {
