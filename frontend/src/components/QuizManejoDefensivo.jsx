@@ -159,9 +159,9 @@ const getCategoriaColor = (cat) => {
   return '#34d399';
 };
 
-const QuizManejoDefensivo = ({ onComplete }) => {
-  const [respuestas, setRespuestas] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+const QuizManejoDefensivo = ({ onComplete, initialData }) => {
+  const [respuestas, setRespuestas] = useState(initialData?.respuestas || {});
+  const [submitted, setSubmitted] = useState(initialData ? true : false);
   const [currentCat, setCurrentCat] = useState(null);
 
   const categorias = [...new Set(PREGUNTAS.map((p) => p.categoria))];
