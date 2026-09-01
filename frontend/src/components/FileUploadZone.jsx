@@ -55,7 +55,10 @@ const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [], '
             <File className="file-icon" size={24} />
             <div className="file-details">
               <span className="file-name">{file.name}</span>
-              <span className="file-size">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+              <span className="file-size">
+                {file.size ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : 'Restaurado'}
+                {file.isRestored && ' · Guardado ✓'}
+              </span>
             </div>
           </div>
           <div className="file-actions">

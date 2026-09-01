@@ -63,6 +63,12 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   // Check if the registered name is actually a DNI (digits only)
   const isRegisteredNameDni = usuario?.nombre && /^\d+$/.test(usuario.nombre);
 
+  // Draft keys unique per user
+  const draftKey = `driver_onboarding_draft_${usuario?.identifier || 'unknown'}`;
+  const filesKey = `driver_onboarding_files_${usuario?.identifier || 'unknown'}`;
+
+  const FILE_FIELDS = ['comprobanteDomicilio','dniScaneado','licenciaConducir','recordConductor','antecedentesPoliciales','cv','certificadosTrabajo','referenciasLaborales','cuestionarioManejoDefensivo','tarjetaPropiedad','soat','revisionTecnica'];
+
   const [formData, setFormData] = useState({
     // Datos Personales
     nombres: isRegisteredNameDni ? '' : (usuario?.nombre || ''),
@@ -99,44 +105,81 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   });
 
   // Draft key unique per user so different users don't share drafts
-  const draftKey = `driver_onboarding_draft_${usuario?.identifier || 'unknown'}`;
+  // (now declared above formData)
 
   useEffect(() => {
-    const saved = localStorage.getItem(draftKey);
-    if (saved) {
+    // Restore text fields
+    const savedText = localStorage.getItem(draftKey);
+    if (savedText) {
       try {
-        const parsed = JSON.parse(saved);
-        setFormData(prev => ({
-          ...prev,
-          ...parsed,
-          // Never override file objects from storage (they can't be serialized)
-          comprobanteDomicilio: null,
-          dniScaneado: null,
-          licenciaConducir: null,
-          recordConductor: null,
-          antecedentesPoliciales: null,
-          cv: null,
-          certificadosTrabajo: null,
-          referenciasLaborales: null,
-          tarjetaPropiedad: null,
-          soat: null,
-          revisionTecnica: null,
-        }));
-      } catch (e) {
-        console.error('Error loading draft', e);
-      }
+        const parsed = JSON.parse(savedText);
+        setFormData(prev => ({ ...prev, ...parsed }));
+      } catch (e) { console.error('Error loading draft', e); }
+    }
+    // Restore file fields from Base64
+    const savedFiles = localStorage.getItem(filesKey);
+    if (savedFiles) {
+      try {
+        const parsedFiles = JSON.parse(savedFiles);
+        // Convert each Base64 entry back to a fake file-like object
+        const restored = {};
+        Object.entries(parsedFiles).forEach(([key, val]) => {
+          if (val) {
+            // Create a minimal file-like object that FileUploadZone can display
+            restored[key] = {
+              name: val.name,
+              size: val.size,
+              type: val.type,
+              base64: val.base64, // keep for submission
+              isRestored: true,
+            };
+          }
+        });
+        setFormData(prev => ({ ...prev, ...restored }));
+      } catch (e) { console.error('Error loading files', e); }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once on mount
 
-  // Auto-save text fields on every change (exclude non-serializable File objects)
+  // Auto-save text fields on every formData change
   useEffect(() => {
     const toSave = { ...formData };
-    // Remove File objects - they can't be JSON serialized
-    const fileFields = ['comprobanteDomicilio','dniScaneado','licenciaConducir','recordConductor','antecedentesPoliciales','cv','certificadosTrabajo','referenciasLaborales','cuestionarioManejoDefensivo','tarjetaPropiedad','soat','revisionTecnica'];
-    fileFields.forEach(f => delete toSave[f]);
+    // Remove file fields (saved separately)
+    FILE_FIELDS.forEach(f => delete toSave[f]);
     localStorage.setItem(draftKey, JSON.stringify(toSave));
   }, [formData, draftKey]);
+
+  // Convert File to Base64 and store; or store fake file-like object as-is
+  const handleFileChange = (name, file) => {
+    if (!file) {
+      setFormData(prev => ({ ...prev, [name]: null }));
+      // Remove from files store
+      try {
+        const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
+        delete existing[name];
+        localStorage.setItem(filesKey, JSON.stringify(existing));
+      } catch {}
+      return;
+    }
+    if (file.isRestored) {
+      // Already a fake object, nothing to convert
+      setFormData(prev => ({ ...prev, [name]: file }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result;
+      const fileObj = { name: file.name, size: file.size, type: file.type, base64, isRestored: false };
+      setFormData(prev => ({ ...prev, [name]: fileObj }));
+      // Persist to localStorage
+      try {
+        const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
+        existing[name] = fileObj;
+        localStorage.setItem(filesKey, JSON.stringify(existing));
+      } catch (e) { console.error('Error saving file to storage', e); }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Calculate age automatically
   useEffect(() => {
@@ -160,9 +203,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleFileChange = (name, file) => {
-    setFormData(prev => ({ ...prev, [name]: file }));
-  };
 
   const toggleSection = (section) => {
     setOpenSection(openSection === section ? null : section);
