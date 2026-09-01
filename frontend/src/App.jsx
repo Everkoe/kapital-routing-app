@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun } from 'lucide-react';
+import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera } from 'lucide-react';
 import DocumentVerification from './components/DocumentVerification';
 import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
@@ -1123,42 +1123,55 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         {activeTab === 'personal' && (
           <div className="profile-layout-grid">
             <div className="profile-avatar-column">
-              <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''} profile-dropzone`}>
-                <input {...getInputProps()} />
-                <div className="avatar-preview-container">
-                  {avatar ? (
-                    <img src={avatar} alt="Avatar" className="profile-avatar-img" />
-                  ) : (
-                    <div className="profile-avatar">{usuario.nombre.charAt(0)}</div>
-                  )}
-                  <div className="avatar-overlay">
-                    <span className="camera-icon">📷</span>
+              {/* Foto de Perfil */}
+              <div className="photo-upload-card">
+                <div className="photo-upload-label">Foto de Perfil</div>
+                <div {...getRootProps()} className={`photo-upload-zone ${isDragActive ? 'drag-active' : ''}`}>
+                  <input {...getInputProps()} />
+                  <div className="photo-preview-circle">
+                    {avatar ? (
+                      <img src={avatar} alt="Avatar" className="photo-preview-img" />
+                    ) : (
+                      <div className="photo-placeholder-circle">
+                        <span className="photo-placeholder-initial">{usuario.nombre.charAt(0).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div className="photo-overlay">
+                      <Camera size={22} color="white" />
+                    </div>
+                  </div>
+                  <div className="photo-upload-meta">
+                    <span className="photo-upload-action">{isDragActive ? 'Suelta aquí...' : 'Haz clic o arrastra'}</span>
+                    <span className="photo-upload-hint">JPG, PNG · Máx 2MB</span>
                   </div>
                 </div>
-                <p className="dropzone-text">{isDragActive ? 'Suelta aquí' : 'Cambiar Foto'}</p>
               </div>
-              <p className="avatar-hint">Formatos: JPG, PNG (Max 2MB)</p>
 
+              {/* Foto del Vehículo - solo conductores */}
               {usuario.rol === 'Conductor' && (
-                <>
-                  <div {...getRootPropsVehiculo()} className={`dropzone ${isDragActiveVehiculo ? 'active' : ''} profile-dropzone`} style={{marginTop: '24px'}}>
+                <div className="photo-upload-card" style={{marginTop: '16px'}}>
+                  <div className="photo-upload-label">Foto del Vehículo</div>
+                  <div {...getRootPropsVehiculo()} className={`photo-upload-zone ${isDragActiveVehiculo ? 'drag-active' : ''}`}>
                     <input {...getInputPropsVehiculo()} />
-                    <div className="avatar-preview-container" style={{borderRadius: '12px', width: '120px', height: '120px'}}>
+                    <div className="photo-preview-rect">
                       {fotoVehiculo ? (
-                        <img src={fotoVehiculo} alt="Vehículo" style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: '12px'}} />
+                        <img src={fotoVehiculo} alt="Vehículo" className="photo-preview-img-rect" />
                       ) : (
-                        <div className="profile-avatar" style={{borderRadius: '12px', width: '100%', height: '100%', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8'}}>
-                          <Truck size={40} />
+                        <div className="photo-placeholder-rect">
+                          <Truck size={36} color="#38bdf8" />
+                          <span style={{fontSize:'0.75rem', color:'#38bdf8', marginTop:'6px', fontWeight:600}}>Sin foto aún</span>
                         </div>
                       )}
-                      <div className="avatar-overlay" style={{borderRadius: '12px'}}>
-                        <span className="camera-icon">📷</span>
+                      <div className="photo-overlay-rect">
+                        <Camera size={22} color="white" />
                       </div>
                     </div>
-                    <p className="dropzone-text">{isDragActiveVehiculo ? 'Suelta aquí' : 'Foto del Vehículo'}</p>
+                    <div className="photo-upload-meta">
+                      <span className="photo-upload-action">{isDragActiveVehiculo ? 'Suelta aquí...' : 'Haz clic o arrastra'}</span>
+                      <span className="photo-upload-hint">JPG, PNG · Foto clara del exterior</span>
+                    </div>
                   </div>
-                  <p className="avatar-hint">Sube una foto clara de tu vehículo</p>
-                </>
+                </div>
               )}
             </div>
 
