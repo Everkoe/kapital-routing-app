@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Save, Send, AlertCircle, CheckCircle } from 'lucide-react';
+import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
+import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
 
 const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
@@ -40,8 +41,9 @@ const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
 };
 
 const DriverOnboardingWizard = ({ usuario, onComplete }) => {
-  const [openSection, setOpenSection] = useState('personales'); // 'personales', 'vehiculares', 'requisitos'
+  const [openSection, setOpenSection] = useState('personales'); // 'personales', 'vehiculares', 'manejo'
   const [isSaving, setIsSaving] = useState(false);
+  const [quizResult, setQuizResult] = useState(null);
 
   // Check if the registered name is actually a DNI (digits only)
   const isRegisteredNameDni = usuario?.nombre && /^\d+$/.test(usuario.nombre);
@@ -141,7 +143,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     if (formData.recordConductor) filled++;
     if (formData.antecedentesPoliciales) filled++;
     
-    if (formData.cuestionarioManejoDefensivo) filled++;
+    if (quizResult) filled++;
     
     // Vehiculares
     if (formData.vehiculoMarca) filled++;
@@ -369,17 +371,35 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="3. Cuestionario de Manejo Defensivo" 
           isOpen={openSection === 'manejo'} 
           onToggle={() => toggleSection('manejo')}
-          status={formData.cuestionarioManejoDefensivo ? 'complete' : 'incomplete'}
+          status={quizResult ? 'complete' : 'incomplete'}
         >
-          <div className="form-grid">
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Certificado o Cuestionario de Manejo Defensivo" 
-                file={formData.cuestionarioManejoDefensivo} 
-                onFileSelect={(f) => handleFileChange('cuestionarioManejoDefensivo', f)} 
-              />
-            </div>
-          </div>
+          {/* Badge de resultado si ya completó */}
+          {quizResult && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '12px',
+                background: quizResult.puntaje >= 18 ? 'rgba(34,197,94,0.1)' : quizResult.puntaje >= 15 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                border: `1px solid ${quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444'}40`,
+                borderRadius: '10px', padding: '12px 16px', marginBottom: '16px',
+              }}
+            >
+              <Award size={22} color={quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444'} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444' }}>
+                  {quizResult.estado} – {quizResult.puntaje}/20 correctas
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Puedes volver a intentarlo si deseas mejorar tu puntaje.</div>
+              </div>
+            </motion.div>
+          )}
+          <QuizManejoDefensivo
+            onComplete={(result) => {
+              setQuizResult(result);
+              toast.success(`Evaluación completada: ${result.puntaje}/20 – ${result.estado}`);
+            }}
+          />
         </AccordionItem>
       </div>
 
@@ -387,7 +407,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
         <button className="btn-draft" onClick={handleSaveDraft} disabled={isSaving}>
           <Save size={18} /> {isSaving ? 'Guardando...' : 'Guardar Progreso (Borrador)'}
         </button>
-        <button className="btn-primary" onClick={() => onComplete && onComplete(formData)} disabled={progress < 100}>
+        <button className="btn-primary" onClick={() => onComplete && onComplete({ ...formData, quizManejoDefensivo: quizResult })} disabled={progress < 100}>
           <Send size={18} /> Enviar para Revisión
         </button>
       </div>

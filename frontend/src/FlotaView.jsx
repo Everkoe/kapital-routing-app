@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X } from 'lucide-react';
 import { GlobalLoader } from './App';
+import DocumentVerification from './components/DocumentVerification';
 
 import './App.css';
 
@@ -495,6 +496,17 @@ const FlotaView = ({ usuario }) => {
                         </div>
                       ))}
                     </div>
+                    
+                    <DocumentVerification 
+                      placa={conductorInfo.usuario.perfil_conductor?.vehiculoPlaca || conductorInfo.flota?.placa || conductorInfo.unidad_id}
+                      doc={conductorInfo.usuario.perfil_conductor?.numDoc || conductorInfo.usuario.nombre}
+                      cachedResults={{
+                        soat: conductorInfo.usuario.perfil_conductor?.validacion_soat,
+                        citv: conductorInfo.usuario.perfil_conductor?.validacion_citv,
+                        licencia: conductorInfo.usuario.perfil_conductor?.validacion_licencia
+                      }}
+                      style={{ marginTop: '20px' }}
+                    />
                   </div>
                 </div>
               </div>

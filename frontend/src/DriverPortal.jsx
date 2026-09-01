@@ -144,7 +144,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       const response = await fetch('/api/driver/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: usuario.email, perfilData: data })
+        body: JSON.stringify({ email: usuario.email || usuario.identifier, perfilData: data })
       });
       if (!response.ok) throw new Error('Error al enviar perfil');
       

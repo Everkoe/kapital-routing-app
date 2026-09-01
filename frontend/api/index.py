@@ -986,7 +986,27 @@ JSON_PE_TOKEN = os.environ.get("JSON_PE_TOKEN", "0cea1f04743e822b1605856b5ca5e1c
 
 @app.get("/api/verify/soat/{placa}")
 async def verify_soat(placa: str):
+    """Verifica el SOAT de un vehículo. Implementa caché en memoria para evitar consumir
+    créditos de json.pe en consultas repetidas."""
+    await reload_db()
     placa_limpia = placa.replace("-", "").strip()
+
+    # --- CORTAFUEGOS: Buscar caché en usuarios_db ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        # Normalizar placa al comparar
+        placa_perfil = (perfil.get("vehiculoPlaca") or "").replace("-", "").strip()
+        if placa_perfil == placa_limpia:
+            cached = perfil.get("validacion_soat")
+            if cached and cached.get("valido") is not None:
+                # ¡Caché HIT! Retornar sin gastar créditos.
+                return {**cached, "fuente": "cache"}
+            break  # Conductor encontrado pero sin caché, salir del loop.
+
+    # --- CACHÉ MISS: Llamar a json.pe ---
+    result = None
     try:
         async with httpx.AsyncClient() as client:
             res = await client.post(
@@ -999,7 +1019,6 @@ async def verify_soat(placa: str):
                 data = res.json()
                 if data.get("success"):
                     info = data.get("data", {})
-                    # Verificar si la fecha_fin es mayor a la actual
                     fecha_fin_str = info.get("fecha_fin")
                     valido = True
                     mensaje = f"SOAT VIGENTE ({info.get('nombre_compania')})"
@@ -1011,39 +1030,103 @@ async def verify_soat(placa: str):
                                 mensaje = "SOAT VENCIDO"
                         except:
                             pass
-                    
-                    return {
+                    result = {
                         "valido": valido,
                         "mensaje": mensaje,
                         "compania": info.get("nombre_compania", "Desconocida"),
-                        "fechaVencimiento": fecha_fin_str
+                        "fechaVencimiento": fecha_fin_str,
+                        "fuente": "api"
                     }
     except Exception as e:
         print("JSON.PE SOAT Error:", e)
-        
-    # Fallback inteligente en caso de error de API o falta de saldo
-    await asyncio.sleep(1.0)
-    if "XXX" in placa.upper():
-        return {"valido": False, "mensaje": "SOAT vencido (Simulación/Fallback)", "fechaVencimiento": None}
-    return {"valido": True, "mensaje": "SOAT VIGENTE (Fallback)", "compania": "La Positiva", "fechaVencimiento": "2027-12-31"}
+
+    # --- FALLBACK: Si la API falló o no retornó datos útiles ---
+    if result is None:
+        await asyncio.sleep(0.5)
+        if "XXX" in placa.upper():
+            result = {"valido": False, "mensaje": "SOAT vencido (Simulación/Fallback)", "fechaVencimiento": None, "fuente": "fallback"}
+        else:
+            result = {"valido": True, "mensaje": "SOAT VIGENTE (Fallback)", "compania": "La Positiva", "fechaVencimiento": "2027-12-31", "fuente": "fallback"}
+
+    # --- GUARDAR en caché (memoria + Supabase) ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        placa_perfil = (perfil.get("vehiculoPlaca") or "").replace("-", "").strip()
+        if placa_perfil == placa_limpia:
+            user["perfil_conductor"]["validacion_soat"] = result
+            await persist()  # persist() completo para sobrevivir reinicio de Vercel
+            break
+
+    return result
+
 
 @app.get("/api/verify/citv/{placa}")
 async def verify_citv(placa: str):
-    # JSON.pe no provee CITV, mantenemos simulación inteligente pura
-    await asyncio.sleep(1.0)
+    """Verifica la Revisión Técnica (CITV) con caché en memoria."""
+    await reload_db()
+    placa_limpia = placa.replace("-", "").strip()
+
+    # --- CORTAFUEGOS: Buscar caché ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        placa_perfil = (perfil.get("vehiculoPlaca") or "").replace("-", "").strip()
+        if placa_perfil == placa_limpia:
+            cached = perfil.get("validacion_citv")
+            if cached and cached.get("valido") is not None:
+                return {**cached, "fuente": "cache"}
+            break
+
+    # --- CITV: json.pe no provee este dato, usamos simulación inteligente ---
+    await asyncio.sleep(0.5)
     if "XXX" in placa.upper():
-        return {"valido": False, "mensaje": "Revisión Técnica vencida (Simulación)", "fechaVencimiento": None}
-    
-    return {
-        "valido": True,
-        "mensaje": "CITV VIGENTE (Simulación activa)",
-        "centro": "Farenet",
-        "fechaVencimiento": "2027-10-15"
-    }
+        result = {"valido": False, "mensaje": "Revisión Técnica vencida (Simulación)", "fechaVencimiento": None, "fuente": "simulacion"}
+    else:
+        result = {
+            "valido": True,
+            "mensaje": "CITV VIGENTE (Simulación activa)",
+            "centro": "Farenet",
+            "fechaVencimiento": "2027-10-15",
+            "fuente": "simulacion"
+        }
+
+    # --- GUARDAR en caché ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        placa_perfil = (perfil.get("vehiculoPlaca") or "").replace("-", "").strip()
+        if placa_perfil == placa_limpia:
+            user["perfil_conductor"]["validacion_citv"] = result
+            await persist()
+            break
+
+    return result
+
 
 @app.get("/api/verify/licencia/{doc}")
 async def verify_licencia(doc: str):
+    """Verifica la licencia de un conductor con caché en memoria."""
+    await reload_db()
     doc_limpio = doc.strip()
+
+    # --- CORTAFUEGOS: Buscar caché ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        doc_perfil = (perfil.get("numDoc") or "").strip()
+        if doc_perfil == doc_limpio:
+            cached = perfil.get("validacion_licencia")
+            if cached and cached.get("valido") is not None:
+                return {**cached, "fuente": "cache"}
+            break
+
+    # --- CACHÉ MISS: Llamar a json.pe ---
+    result = None
     try:
         async with httpx.AsyncClient() as client:
             res = await client.post(
@@ -1058,29 +1141,45 @@ async def verify_licencia(doc: str):
                     info = data.get("data", {})
                     lic_info = info.get("licencia", {})
                     estado = lic_info.get("estado", "")
-                    
                     valido = estado.upper() == "VIGENTE"
-                    
-                    return {
+                    result = {
                         "valido": valido,
                         "mensaje": f"LICENCIA {estado} ({lic_info.get('restricciones', '')})",
                         "claseCategoria": lic_info.get("categoria", ""),
-                        "fechaVencimiento": lic_info.get("fecha_vencimiento", "")
+                        "fechaVencimiento": lic_info.get("fecha_vencimiento", ""),
+                        "fechaEmision": lic_info.get("fecha_emision", ""),
+                        "restricciones": lic_info.get("restricciones", ""),
+                        "fuente": "api"
                     }
     except Exception as e:
-         print("JSON.PE Licencia Error:", e)
-         
-    # Fallback inteligente en caso de error
-    await asyncio.sleep(1.0)
-    if doc.startswith("000"):
-        return {"valido": False, "mensaje": "Licencia Retenida (Simulación/Fallback)", "claseCategoria": None}
-    
-    return {
-        "valido": True,
-        "mensaje": "LICENCIA VIGENTE (Fallback)",
-        "claseCategoria": "A-IIb",
-        "fechaVencimiento": "2028-05-20"
-    }
+        print("JSON.PE Licencia Error:", e)
+
+    # --- FALLBACK ---
+    if result is None:
+        await asyncio.sleep(0.5)
+        if doc_limpio.startswith("000"):
+            result = {"valido": False, "mensaje": "Licencia Retenida (Simulación/Fallback)", "claseCategoria": None, "fuente": "fallback"}
+        else:
+            result = {
+                "valido": True,
+                "mensaje": "LICENCIA VIGENTE (Fallback)",
+                "claseCategoria": "A-IIb",
+                "fechaVencimiento": "2028-05-20",
+                "fuente": "fallback"
+            }
+
+    # --- GUARDAR en caché ---
+    for email, user in usuarios_db.items():
+        perfil = user.get("perfil_conductor", {})
+        if not perfil:
+            continue
+        doc_perfil = (perfil.get("numDoc") or "").strip()
+        if doc_perfil == doc_limpio:
+            user["perfil_conductor"]["validacion_licencia"] = result
+            await persist()
+            break
+
+    return result
 
 @app.post("/api/clear-routes")
 async def clear_routes():
