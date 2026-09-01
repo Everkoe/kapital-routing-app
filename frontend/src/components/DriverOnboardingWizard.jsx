@@ -393,27 +393,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           onToggle={() => toggleSection('manejo')}
           status={quizResult ? 'complete' : 'incomplete'}
         >
-          {/* Badge de resultado si ya completó */}
-          {quizResult && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '12px',
-                background: quizResult.puntaje >= 18 ? 'rgba(34,197,94,0.1)' : quizResult.puntaje >= 15 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
-                border: `1px solid ${quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444'}40`,
-                borderRadius: '10px', padding: '12px 16px', marginBottom: '16px',
-              }}
-            >
-              <Award size={22} color={quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444'} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: quizResult.puntaje >= 18 ? '#22c55e' : quizResult.puntaje >= 15 ? '#f59e0b' : '#ef4444' }}>
-                  {quizResult.estado} – {quizResult.puntaje}/20 correctas
-                </div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Puedes volver a intentarlo si deseas mejorar tu puntaje.</div>
-              </div>
-            </motion.div>
-          )}
           <QuizManejoDefensivo
             initialData={quizResult}
             onComplete={(result) => {
