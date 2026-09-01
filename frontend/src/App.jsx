@@ -57,7 +57,18 @@ const PantallaAuth = ({ onLogin }) => {
 
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const registerIdentifier = formData.rol === 'Conductor' ? formData.dni : formData.email;
-    const payload = isLogin ? { identifier: formData.identifier.trim(), password: formData.password } : { ...formData, identifier: registerIdentifier.trim() };
+    const registerPayload = {
+      identifier: (registerIdentifier || '').trim(),
+      password: formData.password,
+      nombre: formData.nombre,
+      rol: formData.rol,
+      telefono: formData.telefono || null,
+      unidad_id: formData.unidad_id || null,
+      empresa_id: formData.empresa_id || null,
+    };
+    const payload = isLogin
+      ? { identifier: formData.identifier.trim(), password: formData.password }
+      : registerPayload;
 
     setIsAuthLoading(true);
     try {
