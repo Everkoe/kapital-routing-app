@@ -1087,12 +1087,15 @@ const FlotaView = ({ usuario }) => {
               <h3>{viewingDoc.name}</h3>
               <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
             </div>
-            <div className="doc-viewer-body">
+            <div className="doc-viewer-body" style={{ flexDirection: 'column' }}>
               {typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
                 <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
               ) : (
                 <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
               )}
+              <div style={{ padding: '10px', background: '#fff', color: '#000', width: '100%', wordBreak: 'break-all', fontSize: '10px' }}>
+                DEBUG SRC: {typeof viewingDoc.src === 'string' ? viewingDoc.src.substring(0, 150) + '...' : JSON.stringify(viewingDoc.src)}
+              </div>
             </div>
           </div>
         </div>
