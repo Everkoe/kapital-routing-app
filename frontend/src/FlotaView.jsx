@@ -49,7 +49,7 @@ const FlotaView = ({ usuario }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_email: usuario.identifier,
+          admin_email: usuario.email || usuario.identifier,
           conductor_email: conductorInfo.usuario.email,
           campo,
           estado,
@@ -74,7 +74,7 @@ const FlotaView = ({ usuario }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_email: usuario.identifier,
+          admin_email: usuario.email || usuario.identifier,
           conductor_email: conductorInfo.usuario.email,
           mensaje: notifyMsg,
         })
