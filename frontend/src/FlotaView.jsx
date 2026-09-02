@@ -584,7 +584,13 @@ const FlotaView = ({ usuario }) => {
                             {fileData && (
                               <div className="review-doc-actions">
                                 <button className="btn-view-doc" onClick={() => {
-                                  setViewingDoc({ name: doc.label, src: fileData.base64 || fileData });
+                                  let docSrc = '';
+                                  if (typeof fileData === 'string') {
+                                    docSrc = fileData;
+                                  } else if (fileData && typeof fileData === 'object') {
+                                    docSrc = fileData.base64 || fileData.url || fileData.file || '';
+                                  }
+                                  setViewingDoc({ name: doc.label, src: docSrc });
                                 }}>
                                   <Eye size={13} /> Ver
                                 </button>
@@ -1082,7 +1088,7 @@ const FlotaView = ({ usuario }) => {
               <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
             </div>
             <div className="doc-viewer-body">
-              {viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf') ? (
+              {typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
                 <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
               ) : (
                 <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
