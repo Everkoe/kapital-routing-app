@@ -49,8 +49,8 @@ const FlotaView = ({ usuario }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_email: usuario.email || usuario.identifier,
-          conductor_email: conductorInfo.usuario.email || conductorInfo.usuario.identifier,
+          admin_email: usuario?.email || usuario?.identifier || '',
+          conductor_email: conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '',
           campo,
           estado,
         })
@@ -74,8 +74,8 @@ const FlotaView = ({ usuario }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_email: usuario.email || usuario.identifier,
-          conductor_email: conductorInfo.usuario.email || conductorInfo.usuario.identifier,
+          admin_email: usuario?.email || usuario?.identifier || '',
+          conductor_email: conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '',
           mensaje: notifyMsg,
         })
       });

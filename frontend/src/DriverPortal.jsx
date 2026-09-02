@@ -11,6 +11,8 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notificaciones, setNotificaciones] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
   
   // Si el usuario ya está en revisión, su perfil está completo
   const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || false);
@@ -21,28 +23,61 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [activeZenRouteIndex, setActiveZenRouteIndex] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
 
-  // Poll for status changes if pending
+  // Poll for status and notifications changes continuously
   useEffect(() => {
-    if (usuario.estado !== 'Pendiente Revisión') return;
-    
     const checkStatus = async () => {
       try {
-        const res = await fetch(`/api/user/profile?email=${encodeURIComponent(usuario.email)}`);
+        const userKey = usuario.email || usuario.identifier;
+        if (!userKey) return;
+        const res = await fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.estado === 'Activo') {
-            toast.success("¡Tu perfil ha sido aprobado!");
+          // Update local state if it changed
+          if (data.estado !== usuario.estado) {
+            if (data.estado === 'Activo' && usuario.estado === 'Pendiente Revisión') {
+              toast.success("¡Tu perfil ha sido aprobado!");
+            }
+            if (data.estado === 'Documentos Observados' && usuario.estado !== 'Documentos Observados') {
+              toast.error("Atención: Tienes documentos observados. Por favor, revísalos.");
+            }
             const updatedUser = { ...usuario, ...data };
             localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
             if (setUsuarioActual) setUsuarioActual(updatedUser);
+          }
+        }
+        
+        // Also fetch notifications
+        const userKeyNotif = usuario.email || usuario.identifier;
+        if (userKeyNotif) {
+          const notifRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKeyNotif)}`);
+          if (notifRes.ok) {
+            const notifData = await notifRes.json();
+            const unread = notifData.filter(n => !n.leido);
+            if (unread.length > notificaciones.length) {
+              toast('Tienes una nueva notificación de administración', { icon: '🔔' });
+            }
+            setNotificaciones(unread);
           }
         }
       } catch(e) {}
     };
     
     const interval = setInterval(checkStatus, 5000);
+    // Check immediately on mount
+    checkStatus();
     return () => clearInterval(interval);
-  }, [usuario, setUsuarioActual]);
+  }, [usuario, notificaciones.length, setUsuarioActual]);
+
+  const markNotificationRead = async (id) => {
+    try {
+      await fetch('/api/conductor/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: usuario.email || usuario.identifier, notif_id: id })
+      });
+      setNotificaciones(notificaciones.filter(n => n.id !== id));
+    } catch(e) {}
+  };
 
   const fetchMisRutas = async () => {
     setIsLoading(true);
@@ -69,7 +104,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         const response = await fetch('/api/user/profile', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: usuario.email, unidad_id: nuevoId.trim().toUpperCase() })
+          body: JSON.stringify({ identifier: usuario.identifier || usuario.email, unidad_id: nuevoId.trim().toUpperCase() })
         });
         if (!response.ok) throw new Error('Error al actualizar unidad');
         const updatedUser = await response.json();
@@ -209,6 +244,33 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         <button className="no-print" onClick={enviarSOS} style={{ width: '100%', background: '#dc2626', color: 'white', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '20px', boxShadow: '0 4px 6px rgba(220, 38, 38, 0.3)', cursor: 'pointer' }}>
           🚨 BOTÓN DE EMERGENCIA (SOS)
         </button>
+
+        {notificaciones.length > 0 && (
+          <div className="no-print" style={{ marginBottom: '20px', background: 'var(--bg-secondary)', border: '1px solid var(--kapital-accent-orange)', borderRadius: '8px', padding: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h4 style={{ margin: 0, color: 'var(--kapital-accent-orange)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                🔔 Notificaciones ({notificaciones.length})
+              </h4>
+              <button onClick={() => setShowNotifications(!showNotifications)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.9rem' }}>
+                {showNotifications ? 'Ocultar' : 'Ver'}
+              </button>
+            </div>
+            {showNotifications && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {notificaciones.map(n => (
+                  <div key={n.id} style={{ background: 'var(--bg)', padding: '10px', borderRadius: '6px', borderLeft: '4px solid var(--kapital-accent-orange)', position: 'relative' }}>
+                    <button onClick={() => markNotificationRead(n.id)} style={{ position: 'absolute', top: '5px', right: '5px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                      ✕
+                    </button>
+                    <strong>{n.titulo}</strong>
+                    <p style={{ margin: '5px 0 0 0', fontSize: '0.9rem', color: 'var(--text-primary)' }}>{n.mensaje}</p>
+                    <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '5px' }}>De: {n.de}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {activeZenRouteIndex !== null ? (
           <ZenModeView 

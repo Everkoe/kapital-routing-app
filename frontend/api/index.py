@@ -570,12 +570,19 @@ async def review_driver_doc(payload: DriverDocReviewPayload):
     """Admin marca un documento individual del conductor como aprobado o rechazado."""
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
     conductor = usuarios_db.get(payload.conductor_email)
     if not conductor:
-        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+        conductor = {
+            "identifier": payload.conductor_email,
+            "email": payload.conductor_email,
+            "rol": "Conductor",
+            "estado": "Pendiente Revisión",
+            "perfil_conductor": {}
+        }
+        usuarios_db[payload.conductor_email] = conductor
 
     if "perfil_conductor" not in conductor:
         conductor["perfil_conductor"] = {}
@@ -609,12 +616,19 @@ async def notify_driver(payload: DriverNotifyPayload):
     """Admin envía un aviso interno al conductor."""
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
     conductor = usuarios_db.get(payload.conductor_email)
     if not conductor:
-        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+        conductor = {
+            "identifier": payload.conductor_email,
+            "email": payload.conductor_email,
+            "rol": "Conductor",
+            "estado": "Pendiente Revisión",
+            "perfil_conductor": {}
+        }
+        usuarios_db[payload.conductor_email] = conductor
 
     notif_id = int(__import__('time').time() * 1000)
     notifications_db.append({
@@ -1076,6 +1090,7 @@ async def get_conductor_info(unidad_id: str):
         "usuario": {
             "nombre": conductor_user.get("nombre") if conductor_user else flota_info.get("chofer", "Desconocido"),
             "email": conductor_user.get("email") if conductor_user else "",
+            "identifier": conductor_user.get("identifier") if conductor_user else "",
             "avatar": conductor_user.get("avatar") if conductor_user else None,
             "perfil_conductor": conductor_user.get("perfil_conductor") if conductor_user else None
         },
