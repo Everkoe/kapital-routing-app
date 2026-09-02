@@ -590,7 +590,7 @@ const FlotaView = ({ usuario }) => {
                                   } else if (fileData && typeof fileData === 'object') {
                                     docSrc = fileData.base64 || fileData.url || fileData.file || '';
                                   }
-                                  setViewingDoc({ name: doc.label, src: docSrc });
+                                  setViewingDoc({ name: doc.label, src: docSrc, raw: fileData });
                                 }}>
                                   <Eye size={13} /> Ver
                                 </button>
@@ -1088,13 +1088,13 @@ const FlotaView = ({ usuario }) => {
               <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
             </div>
             <div className="doc-viewer-body" style={{ flexDirection: 'column' }}>
-              {typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
+              {typeof viewingDoc.src === 'string' && viewingDoc.src !== '' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
                 <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
               ) : (
-                <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
+                <img src={viewingDoc.src || 'about:blank'} alt={viewingDoc.name} className="doc-image" />
               )}
-              <div style={{ padding: '10px', background: '#fff', color: '#000', width: '100%', wordBreak: 'break-all', fontSize: '10px' }}>
-                DEBUG SRC: {typeof viewingDoc.src === 'string' ? viewingDoc.src.substring(0, 150) + '...' : JSON.stringify(viewingDoc.src)}
+              <div style={{ padding: '10px', background: '#fff', color: '#000', width: '100%', wordBreak: 'break-all', fontSize: '12px' }}>
+                <strong>DEBUG RAW FILE DATA:</strong> {JSON.stringify(viewingDoc.raw)}
               </div>
             </div>
           </div>
