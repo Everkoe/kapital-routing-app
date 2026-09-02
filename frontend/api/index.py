@@ -311,6 +311,18 @@ class BulkActionPayload(BaseModel):
     target_emails: List[str]
     action: str # "approve", "reject", "delete", "deactivate"
 
+class DriverDocReviewPayload(BaseModel):
+    admin_email: str
+    conductor_email: str
+    campo: str          # e.g. "dniScaneado", "licenciaConducir"
+    estado: str         # "aprobado" | "rechazado"
+    nota: Optional[str] = None
+
+class DriverNotifyPayload(BaseModel):
+    admin_email: str
+    conductor_email: str
+    mensaje: str
+
 # --- Endpoints de Autenticación y Verificación ---
 
 @app.get("/api/notifications")
@@ -552,6 +564,71 @@ async def reject_user(target_email: str, admin_email: str):
     del usuarios_db[target_email]
     await persist_users_only()
     return {"message": f"Usuario {target_email} rechazado y eliminado."}
+
+@app.post("/api/admin/driver/review")
+async def review_driver_doc(payload: DriverDocReviewPayload):
+    """Admin marca un documento individual del conductor como aprobado o rechazado."""
+    await reload_db()
+    req_user = usuarios_db.get(payload.admin_email)
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+
+    conductor = usuarios_db.get(payload.conductor_email)
+    if not conductor:
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+
+    if "perfil_conductor" not in conductor:
+        conductor["perfil_conductor"] = {}
+
+    if "revision_docs" not in conductor["perfil_conductor"]:
+        conductor["perfil_conductor"]["revision_docs"] = {}
+
+    conductor["perfil_conductor"]["revision_docs"][payload.campo] = {
+        "estado": payload.estado,
+        "nota": payload.nota or "",
+        "revisado_por": req_user.get("nombre", payload.admin_email),
+        "fecha": __import__('datetime').datetime.now().isoformat()
+    }
+
+    # Update global driver state based on all doc reviews
+    revisiones = conductor["perfil_conductor"]["revision_docs"]
+    if any(v["estado"] == "rechazado" for v in revisiones.values()):
+        conductor["estado"] = "Documentos Observados"
+    elif len(revisiones) > 0 and all(v["estado"] == "aprobado" for v in revisiones.values()):
+        conductor["estado"] = "Activo"
+
+    await persist_users_only()
+    return {
+        "message": f"Documento '{payload.campo}' marcado como {payload.estado}.",
+        "estado_conductor": conductor["estado"],
+        "revision_docs": conductor["perfil_conductor"]["revision_docs"]
+    }
+
+@app.post("/api/admin/driver/notify")
+async def notify_driver(payload: DriverNotifyPayload):
+    """Admin envía un aviso interno al conductor."""
+    await reload_db()
+    req_user = usuarios_db.get(payload.admin_email)
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+
+    conductor = usuarios_db.get(payload.conductor_email)
+    if not conductor:
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+
+    notif_id = int(__import__('time').time() * 1000)
+    notifications_db.append({
+        "id": notif_id,
+        "tipo": "aviso_admin",
+        "titulo": "⚠️ Revisión de documentos",
+        "mensaje": payload.mensaje,
+        "para": payload.conductor_email,
+        "de": req_user.get("nombre", payload.admin_email),
+        "fecha": __import__('datetime').datetime.now().isoformat(),
+        "leido": False
+    })
+    await persist_users_only()
+    return {"message": "Aviso enviado al conductor exitosamente.", "notif_id": notif_id}
 
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):

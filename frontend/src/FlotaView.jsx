@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText } from 'lucide-react';
 import { GlobalLoader } from './App';
 import DocumentVerification from './components/DocumentVerification';
 
@@ -26,7 +26,65 @@ const FlotaView = ({ usuario }) => {
   const [conductorInfo, setConductorInfo] = useState(null);
   const [isLoadingConductor, setIsLoadingConductor] = useState(false);
 
-  // Pagination state
+  const [reviewLoading, setReviewLoading] = useState({});
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const [isSendingNotify, setIsSendingNotify] = useState(false);
+  const [localRevisionDocs, setLocalRevisionDocs] = useState({});
+
+  // Sync localRevisionDocs when conductorInfo loads
+  useEffect(() => {
+    if (conductorInfo) {
+      setLocalRevisionDocs(conductorInfo.usuario?.perfil_conductor?.revision_docs || {});
+    }
+  }, [conductorInfo]);
+
+  const handleDocReview = async (campo, estado) => {
+    if (!conductorInfo || !usuario) return;
+    setReviewLoading(prev => ({ ...prev, [campo]: true }));
+    try {
+      const res = await fetch('/api/admin/driver/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_email: usuario.identifier,
+          conductor_email: conductorInfo.usuario.email,
+          campo,
+          estado,
+        })
+      });
+      if (!res.ok) throw new Error('Error al revisar documento');
+      const data = await res.json();
+      setLocalRevisionDocs(data.revision_docs || {});
+      toast.success(`Documento marcado como ${estado === 'aprobado' ? '✅ Aprobado' : '❌ Rechazado'}`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setReviewLoading(prev => ({ ...prev, [campo]: false }));
+    }
+  };
+
+  const handleNotifyDriver = async () => {
+    if (!notifyMsg.trim() || !conductorInfo || !usuario) return;
+    setIsSendingNotify(true);
+    try {
+      const res = await fetch('/api/admin/driver/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_email: usuario.identifier,
+          conductor_email: conductorInfo.usuario.email,
+          mensaje: notifyMsg,
+        })
+      });
+      if (!res.ok) throw new Error('Error al enviar aviso');
+      toast.success('✉️ Aviso enviado al conductor exitosamente');
+      setNotifyMsg('');
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setIsSendingNotify(false);
+    }
+  };
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [pageSizeDropdownOpen, setPageSizeDropdownOpen] = useState(false);
@@ -440,6 +498,7 @@ const FlotaView = ({ usuario }) => {
               </div>
             ) : conductorInfo ? (
               <div className="profile-layout">
+                {/* LEFT: Avatar + Vehicle Photo */}
                 <div className="profile-left">
                   <div className="driver-photo">
                     {conductorInfo.usuario.avatar ? (
@@ -449,64 +508,146 @@ const FlotaView = ({ usuario }) => {
                     )}
                   </div>
                   <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
-                  <h3 className="driver-name">{conductorInfo.usuario.nombre.toUpperCase()}</h3>
+                  <h3 className="driver-name">{conductorInfo.usuario.nombre?.toUpperCase()}</h3>
+                  <p style={{fontSize:'0.78rem', color:'var(--text-secondary)', margin:'4px 0 12px'}}>{conductorInfo.usuario.email}</p>
+
+                  {/* Vehicle photo from profile */}
+                  {conductorInfo.usuario.perfil_conductor?.fotoVehiculo ? (
+                    <div className="vehicle-photo" style={{marginTop:'0'}}>
+                      <img src={conductorInfo.usuario.perfil_conductor.fotoVehiculo} alt="Vehículo" style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                    </div>
+                  ) : (
+                    <div className="vehicle-photo" style={{marginTop:'0'}}>
+                      <div className="vehicle-placeholder"><CarFront size={36} strokeWidth={1} /><p style={{fontSize:'0.75rem',marginTop:'6px'}}>Sin foto de vehículo</p></div>
+                    </div>
+                  )}
                 </div>
+
+                {/* RIGHT: Info + Docs review */}
                 <div className="profile-right">
-                  <div className="vehicle-photo">
-                    <img src="https://images.unsplash.com/photo-1619682817481-e994891cd1f5?auto=format&fit=crop&q=80&w=1600" alt="Vehículo" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
-                  </div>
                   <div className="info-grid">
                     <div className="info-section">
                       <h4>Información del conductor</h4>
                       <p><strong>DNI/Documento:</strong> {conductorInfo.usuario.perfil_conductor?.tipoDoc || 'DNI'} {conductorInfo.usuario.perfil_conductor?.numDoc || 'No registrado'}</p>
-                      <p><strong>Fecha de Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || 'No registrado'}</p>
-                      <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || 'No registrado'}</p>
-                      <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || 'No registrado'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
+                      <p><strong>Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || '—'}</p>
+                      <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || '—'}</p>
+                      <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || '—'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
                     </div>
                     <div className="info-section">
                       <h4>Información del vehículo</h4>
-                      <p><strong>Marca y Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || conductorInfo.flota?.tipo || 'Vehículo'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
-                      <p><strong>Año y Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || 'N/A'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || 'N/A'}</p>
+                      <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
+                      <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || '—'}</p>
                       <p><strong>Placa:</strong> {conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
                       <p><strong>Capacidad:</strong> {conductorInfo.flota?.capacidad || 15} pasajeros</p>
                     </div>
                   </div>
+
+                  {/* DOCUMENT REVIEW PANEL */}
                   <div className="docs-section">
-                    <h4>Documentación</h4>
-                    <div className="docs-grid">
+                    <h4 style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                      <ShieldCheck size={18} color="#38bdf8" />
+                      Revisión de Documentos del Conductor
+                    </h4>
+                    <div className="review-docs-grid">
                       {[
-                        { name: 'Comprobante de domicilio', file: conductorInfo.usuario.perfil_conductor?.comprobanteDomicilio },
-                        { name: 'Licencia de Conducir', file: conductorInfo.usuario.perfil_conductor?.licenciaConducir },
-                        { name: 'Récord de Conductor', file: conductorInfo.usuario.perfil_conductor?.recordConductor },
-                        { name: 'Antecedentes', file: conductorInfo.usuario.perfil_conductor?.antecedentesPenales },
-                        { name: 'Tarjeta de Propiedad', file: conductorInfo.flota?.tarjeta_propiedad || conductorInfo.usuario.perfil_conductor?.tarjetaPropiedad },
-                        { name: 'SOAT', file: conductorInfo.flota?.soat_doc || conductorInfo.usuario.perfil_conductor?.soat },
-                        { name: 'Revisión Técnica', file: conductorInfo.flota?.revision_doc || conductorInfo.usuario.perfil_conductor?.revisionTecnica }
-                      ].map((doc, i) => (
-                        <div key={i} className="doc-item">
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {doc.name}
-                            {!doc.file && <span style={{color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: '600', padding: '2px 6px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '4px'}}><Clock size={12} /> Falta</span>}
-                          </span>
-                          {doc.file && (
-                            <button className="btn-view-doc" onClick={() => window.open(doc.file, '_blank')}>
-                              <Eye size={14} /> Ver Archivo
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                        { key: 'comprobanteDomicilio', label: 'Comprobante de Domicilio' },
+                        { key: 'dniScaneado', label: 'DNI Escaneado' },
+                        { key: 'licenciaConducir', label: 'Licencia de Conducir' },
+                        { key: 'recordConductor', label: 'Récord de Conductor' },
+                        { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales' },
+                        { key: 'cv', label: 'Currículum Vitae' },
+                        { key: 'tarjetaPropiedad', label: 'Tarjeta de Propiedad' },
+                        { key: 'soat', label: 'SOAT' },
+                        { key: 'revisionTecnica', label: 'Revisión Técnica' },
+                      ].map((doc) => {
+                        const fileData = conductorInfo.usuario.perfil_conductor?.[doc.key];
+                        const rev = localRevisionDocs[doc.key];
+                        const isLoading = reviewLoading[doc.key];
+                        return (
+                          <div key={doc.key} className="review-doc-card">
+                            <div className="review-doc-header">
+                              <FileText size={15} style={{flexShrink:0, color:'var(--text-secondary)'}} />
+                              <span className="review-doc-name">{doc.label}</span>
+                              {rev ? (
+                                rev.estado === 'aprobado'
+                                  ? <span className="rev-badge rev-ok"><CheckCircle size={12} /> Aprobado</span>
+                                  : <span className="rev-badge rev-no"><XCircle size={12} /> Rechazado</span>
+                              ) : (
+                                fileData
+                                  ? <span className="rev-badge rev-pending"><Clock size={12} /> Pendiente</span>
+                                  : <span className="rev-badge rev-missing">Sin archivo</span>
+                              )}
+                            </div>
+                            {fileData && (
+                              <div className="review-doc-actions">
+                                <button className="btn-view-doc" onClick={() => {
+                                  const src = fileData.base64 || fileData;
+                                  const win = window.open();
+                                  win.document.write(`<iframe src="${src}" style="width:100%;height:100vh;border:none"></iframe>`);
+                                }}>
+                                  <Eye size={13} /> Ver
+                                </button>
+                                <button
+                                  className="btn-approve-doc"
+                                  disabled={isLoading || rev?.estado === 'aprobado'}
+                                  onClick={() => handleDocReview(doc.key, 'aprobado')}
+                                >
+                                  {isLoading ? '...' : <><CheckCircle size={13} /> Aprobar</>}
+                                </button>
+                                <button
+                                  className="btn-reject-doc"
+                                  disabled={isLoading || rev?.estado === 'rechazado'}
+                                  onClick={() => handleDocReview(doc.key, 'rechazado')}
+                                >
+                                  {isLoading ? '...' : <><XCircle size={13} /> Rechazar</>}
+                                </button>
+                              </div>
+                            )}
+                            {!fileData && (
+                              <p className="review-doc-missing">El conductor aún no ha subido este documento.</p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    
-                    <DocumentVerification 
-                      placa={conductorInfo.usuario.perfil_conductor?.vehiculoPlaca || conductorInfo.flota?.placa || conductorInfo.unidad_id}
-                      doc={conductorInfo.usuario.perfil_conductor?.numDoc || conductorInfo.usuario.nombre}
-                      cachedResults={{
-                        soat: conductorInfo.usuario.perfil_conductor?.validacion_soat,
-                        citv: conductorInfo.usuario.perfil_conductor?.validacion_citv,
-                        licencia: conductorInfo.usuario.perfil_conductor?.validacion_licencia
-                      }}
-                      style={{ marginTop: '20px' }}
+                  </div>
+
+                  {/* API VERIFICATION */}
+                  <DocumentVerification
+                    placa={conductorInfo.usuario.perfil_conductor?.vehiculoPlaca || conductorInfo.flota?.placa || conductorInfo.unidad_id}
+                    doc={conductorInfo.usuario.perfil_conductor?.numDoc || conductorInfo.usuario.nombre}
+                    cachedResults={{
+                      soat: conductorInfo.usuario.perfil_conductor?.validacion_soat,
+                      citv: conductorInfo.usuario.perfil_conductor?.validacion_citv,
+                      licencia: conductorInfo.usuario.perfil_conductor?.validacion_licencia
+                    }}
+                  />
+
+                  {/* NOTIFY DRIVER */}
+                  <div className="notify-section">
+                    <h4 style={{display:'flex', alignItems:'center', gap:'8px', margin:'0 0 12px 0'}}>
+                      <ShieldAlert size={18} color="#f59e0b" />
+                      Enviar Aviso al Conductor
+                    </h4>
+                    <p style={{fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0 0 10px 0'}}>
+                      El conductor recibirá esta notificación en su portal.
+                    </p>
+                    <textarea
+                      value={notifyMsg}
+                      onChange={e => setNotifyMsg(e.target.value)}
+                      placeholder={`Ej: Estimado ${conductorInfo.usuario.nombre}, por favor vuelva a enviar su licencia de conducir ya que la imagen no es legible.`}
+                      className="notify-textarea"
+                      rows={3}
                     />
+                    <button
+                      className="btn-primary"
+                      style={{marginTop:'10px', display:'flex', alignItems:'center', gap:'8px', padding:'10px 20px'}}
+                      onClick={handleNotifyDriver}
+                      disabled={isSendingNotify || !notifyMsg.trim()}
+                    >
+                      <Send size={15} />
+                      {isSendingNotify ? 'Enviando...' : 'Enviar Aviso'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -710,6 +851,70 @@ const FlotaView = ({ usuario }) => {
           background: var(--primary-color);
           color: #ffffff;
         }
+
+        /* Review doc cards */
+        .review-docs-grid {
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;
+        }
+        .review-doc-card {
+          background: var(--bg-secondary, #fff); border: 1px solid var(--border-color);
+          border-radius: 10px; padding: 12px 14px;
+          display: flex; flex-direction: column; gap: 10px;
+          transition: border-color 0.2s;
+        }
+        .review-doc-card:hover { border-color: rgba(56,189,248,0.4); }
+        .review-doc-header {
+          display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        }
+        .review-doc-name {
+          flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--text-primary);
+        }
+        .rev-badge {
+          display: inline-flex; align-items: center; gap: 4px;
+          font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+          white-space: nowrap;
+        }
+        .rev-ok { background: rgba(34,197,94,0.12); color: #22c55e; }
+        .rev-no { background: rgba(239,68,68,0.12); color: #ef4444; }
+        .rev-pending { background: rgba(245,158,11,0.12); color: #f59e0b; }
+        .rev-missing { background: rgba(100,116,139,0.1); color: var(--text-secondary); }
+        .review-doc-actions {
+          display: flex; gap: 6px; flex-wrap: wrap;
+        }
+        .btn-approve-doc {
+          display: flex; align-items: center; gap: 4px;
+          background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3);
+          color: #22c55e; padding: 5px 10px; border-radius: 6px;
+          font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+        }
+        .btn-approve-doc:hover:not(:disabled) { background: #22c55e; color: #fff; }
+        .btn-approve-doc:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-reject-doc {
+          display: flex; align-items: center; gap: 4px;
+          background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+          color: #ef4444; padding: 5px 10px; border-radius: 6px;
+          font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+        }
+        .btn-reject-doc:hover:not(:disabled) { background: #ef4444; color: #fff; }
+        .btn-reject-doc:disabled { opacity: 0.4; cursor: not-allowed; }
+        .review-doc-missing {
+          font-size: 0.75rem; color: var(--text-secondary); margin: 0;
+          font-style: italic;
+        }
+
+        /* Notify section */
+        .notify-section {
+          background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);
+          border-radius: 12px; padding: 20px;
+        }
+        .notify-textarea {
+          width: 100%; padding: 10px 12px; border-radius: 8px;
+          border: 1px solid var(--border-color); background: var(--bg-secondary);
+          color: var(--text-primary); font-size: 0.88rem; resize: vertical;
+          outline: none; transition: border-color 0.2s; font-family: inherit;
+          box-sizing: border-box;
+        }
+        .notify-textarea:focus { border-color: #f59e0b; }
 
         .btn-icon {
           background: transparent;
