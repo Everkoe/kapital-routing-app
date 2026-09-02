@@ -30,6 +30,9 @@ const FlotaView = ({ usuario }) => {
   const [notifyMsg, setNotifyMsg] = useState('');
   const [isSendingNotify, setIsSendingNotify] = useState(false);
   const [localRevisionDocs, setLocalRevisionDocs] = useState({});
+  
+  // Doc Viewer State
+  const [viewingDoc, setViewingDoc] = useState(null);
 
   // Sync localRevisionDocs when conductorInfo loads
   useEffect(() => {
@@ -581,28 +584,7 @@ const FlotaView = ({ usuario }) => {
                             {fileData && (
                               <div className="review-doc-actions">
                                 <button className="btn-view-doc" onClick={() => {
-                                  const src = fileData.base64 || fileData;
-                                  // Convert base64 data URL to a Blob URL to avoid popup blocker issues
-                                  try {
-                                    if (src.startsWith('data:')) {
-                                      const [header, b64] = src.split(',');
-                                      const mime = header.match(/:(.*?);/)[1];
-                                      const bytes = atob(b64);
-                                      const arr = new Uint8Array(bytes.length);
-                                      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-                                      const blob = new Blob([arr], { type: mime });
-                                      const blobUrl = URL.createObjectURL(blob);
-                                      window.open(blobUrl, '_blank');
-                                    } else {
-                                      window.open(src, '_blank');
-                                    }
-                                  } catch (err) {
-                                    // Fallback: create a download link
-                                    const a = document.createElement('a');
-                                    a.href = src;
-                                    a.download = fileData.name || 'documento';
-                                    a.click();
-                                  }
+                                  setViewingDoc({ name: doc.label, src: fileData.base64 || fileData });
                                 }}>
                                   <Eye size={13} /> Ver
                                 </button>
@@ -685,7 +667,7 @@ const FlotaView = ({ usuario }) => {
             <h3>{isEditing ? 'Editar Unidad' : 'Registrar Nueva Unidad'}</h3>
             <form onSubmit={handleSubmit} className="flota-form">
               <div className="form-scroll-area">
-                <div className="form-row">
+              <div className="form-row">
                 <label>Placa/ID</label>
                 <input required disabled={isEditing} value={formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
               </div>
@@ -1053,7 +1035,62 @@ const FlotaView = ({ usuario }) => {
           gap: 12px;
           margin-top: 25px;
         }
+
+        /* DOC VIEWER MODAL */
+        .doc-viewer-overlay {
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+          display: flex; align-items: center; justify-content: center;
+          z-index: 9999; padding: 20px;
+        }
+        .doc-viewer-content {
+          background: var(--bg-secondary); border-radius: 12px; width: 100%; max-width: 900px;
+          display: flex; flex-direction: column; overflow: hidden;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.4); border: 1px solid var(--border-color);
+        }
+        .doc-viewer-header {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 15px 20px; border-bottom: 1px solid var(--border-color);
+        }
+        .doc-viewer-header h3 {
+          margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);
+        }
+        .close-btn-inline {
+          background: transparent; border: none; color: var(--text-secondary);
+          cursor: pointer; padding: 4px; border-radius: 4px; display: flex;
+          align-items: center; justify-content: center; transition: all 0.2s;
+        }
+        .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+        .doc-viewer-body {
+          padding: 0; background: #e2e8f0; display: flex; align-items: center; justify-content: center;
+          height: 80vh; max-height: 800px;
+        }
+        .doc-iframe {
+          width: 100%; height: 100%; border: none;
+        }
+        .doc-image {
+          max-width: 100%; max-height: 100%; object-fit: contain;
+        }
       `}</style>
+
+      {/* DOCUMENT VIEWER MODAL */}
+      {viewingDoc && (
+        <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
+          <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
+            <div className="doc-viewer-header">
+              <h3>{viewingDoc.name}</h3>
+              <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
+            </div>
+            <div className="doc-viewer-body">
+              {viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf') ? (
+                <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
+              ) : (
+                <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
