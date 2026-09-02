@@ -1087,15 +1087,17 @@ const FlotaView = ({ usuario }) => {
               <h3>{viewingDoc.name}</h3>
               <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
             </div>
-            <div className="doc-viewer-body" style={{ flexDirection: 'column' }}>
-              {typeof viewingDoc.src === 'string' && viewingDoc.src !== '' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
+            <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '20px', textAlign: 'center' }}>
+              {(!viewingDoc.src || viewingDoc.src === '') ? (
+                <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
+                  <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible o dañado</h4>
+                  <p style={{ fontSize: '14px', color: '#ccc' }}>El archivo no se cargó correctamente al servidor. Por favor, solicite al conductor que lo vuelva a subir.</p>
+                </div>
+              ) : typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
                 <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
               ) : (
-                <img src={viewingDoc.src || 'about:blank'} alt={viewingDoc.name} className="doc-image" />
+                <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
               )}
-              <div style={{ padding: '10px', background: '#fff', color: '#000', width: '100%', wordBreak: 'break-all', fontSize: '12px' }}>
-                <strong>DEBUG RAW FILE DATA:</strong> {JSON.stringify(viewingDoc.raw)}
-              </div>
             </div>
           </div>
         </div>
