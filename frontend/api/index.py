@@ -649,6 +649,60 @@ async def driver_onboarding(payload: DriverProfilePayload):
     await persist_users_only()
     return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}
 
+class MarkReadPayload(BaseModel):
+    notif_id: int
+
+@app.get("/api/conductor/notifications")
+async def get_conductor_notifications(email: str):
+    await reload_db()
+    user_notifs = [n for n in notifications_db if n.get("para") == email]
+    # Sort newest first
+    user_notifs.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    return user_notifs
+
+@app.post("/api/conductor/notifications/mark-read")
+async def mark_notification_read(payload: MarkReadPayload):
+    await reload_db()
+    for n in notifications_db:
+        if n.get("id") == payload.notif_id:
+            n["leido"] = True
+            await persist_users_only()
+            return {"message": "Marcado como leído."}
+    raise HTTPException(status_code=404, detail="Notificación no encontrada.")
+
+class ResubmitDocsPayload(BaseModel):
+    email: str
+    docs: Dict[str, Any]
+
+@app.post("/api/conductor/resubmit-docs")
+async def resubmit_driver_docs(payload: ResubmitDocsPayload):
+    await reload_db()
+    user = usuarios_db.get(payload.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+    
+    perfil = user.get("perfil_conductor")
+    if not perfil:
+        raise HTTPException(status_code=400, detail="El conductor no tiene perfil configurado.")
+        
+    revision_docs = perfil.get("revision_docs", {})
+    
+    # Update only the provided documents
+    for k, v in payload.docs.items():
+        perfil[k] = v
+        # Reset the status of this specific document back to pending
+        if k in revision_docs:
+            revision_docs[k]["estado"] = "pendiente"
+            
+    # Check if there are any remaining rejected documents
+    has_rejected = any(rev.get("estado") == "rechazado" for rev in revision_docs.values())
+    
+    if not has_rejected:
+        user["estado"] = "Pendiente Revisión"
+    
+    await persist_users_only()
+    return {"message": "Documentos actualizados exitosamente", "estado": user["estado"]}
+
 # --- Lógica de Negocio y Endpoints de Rutas ---
 
 

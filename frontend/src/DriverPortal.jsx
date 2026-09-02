@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
+import DocumentResubmission from './components/DocumentResubmission';
 import SwipeablePassenger from './components/SwipeablePassenger';
 import ZenModeView from './components/ZenModeView';
 import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play } from 'lucide-react';
@@ -165,6 +166,14 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     return (
       <main style={{ padding: '20px' }}>
         <DriverOnboardingWizard usuario={usuario} onComplete={handleProfileComplete} />
+      </main>
+    );
+  }
+
+  if (usuario.estado === 'Documentos Observados') {
+    return (
+      <main style={{ padding: '20px', minHeight: '100vh', background: 'var(--bg)' }}>
+        <DocumentResubmission usuario={usuario} onComplete={handleProfileComplete} />
       </main>
     );
   }
