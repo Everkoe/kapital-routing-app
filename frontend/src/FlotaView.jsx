@@ -50,7 +50,7 @@ const FlotaView = ({ usuario }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           admin_email: usuario.email || usuario.identifier,
-          conductor_email: conductorInfo.usuario.email,
+          conductor_email: conductorInfo.usuario.email || conductorInfo.usuario.identifier,
           campo,
           estado,
         })
@@ -75,7 +75,7 @@ const FlotaView = ({ usuario }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           admin_email: usuario.email || usuario.identifier,
-          conductor_email: conductorInfo.usuario.email,
+          conductor_email: conductorInfo.usuario.email || conductorInfo.usuario.identifier,
           mensaje: notifyMsg,
         })
       });
