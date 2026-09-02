@@ -582,8 +582,27 @@ const FlotaView = ({ usuario }) => {
                               <div className="review-doc-actions">
                                 <button className="btn-view-doc" onClick={() => {
                                   const src = fileData.base64 || fileData;
-                                  const win = window.open();
-                                  win.document.write(`<iframe src="${src}" style="width:100%;height:100vh;border:none"></iframe>`);
+                                  // Convert base64 data URL to a Blob URL to avoid popup blocker issues
+                                  try {
+                                    if (src.startsWith('data:')) {
+                                      const [header, b64] = src.split(',');
+                                      const mime = header.match(/:(.*?);/)[1];
+                                      const bytes = atob(b64);
+                                      const arr = new Uint8Array(bytes.length);
+                                      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+                                      const blob = new Blob([arr], { type: mime });
+                                      const blobUrl = URL.createObjectURL(blob);
+                                      window.open(blobUrl, '_blank');
+                                    } else {
+                                      window.open(src, '_blank');
+                                    }
+                                  } catch (err) {
+                                    // Fallback: create a download link
+                                    const a = document.createElement('a');
+                                    a.href = src;
+                                    a.download = fileData.name || 'documento';
+                                    a.click();
+                                  }
                                 }}>
                                   <Eye size={13} /> Ver
                                 </button>
