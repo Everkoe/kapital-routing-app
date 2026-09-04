@@ -17,20 +17,22 @@ const DOC_LABELS = {
 
 const DocumentResubmission = ({ usuario, onComplete }) => {
   const [notifications, setNotifications] = useState([]);
-  const [rejectedDocs, setRejectedDocs] = useState([]);
+  const revisions = usuario?.perfil_conductor?.revision_docs || {};
+  const rejectedDocs = Object.keys(revisions).filter(key => revisions[key].estado?.toLowerCase() === 'rechazado');
   const [newFiles, setNewFiles] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchData();
-  }, [usuario.email]);
+  }, [usuario.identifier, usuario.email]);
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      const userKey = usuario.identifier || usuario.email;
       // Fetch notifications
-      const notifsRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(usuario.email)}`);
+      const notifsRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`);
       if (notifsRes.ok) {
         const notifs = await notifsRes.json();
         setNotifications(notifs);
@@ -45,12 +47,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
         });
       }
 
-      // Check which documents were rejected
-      const perfil = usuario.perfil_conductor || {};
-      const revisions = perfil.revision_docs || {};
-      const rejected = Object.keys(revisions).filter(key => revisions[key].estado === 'rechazado');
-      setRejectedDocs(rejected);
-
+      // The rejectedDocs is now computed directly from props above
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -89,11 +86,12 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
 
     setIsSubmitting(true);
     try {
+      const userKey = usuario.identifier || usuario.email;
       const res = await fetch('/api/conductor/resubmit-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: usuario.email,
+          email: userKey,
           docs: newFiles
         })
       });
@@ -111,6 +109,9 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
     }
   };
 
+  const isPending = usuario.estado === 'Pendiente Revisión';
+  const hasRejected = rejectedDocs.length > 0;
+
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}>
@@ -121,18 +122,31 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   }
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
+    <div style={{ maxWidth: '700px', margin: '0 auto', padding: '20px' }}>
       <div style={{ background: 'var(--bg-secondary)', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: '#ff6b6b' }}>
-          <AlertTriangle size={32} />
-          <h2 style={{ margin: 0 }}>Documentos Observados</h2>
-        </div>
+        
+        {isPending && !hasRejected ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: 'var(--kapital-blue-deep)' }}>
+              <h2 style={{ margin: 0 }}>⏳ Perfil en Revisión</h2>
+            </div>
+            <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
+              Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y los documentos que has subido. Por favor, regresa más tarde.
+            </p>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: '#ff6b6b' }}>
+              <AlertTriangle size={32} />
+              <h2 style={{ margin: 0 }}>Documentos Observados</h2>
+            </div>
+            <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
+              Hemos revisado tu perfil y necesitamos que corrijas o vuelvas a subir algunos documentos para poder activarlo.
+            </p>
+          </>
+        )}
 
-        <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
-          Hemos revisado tu perfil y necesitamos que corrijas o vuelvas a subir algunos documentos para poder activarlo.
-        </p>
-
-        {notifications.length > 0 && (
+        {notifications.length > 0 && hasRejected && (
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #ff6b6b', marginBottom: '30px' }}>
             <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)' }}>Último mensaje de Administración:</h4>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
@@ -142,50 +156,84 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
-          {rejectedDocs.map(docKey => (
-            <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
-              <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)' }}>
-                {DOC_LABELS[docKey] || docKey} <span style={{ color: '#ff6b6b', fontSize: '12px' }}>(Rechazado)</span>
-              </h4>
-              <FileUploadZone 
-                label={`Sube el nuevo ${DOC_LABELS[docKey] || docKey}`}
-                file={newFiles[docKey]}
-                onFileSelect={(f) => handleFileChange(docKey, f)}
-              />
-            </div>
-          ))}
+          {Object.keys(DOC_LABELS).map(docKey => {
+            const hasDoc = !!usuario?.perfil_conductor?.[docKey];
+            const revision = revisions[docKey];
+            const estado = revision ? revision.estado?.toLowerCase() : (hasDoc ? 'pendiente' : 'faltante');
+            
+            if (estado === 'faltante') return null;
+
+            if (estado === 'rechazado') {
+              return (
+                <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
+                  <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)' }}>
+                    {DOC_LABELS[docKey]} <span style={{ color: '#ff6b6b', fontSize: '12px' }}>(Rechazado)</span>
+                  </h4>
+                  <FileUploadZone 
+                    label={`Sube el nuevo ${DOC_LABELS[docKey]}`}
+                    file={newFiles[docKey]}
+                    onFileSelect={(f) => handleFileChange(docKey, f)}
+                  />
+                </div>
+              );
+            }
+
+            return (
+              <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 5px 0', color: 'var(--text-primary)' }}>
+                    {DOC_LABELS[docKey]}
+                  </h4>
+                  {hasDoc && usuario.perfil_conductor[docKey].name && (
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginTop: '4px' }}>
+                      📄 {usuario.perfil_conductor[docKey].name}
+                    </span>
+                  )}
+                </div>
+                <span style={{ 
+                  padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold',
+                  background: estado === 'aprobado' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                  color: estado === 'aprobado' ? '#10b981' : '#f59e0b'
+                }}>
+                  {estado === 'aprobado' ? '✅ Aprobado' : '⏳ En Revisión'}
+                </span>
+              </div>
+            );
+          })}
         </div>
 
-        <button 
-          onClick={handleSubmit}
-          disabled={isSubmitting}
-          style={{ 
-            width: '100%', 
-            padding: '16px', 
-            background: 'var(--primary-color, #2563eb)', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '8px',
-            fontSize: '1.1rem',
-            fontWeight: 'bold',
-            cursor: isSubmitting ? 'not-allowed' : 'pointer',
-            opacity: isSubmitting ? 0.7 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-          }}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader size={20} style={{ animation: 'spin 1s linear infinite' }} /> Enviando...
-            </>
-          ) : (
-            <>
-              Reenviar a Revisión <ArrowRight size={20} />
-            </>
-          )}
-        </button>
+        {hasRejected && (
+          <button 
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            style={{ 
+              width: '100%', 
+              padding: '16px', 
+              background: 'var(--primary-color, #2563eb)', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '8px',
+              fontSize: '1.1rem',
+              fontWeight: 'bold',
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              opacity: isSubmitting ? 0.7 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader size={20} style={{ animation: 'spin 1s linear infinite' }} /> Enviando...
+              </>
+            ) : (
+              <>
+                Reenviar a Revisión <ArrowRight size={20} />
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );

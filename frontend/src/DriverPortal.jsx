@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import DocumentResubmission from './components/DocumentResubmission';
 import SwipeablePassenger from './components/SwipeablePassenger';
 import ZenModeView from './components/ZenModeView';
-import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play } from 'lucide-react';
+import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play, Bell } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import './App.css';
 
@@ -11,7 +12,21 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [notificaciones, setNotificaciones] = useState([]);
+  const [notificaciones, setNotificaciones] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`kapital_notifs_${usuario?.identifier || usuario?.email}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  
+  useEffect(() => {
+    if (usuario) {
+      localStorage.setItem(`kapital_notifs_${usuario.identifier || usuario.email}`, JSON.stringify(notificaciones));
+    }
+  }, [notificaciones, usuario]);
+
   const [showNotifications, setShowNotifications] = useState(false);
   
   // Si el usuario ya está en revisión, su perfil está completo
@@ -23,50 +38,128 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const [activeZenRouteIndex, setActiveZenRouteIndex] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
 
-  // Poll for status and notifications changes continuously
+  // --- WebSocket en tiempo real (reemplaza el polling) ---
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+
+  const usuarioRef = useRef(usuario);
   useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const userKey = usuario.email || usuario.identifier;
-        if (!userKey) return;
-        const res = await fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`);
-        if (res.ok) {
-          const data = await res.json();
-          // Update local state if it changed
-          if (data.estado !== usuario.estado) {
-            if (data.estado === 'Activo' && usuario.estado === 'Pendiente Revisión') {
-              toast.success("¡Tu perfil ha sido aprobado!");
-            }
-            if (data.estado === 'Documentos Observados' && usuario.estado !== 'Documentos Observados') {
-              toast.error("Atención: Tienes documentos observados. Por favor, revísalos.");
-            }
-            const updatedUser = { ...usuario, ...data };
-            localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
-            if (setUsuarioActual) setUsuarioActual(updatedUser);
-          }
-        }
-        
-        // Also fetch notifications
-        const userKeyNotif = usuario.email || usuario.identifier;
-        if (userKeyNotif) {
-          const notifRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKeyNotif)}`);
-          if (notifRes.ok) {
-            const notifData = await notifRes.json();
-            const unread = notifData.filter(n => !n.leido);
-            if (unread.length > notificaciones.length) {
-              toast('Tienes una nueva notificación de administración', { icon: '🔔' });
-            }
-            setNotificaciones(unread);
-          }
-        }
-      } catch(e) {}
-    };
+    usuarioRef.current = usuario;
+  }, [usuario]);
+
+  const connectWebSocket = useCallback(() => {
+    const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
+    if (!userKey) return;
+
+    // Usar ws:// o wss:// según el protocolo de la página
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/${encodeURIComponent(userKey)}`;
     
-    const interval = setInterval(checkStatus, 5000);
-    // Check immediately on mount
-    checkStatus();
-    return () => clearInterval(interval);
-  }, [usuario, notificaciones.length, setUsuarioActual]);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('[WS] Conectado al servidor en tiempo real');
+      reconnectAttemptsRef.current = 0;
+      // Heartbeat ping cada 30s para mantener la conexión viva
+      const heartbeat = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 30000);
+      ws._heartbeat = heartbeat;
+    };
+
+    ws.onmessage = (event) => {
+      if (event.data === 'pong') return;
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.tipo === 'notificacion') {
+          // Aviso del admin (mensaje libre)
+          toast(msg.mensaje, { icon: '🔔', duration: 6000 });
+          setNotificaciones(prev => [{ ...msg, leido: false }, ...prev]);
+        }
+
+        else if (msg.tipo === 'documento_revisado') {
+          // Un documento fue aprobado o rechazado
+          if (msg.estado === 'aprobado') {
+            toast.success(`✅ ${msg.campo}: Documento aprobado`, { duration: 5000 });
+          } else {
+            toast.error(`❌ ${msg.campo}: Documento rechazado${msg.nota ? ' — ' + msg.nota : ''}`, { duration: 7000 });
+          }
+          setNotificaciones(prev => [{
+            id: Date.now(),
+            tipo: 'documento_revisado',
+            titulo: msg.titulo,
+            mensaje: msg.mensaje,
+            campo: msg.campo,
+            estado: msg.estado,
+            fecha: msg.fecha,
+            leido: false
+          }, ...prev]);
+          // Recargar perfil para obtener el estado actualizado
+          const userKeyProfile = usuarioRef.current?.identifier || usuarioRef.current?.email;
+          if (userKeyProfile) {
+            fetch(`/api/user/profile?email=${encodeURIComponent(userKeyProfile)}`)
+              .then(r => r.ok ? r.json() : null)
+              .then(data => {
+                if (data) {
+                  const currentUser = usuarioRef.current;
+                  if (data.estado === 'Documentos Observados' && currentUser.estado !== 'Documentos Observados') {
+                    toast.error('⚠️ Tienes documentos observados. Por favor, revísalos.', { duration: 8000 });
+                  }
+                  if (data.estado === 'Activo' && currentUser.estado === 'Pendiente Revisión') {
+                    toast.success('🎉 ¡Tu perfil ha sido aprobado!', { duration: 6000 });
+                  }
+                  const updatedUser = { ...currentUser, ...data };
+                  localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+                  if (setUsuarioActual) setUsuarioActual(updatedUser);
+                }
+              })
+              .catch(() => {});
+          }
+        }
+
+        else if (msg.tipo === 'estado_actualizado') {
+          // Estado general del usuario cambió
+          const currentUser = usuarioRef.current;
+          const updatedUser = { ...currentUser, estado: msg.estado };
+          localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+          if (setUsuarioActual) setUsuarioActual(updatedUser);
+          toast(msg.mensaje || `Tu estado cambió a: ${msg.estado}`, { icon: 'ℹ️' });
+        }
+
+      } catch (e) {
+        console.warn('[WS] Error parseando mensaje:', e);
+      }
+    };
+
+    ws.onclose = (event) => {
+      if (ws._heartbeat) clearInterval(ws._heartbeat);
+      console.log('[WS] Conexión cerrada, reintentando...');
+      // Reconexión con backoff exponencial (máx 30s)
+      const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000);
+      reconnectAttemptsRef.current += 1;
+      reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+    };
+
+    ws.onerror = (err) => {
+      console.warn('[WS] Error de conexión:', err);
+      ws.close();
+    };
+  }, [setUsuarioActual]);
+
+  useEffect(() => {
+    connectWebSocket();
+    return () => {
+      // Cleanup: cerrar WS y cancelar reconexión pendiente
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // Evitar reconexión al desmontar
+        wsRef.current.close();
+      }
+    };
+  }, [connectWebSocket]);
 
   const markNotificationRead = async (id) => {
     try {
@@ -192,9 +285,18 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       setProfileComplete(true);
       toast.success("Perfil enviado para revisión.");
     } catch (error) {
-      toast.error("Ocurrió un error al enviar el perfil. Intenta de nuevo.");
       console.error(error);
+      toast.error("Hubo un error al enviar tu perfil.");
     }
+  };
+
+  const handleResubmissionComplete = (data) => {
+    const updatedUser = { ...usuario, estado: data.estado || 'Pendiente Revisión' };
+    localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
+    if (setUsuarioActual) {
+      setUsuarioActual(updatedUser);
+    }
+    toast.success("Documentos enviados para revisión.");
   };
 
   if (!profileComplete) {
@@ -205,26 +307,10 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     );
   }
 
-  if (usuario.estado === 'Documentos Observados') {
+  if (usuario.estado === 'Documentos Observados' || usuario.estado === 'Pendiente Revisión') {
     return (
       <main style={{ padding: '20px', minHeight: '100vh', background: 'var(--bg)' }}>
-        <DocumentResubmission usuario={usuario} onComplete={handleProfileComplete} />
-      </main>
-    );
-  }
-
-  if (usuario.estado === 'Pendiente Revisión') {
-    return (
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-        <div style={{ background: 'var(--bg)', padding: '40px', borderRadius: '12px', boxShadow: 'var(--shadow)', textAlign: 'center', maxWidth: '500px' }}>
-          <h2 style={{ color: 'var(--kapital-blue-deep)', marginBottom: '15px' }}>⏳ Perfil en Revisión</h2>
-          <p style={{ color: 'var(--text)', lineHeight: '1.6' }}>
-            Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y documentos.
-          </p>
-          <p style={{ color: 'var(--text)', lineHeight: '1.6', marginTop: '10px' }}>
-            Por favor, regresa más tarde. Podrás acceder a tus rutas asignadas una vez que tu perfil sea aprobado.
-          </p>
-        </div>
+        <DocumentResubmission usuario={usuario} onComplete={handleResubmissionComplete} />
       </main>
     );
   }
@@ -256,17 +342,33 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
               </button>
             </div>
             {showNotifications && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {notificaciones.map(n => (
-                  <div key={n.id} style={{ background: 'var(--bg)', padding: '10px', borderRadius: '6px', borderLeft: '4px solid var(--kapital-accent-orange)', position: 'relative' }}>
-                    <button onClick={() => markNotificationRead(n.id)} style={{ position: 'absolute', top: '5px', right: '5px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>
-                      ✕
-                    </button>
-                    <strong>{n.titulo}</strong>
-                    <p style={{ margin: '5px 0 0 0', fontSize: '0.9rem', color: 'var(--text-primary)' }}>{n.mensaje}</p>
-                    <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '5px' }}>De: {n.de}</small>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflowX: 'hidden' }}>
+                <AnimatePresence>
+                  {notificaciones.map(n => (
+                    <motion.div 
+                      key={n.id} 
+                      initial={{ opacity: 0, x: -50 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: (n._swipeDir || 100) }}
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 0 }}
+                      onDragEnd={(e, { offset }) => {
+                        if (offset.x > 80 || offset.x < -80) {
+                          n._swipeDir = offset.x > 0 ? 100 : -100;
+                          markNotificationRead(n.id);
+                        }
+                      }}
+                      style={{ background: 'var(--bg)', padding: '10px', borderRadius: '6px', borderLeft: '4px solid var(--kapital-accent-orange)', position: 'relative', touchAction: 'pan-y' }}
+                    >
+                      <button onClick={() => markNotificationRead(n.id)} style={{ position: 'absolute', top: '5px', right: '5px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                        ✕
+                      </button>
+                      <strong>{n.titulo}</strong>
+                      <p style={{ margin: '5px 0 0 0', fontSize: '0.9rem', color: 'var(--text-primary)' }}>{n.mensaje}</p>
+                      <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: '5px' }}>De: {n.de}</small>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
             )}
           </div>

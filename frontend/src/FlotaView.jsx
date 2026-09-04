@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText } from 'lucide-react';
 import { GlobalLoader } from './App';
 import DocumentVerification from './components/DocumentVerification';
 
@@ -27,12 +27,72 @@ const FlotaView = ({ usuario }) => {
   const [isLoadingConductor, setIsLoadingConductor] = useState(false);
 
   const [reviewLoading, setReviewLoading] = useState({});
+  const [resolveLoading, setResolveLoading] = useState({});
   const [notifyMsg, setNotifyMsg] = useState('');
   const [isSendingNotify, setIsSendingNotify] = useState(false);
   const [localRevisionDocs, setLocalRevisionDocs] = useState({});
   
   // Doc Viewer State
   const [viewingDoc, setViewingDoc] = useState(null);
+
+  // --- Admin WebSocket: notificaciones de conductores en tiempo real ---
+  const [adminNotifs, setAdminNotifs] = useState([]);
+  const wsAdminRef = useRef(null);
+  const wsAdminReconnectRef = useRef(null);
+  const wsAdminAttemptsRef = useRef(0);
+
+  const usuarioRef = useRef(usuario);
+  useEffect(() => {
+    usuarioRef.current = usuario;
+  }, [usuario]);
+
+  const connectAdminWS = useCallback(() => {
+    const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
+    if (!userKey) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/${encodeURIComponent(userKey)}`;
+    const ws = new WebSocket(wsUrl);
+    wsAdminRef.current = ws;
+
+    ws.onopen = () => {
+      wsAdminAttemptsRef.current = 0;
+      const hb = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 30000);
+      ws._heartbeat = hb;
+    };
+
+    ws.onmessage = (event) => {
+      if (event.data === 'pong') return;
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.tipo === 'docs_resubmitted') {
+          toast(`📥 ${msg.conductor_nombre} resubió sus documentos`, { icon: '📌', duration: 7000 });
+          setAdminNotifs(prev => [{ ...msg, leido: false, id: Date.now() }, ...prev]);
+        }
+      } catch(e) {}
+    };
+
+    ws.onclose = () => {
+      if (ws._heartbeat) clearInterval(ws._heartbeat);
+      const delay = Math.min(1000 * 2 ** wsAdminAttemptsRef.current, 30000);
+      wsAdminAttemptsRef.current += 1;
+      wsAdminReconnectRef.current = setTimeout(connectAdminWS, delay);
+    };
+
+    ws.onerror = () => ws.close();
+  }, []);
+
+  useEffect(() => {
+    connectAdminWS();
+    return () => {
+      if (wsAdminReconnectRef.current) clearTimeout(wsAdminReconnectRef.current);
+      if (wsAdminRef.current) {
+        wsAdminRef.current.onclose = null;
+        wsAdminRef.current.close();
+      }
+    };
+  }, [connectAdminWS]);
 
   // Sync localRevisionDocs when conductorInfo loads
   useEffect(() => {
@@ -63,6 +123,48 @@ const FlotaView = ({ usuario }) => {
       toast.error(e.message);
     } finally {
       setReviewLoading(prev => ({ ...prev, [campo]: false }));
+    }
+  };
+
+  const handleResolveDataRequest = async (campo, action) => {
+    if (!conductorInfo || !usuario) return;
+    setResolveLoading(prev => ({ ...prev, [campo]: true }));
+    try {
+      const res = await fetch('/api/admin/resolve-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_email: usuario?.identifier || usuario?.email || '',
+          conductor_email: conductorInfo?.usuario?.identifier || conductorInfo?.usuario?.email || conductorInfo?.flota?.conductor || '',
+          field: campo,
+          action: action,
+        })
+      });
+      if (!res.ok) throw new Error('Error al resolver solicitud');
+      
+      const data = await res.json();
+      
+      // Update local state to reflect the change immediately
+      const updatedConductorInfo = { ...conductorInfo };
+      if (updatedConductorInfo.usuario?.perfil_conductor) {
+        if (action === 'approve') {
+          const newVal = updatedConductorInfo.usuario.perfil_conductor.solicitudes_cambio[campo].new_value;
+          updatedConductorInfo.usuario.perfil_conductor[campo] = newVal;
+        }
+        if (updatedConductorInfo.usuario.perfil_conductor.solicitudes_cambio[campo]) {
+          updatedConductorInfo.usuario.perfil_conductor.solicitudes_cambio[campo].status = action === 'approve' ? 'aprobado' : 'rechazado';
+        }
+      }
+      setConductorInfo(updatedConductorInfo);
+      
+      toast.success(`Solicitud ${action === 'approve' ? '✅ Aprobada' : '❌ Rechazada'}`);
+      
+      // Refresh list to update main table badges if necessary
+      fetchFlota();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setResolveLoading(prev => ({ ...prev, [campo]: false }));
     }
   };
 
@@ -396,11 +498,14 @@ const FlotaView = ({ usuario }) => {
                 <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
                 <td>
                   <span
-                    style={{ cursor: 'pointer', textDecoration: 'underline', color: '#38bdf8' }}
+                    style={{ cursor: 'pointer', textDecoration: 'underline', color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     onClick={() => handleOpenConductor(vehiculo.placa)}
                     title="Ver perfil del conductor"
                   >
                     {vehiculo.chofer}
+                    {vehiculo.has_pending_requests && (
+                      <span title="Tiene solicitudes de cambio pendientes" style={{ width: '8px', height: '8px', backgroundColor: '#f59e0b', borderRadius: '50%', flexShrink: 0 }}></span>
+                    )}
                   </span>
                 </td>
                 {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
@@ -540,10 +645,93 @@ const FlotaView = ({ usuario }) => {
                       <h4>Información del vehículo</h4>
                       <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
                       <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || '—'}</p>
-                      <p><strong>Placa:</strong> {conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
-                      <p><strong>Capacidad:</strong> {conductorInfo.flota?.capacidad || 15} pasajeros</p>
+                      <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa || conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
+                      <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo || conductorInfo.flota?.capacidad || 15} pasajeros</p>
                     </div>
                   </div>
+
+
+                  {/* DATA UPDATE REQUESTS PANEL */}
+                  {conductorInfo?.usuario?.perfil_conductor?.solicitudes_cambio && Object.entries(conductorInfo.usuario.perfil_conductor.solicitudes_cambio || {}).filter(([_, req]) => req?.status === 'pendiente').length > 0 && (
+                    <div className="docs-section" style={{ borderColor: '#f59e0b', background: 'rgba(245,158,11,0.02)', marginTop: '20px' }}>
+                      <h4 style={{display:'flex', alignItems:'center', gap:'8px', color: '#f59e0b'}}>
+                        <AlertTriangle size={18} />
+                        Solicitudes de Cambio de Datos
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {Object.entries(conductorInfo.usuario.perfil_conductor.solicitudes_cambio)
+                          .filter(([_, req]) => req?.status === 'pendiente')
+                          .map(([field, req]) => {
+                            const isResolving = resolveLoading?.[field];
+                            let currentVal = conductorInfo.usuario.perfil_conductor[field];
+                            if (currentVal === undefined || currentVal === null) currentVal = '—';
+                            else if (typeof currentVal === 'object') currentVal = JSON.stringify(currentVal);
+
+                            // Special render for vehiculo2 group request
+                            if (field === 'vehiculo2') {
+                              let v2 = {};
+                              try { v2 = JSON.parse(req?.new_value); } catch (_) {}
+                              return (
+                                <div key={field} style={{ background: 'var(--bg)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '8px' }}>Solicitud: Vehículo 2</div>
+                                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-primary)', lineHeight: '1.8' }}>
+                                        <div><strong>Placa:</strong> {v2.placa2 || '—'}</div>
+                                        <div><strong>Marca:</strong> {v2.vehiculoMarca2 || '—'} &nbsp; <strong>Modelo:</strong> {v2.vehiculoModelo2 || '—'}</div>
+                                        <div><strong>Año:</strong> {v2.vehiculoAnio2 || '—'} &nbsp; <strong>Color:</strong> {v2.vehiculoColor2 || '—'}</div>
+                                        <div><strong>Capacidad:</strong> {v2.capacidadVehiculo2 || '—'} pax</div>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px', marginLeft: '12px', flexShrink: 0 }}>
+                                      <button className="btn-icon" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer' }} onClick={() => handleResolveDataRequest(field, 'approve')} disabled={isResolving} title="Aprobar"><Check size={16} /></button>
+                                      <button className="btn-icon" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer' }} onClick={() => handleResolveDataRequest(field, 'reject')} disabled={isResolving} title="Rechazar"><X size={16} /></button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            let newVal = req?.new_value;
+                            if (typeof newVal === 'object') newVal = JSON.stringify(newVal);
+
+                            return (
+                              <div key={field} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                                <div>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{String(field).replace(/([A-Z])/g, ' $1').trim()}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+                                    <span style={{ textDecoration: 'line-through', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{currentVal}</span>
+                                    <span>➔</span>
+                                    <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>{newVal}</span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button 
+                                    className="btn-icon"
+                                    style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer' }}
+                                    onClick={() => handleResolveDataRequest(field, 'approve')}
+                                    disabled={isResolving}
+                                    title="Aprobar"
+                                  >
+                                    <Check size={16} />
+                                  </button>
+                                  <button 
+                                    className="btn-icon"
+                                    style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer' }}
+                                    onClick={() => handleResolveDataRequest(field, 'reject')}
+                                    disabled={isResolving}
+                                    title="Rechazar"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        }
+                      </div>
+                    </div>
+                  )}
 
                   {/* DOCUMENT REVIEW PANEL */}
                   <div className="docs-section">

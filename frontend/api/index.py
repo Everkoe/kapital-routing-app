@@ -1,6 +1,6 @@
 # api/index.py
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, WebSocket, WebSocketDisconnect
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -46,6 +46,45 @@ historial_rutas: List[Dict[str, Any]] = []
 board_lock: Dict[str, Any] = {}
 routes_summary: List[Dict[str, Any]] = []  # Compact summary for GerentePortal
 notifications_db: List[Dict[str, Any]] = [] # Real-time events
+
+# --- WebSocket Manager ---
+class WebSocketManager:
+    """Gestiona conexiones WebSocket activas por user_id (identifier del usuario)."""
+    def __init__(self):
+        self.active: Dict[str, WebSocket] = {}
+
+    async def connect(self, user_id: str, ws: WebSocket):
+        await ws.accept()
+        self.active[user_id] = ws
+        print(f"[WS] Conectado: {user_id} (total: {len(self.active)})")
+
+    def disconnect(self, user_id: str):
+        self.active.pop(user_id, None)
+        print(f"[WS] Desconectado: {user_id} (total: {len(self.active)})")
+
+    async def send(self, user_id: str, data: dict):
+        """Envía un mensaje JSON al usuario si está conectado."""
+        ws = self.active.get(user_id)
+        if ws:
+            try:
+                await ws.send_json(data)
+                return True
+            except Exception as e:
+                print(f"[WS] Error enviando a {user_id}: {e}")
+                self.disconnect(user_id)
+        return False
+
+    async def broadcast_to_role(self, role: str, data: dict):
+        """Envía un mensaje a todos los usuarios con cierto rol conectados."""
+        for uid, ws in list(self.active.items()):
+            user = usuarios_db.get(uid)
+            if user and user.get("rol") == role:
+                try:
+                    await ws.send_json(data)
+                except:
+                    self.disconnect(uid)
+
+ws_manager = WebSocketManager()
 
 db_loaded = False
 
@@ -192,7 +231,8 @@ async def persist_users_only():
                 "__routes_summary__": routes_summary,
                 "__historial_rutas__": historial_rutas,
                 "__lock__": board_lock,
-                "__flota__": conductores_db
+                "__flota__": conductores_db,
+                "__notifications__": notifications_db
             }
         }
         hdrs = {**HEADERS, "Prefer": "return=minimal"}
@@ -246,6 +286,21 @@ app.add_middleware(
 @app.get("/api")
 def read_root():
     return {"status": "Kapital Routing API is running!"}
+
+# --- WebSocket Endpoint ---
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    """Punto de conexión WebSocket. El user_id es el identifier del usuario."""
+    await ws_manager.connect(user_id, websocket)
+    try:
+        while True:
+            # Mantenemos la conexión viva esperando mensajes del cliente (ping/pong)
+            data = await websocket.receive_text()
+            # Si el cliente manda un ping, responde con pong
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(user_id)
 
 # --- Modelos de Datos Pydantic ---
 class UsuarioRegistro(BaseModel):
@@ -327,8 +382,7 @@ class DriverNotifyPayload(BaseModel):
 
 @app.get("/api/notifications")
 async def get_notifications(last_id: int = 0):
-    await reload_db()
-    new_notifs = [n for n in notifications_db if n.get("id", 0) > last_id]
+    new_notifs = [n for n in notifications_db if int(n.get("id", 0)) > last_id and ("type" in n or n.get("para") == "admin")]
     return new_notifs
 
 @app.post("/api/notifications")
@@ -367,8 +421,8 @@ async def register_user(usuario: UsuarioRegistro):
     if usuario.rol == "Conductor" and (not usuario.unidad_id or not usuario.unidad_id.strip()):
         raise HTTPException(status_code=400, detail="Los conductores deben proporcionar un ID de unidad.")
 
-    identifier_clean = usuario.identifier.strip()
-    if identifier_clean in usuarios_db:
+    identifier_clean = usuario.identifier.strip().lower()
+    if identifier_clean in [k.lower() for k in usuarios_db.keys()]:
         raise HTTPException(status_code=400, detail="El usuario ya está registrado.")
     
     ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones", "Cliente"]
@@ -416,7 +470,14 @@ async def register_user(usuario: UsuarioRegistro):
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
     await reload_db()
-    user_in_db = usuarios_db.get(usuario.identifier)
+    identifier_clean = usuario.identifier.strip()
+    user_in_db = usuarios_db.get(identifier_clean)
+    if not user_in_db:
+        for k, v in usuarios_db.items():
+            if k.lower() == identifier_clean.lower():
+                user_in_db = v
+                break
+                
     if not user_in_db or user_in_db["password"] != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
     
@@ -444,7 +505,6 @@ async def login_user(usuario: UsuarioLogin):
 
 @app.get("/api/user/profile")
 async def get_profile(email: str):
-    await reload_db()
     user = usuarios_db.get(email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -452,11 +512,13 @@ async def get_profile(email: str):
         "email": user["email"],
         "nombre": user["nombre"],
         "rol": user["rol"],
+        "identifier": user.get("identifier"),
         "unidad_id": user.get("unidad_id"),
         "empresa_id": user.get("empresa_id"),
         "avatar": user.get("avatar"),
         "estado": user.get("estado", "Activo"),
-        "profileComplete": "perfil_conductor" in user
+        "profileComplete": "perfil_conductor" in user,
+        "perfil_conductor": user.get("perfil_conductor", {})
     }
 
 @app.put("/api/user/profile")
@@ -501,7 +563,7 @@ async def update_profile(update_data: UsuarioUpdate):
 async def get_all_users(email: str):
     await reload_db()
     req_user = usuarios_db.get(email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
     
     # Devolver lista de usuarios sin contraseñas
@@ -522,7 +584,7 @@ async def get_all_users(email: str):
 async def bulk_users_action(payload: BulkActionPayload):
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     for target in payload.target_emails:
@@ -541,7 +603,7 @@ async def bulk_users_action(payload: BulkActionPayload):
 async def approve_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
@@ -555,7 +617,7 @@ async def approve_user(target_email: str, admin_email: str):
 async def reject_user(target_email: str, admin_email: str):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
     
     if target_email not in usuarios_db:
@@ -568,9 +630,9 @@ async def reject_user(target_email: str, admin_email: str):
 @app.post("/api/admin/driver/review")
 async def review_driver_doc(payload: DriverDocReviewPayload):
     """Admin marca un documento individual del conductor como aprobado o rechazado."""
-    await reload_db()
+
     req_user = usuarios_db.get(payload.admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
     conductor = usuarios_db.get(payload.conductor_email)
@@ -597,6 +659,34 @@ async def review_driver_doc(payload: DriverDocReviewPayload):
         "fecha": __import__('datetime').datetime.now().isoformat()
     }
 
+    # Save the notification to notifications_db so it persists
+    conductor_key = conductor.get("identifier") or payload.conductor_email
+    notif_id = int(__import__('time').time() * 1000)
+    notifications_db.append({
+        "id": notif_id,
+        "tipo": "documento_revisado",
+        "campo": payload.campo,
+        "estado": payload.estado,
+        "nota": payload.nota or "",
+        "titulo": f"📋 Documento {payload.campo} {'✅ aprobado' if payload.estado == 'aprobado' else '❌ rechazado'}",
+        "mensaje": payload.nota or f"Tu documento '{payload.campo}' fue marcado como {payload.estado}.",
+        "para": conductor_key,
+        "de": req_user.get("nombre", payload.admin_email),
+        "fecha": __import__('datetime').datetime.now().isoformat(),
+        "leido": False
+    })
+    
+    # Push WebSocket notification to the conductor immediately
+    await ws_manager.send(conductor_key, {
+        "tipo": "documento_revisado",
+        "campo": payload.campo,
+        "estado": payload.estado,
+        "nota": payload.nota or "",
+        "titulo": f"📋 Documento {payload.campo} {'✅ aprobado' if payload.estado == 'aprobado' else '❌ rechazado'}",
+        "mensaje": payload.nota or f"Tu documento '{payload.campo}' fue marcado como {payload.estado}.",
+        "fecha": __import__('datetime').datetime.now().isoformat()
+    })
+
     # Update global driver state based on all doc reviews
     revisiones = conductor["perfil_conductor"]["revision_docs"]
     if any(v["estado"] == "rechazado" for v in revisiones.values()):
@@ -616,7 +706,7 @@ async def notify_driver(payload: DriverNotifyPayload):
     """Admin envía un aviso interno al conductor."""
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Programador de rutas"]:
+    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
     conductor = usuarios_db.get(payload.conductor_email)
@@ -642,6 +732,19 @@ async def notify_driver(payload: DriverNotifyPayload):
         "leido": False
     })
     await persist_users_only()
+
+    # Push WebSocket notification to conductor immediately
+    conductor_key = conductor.get("identifier") if conductor else payload.conductor_email
+    await ws_manager.send(conductor_key, {
+        "tipo": "notificacion",
+        "id": notif_id,
+        "titulo": "⚠️ Revisión de documentos",
+        "mensaje": payload.mensaje,
+        "de": req_user.get("nombre", payload.admin_email),
+        "fecha": __import__('datetime').datetime.now().isoformat(),
+        "leido": False
+    })
+
     return {"message": "Aviso enviado al conductor exitosamente.", "notif_id": notif_id}
 
 @app.post("/api/driver/onboarding")
@@ -688,9 +791,19 @@ class ResubmitDocsPayload(BaseModel):
     email: str
     docs: Dict[str, Any]
 
+class UpdateDataRequestPayload(BaseModel):
+    email: str
+    field: str
+    new_value: str
+
+class ResolveDataRequestPayload(BaseModel):
+    admin_email: str
+    conductor_email: str
+    field: str
+    action: str
+
 @app.post("/api/conductor/resubmit-docs")
 async def resubmit_driver_docs(payload: ResubmitDocsPayload):
-    await reload_db()
     user = usuarios_db.get(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Conductor no encontrado.")
@@ -709,13 +822,127 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
             revision_docs[k]["estado"] = "pendiente"
             
     # Check if there are any remaining rejected documents
-    has_rejected = any(rev.get("estado") == "rechazado" for rev in revision_docs.values())
+    has_rejected = any(rev.get("estado", "").lower() == "rechazado" for rev in revision_docs.values())
     
     if not has_rejected:
         user["estado"] = "Pendiente Revisión"
     
     await persist_users_only()
+
+    # Notify admins in real-time that conductor re-submitted docs
+    conductor_nombre = user.get("nombre", payload.email)
+    notif_obj = {
+        "id": len(notifications_db) + 1,
+        "tipo": "docs_resubmitted",
+        "type": "info", # To be picked up by App.jsx polling
+        "title": "📥 Documentos resubidos",
+        "message": f"{conductor_nombre} ha subido nuevamente sus documentos para revisión.",
+        "conductor_id": payload.email,
+        "conductor_nombre": conductor_nombre,
+        "para": "admin",
+        "timestamp": __import__('datetime').datetime.now().isoformat()
+    }
+    notifications_db.append(notif_obj)
+
+    # Broadcast to all connected admins
+    for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
+        await ws_manager.broadcast_to_role(role, notif_obj)
+
     return {"message": "Documentos actualizados exitosamente", "estado": user["estado"]}
+
+@app.post("/api/conductor/request-update")
+async def request_data_update(payload: UpdateDataRequestPayload):
+    user = usuarios_db.get(payload.email)
+    if not user or user.get("rol") != "Conductor":
+        raise HTTPException(status_code=404, detail="Conductor no encontrado")
+    
+    if "perfil_conductor" not in user:
+        user["perfil_conductor"] = {}
+    
+    if "solicitudes_cambio" not in user["perfil_conductor"]:
+        user["perfil_conductor"]["solicitudes_cambio"] = {}
+        
+    user["perfil_conductor"]["solicitudes_cambio"][payload.field] = {
+        "new_value": payload.new_value,
+        "status": "pendiente",
+        "timestamp": __import__('datetime').datetime.now().isoformat()
+    }
+    
+    # Notify admins
+    notif_id = f"notif_{int(__import__('datetime').datetime.now().timestamp())}_{__import__('random').randint(1000,9999)}"
+    conductor_nombre = user.get("nombre", payload.email)
+    notif_obj = {
+        "id": notif_id,
+        "type": "data_update_request",
+        "title": "📝 Solicitud de Cambio de Datos",
+        "message": f"{conductor_nombre} ha solicitado actualizar su {payload.field}.",
+        "conductor_id": payload.email,
+        "conductor_nombre": conductor_nombre,
+        "para": "admin",
+        "timestamp": __import__('datetime').datetime.now().isoformat()
+    }
+    notifications_db.append(notif_obj)
+    
+    for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
+        await ws_manager.broadcast_to_role(role, notif_obj)
+    
+    await persist_users_only()
+    return {"status": "ok", "message": "Solicitud enviada"}
+
+@app.post("/api/admin/resolve-update")
+async def resolve_data_update(payload: ResolveDataRequestPayload):
+    admin = usuarios_db.get(payload.admin_email)
+    if not admin or admin.get("rol") not in ["Administración", "Administrador", "Gerente de Operaciones"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+        
+    conductor = usuarios_db.get(payload.conductor_email)
+    if not conductor or "perfil_conductor" not in conductor:
+        raise HTTPException(status_code=404, detail="Conductor no encontrado")
+        
+    solicitudes = conductor["perfil_conductor"].get("solicitudes_cambio", {})
+    if payload.field not in solicitudes or solicitudes[payload.field]["status"] != "pendiente":
+        raise HTTPException(status_code=400, detail="Solicitud no encontrada o ya resuelta")
+        
+    new_value = solicitudes[payload.field]["new_value"]
+    
+    if payload.action == "approve":
+        # Special handling for vehiculo2 group — unpack all vehicle 2 fields
+        if payload.field == "vehiculo2":
+            import json
+            try:
+                vehiculo2_data = json.loads(new_value)
+                for k, v in vehiculo2_data.items():
+                    conductor["perfil_conductor"][k] = v
+            except Exception:
+                conductor["perfil_conductor"][payload.field] = new_value
+        else:
+            conductor["perfil_conductor"][payload.field] = new_value
+        solicitudes[payload.field]["status"] = "aprobado"
+        msg = f"Tu solicitud para actualizar '{payload.field}' ha sido aprobada."
+    else:
+        solicitudes[payload.field]["status"] = "rechazado"
+        msg = f"Tu solicitud para actualizar '{payload.field}' ha sido rechazada."
+        
+    # Notify conductor
+    notif_id = f"notif_{int(__import__('datetime').datetime.now().timestamp())}_{__import__('random').randint(1000,9999)}"
+    notif_obj = {
+        "id": notif_id,
+        "type": "data_update_resolved",
+        "title": "📝 Respuesta a Solicitud de Cambio",
+        "message": msg,
+        "para": "conductor",
+        "timestamp": __import__('datetime').datetime.now().isoformat(),
+        "leido": False
+    }
+    
+    if "notificaciones" not in conductor:
+        conductor["notificaciones"] = []
+    conductor["notificaciones"].insert(0, notif_obj)
+    
+    await ws_manager.send(payload.conductor_email, {"type": "NEW_NOTIFICATION", "notification": notif_obj})
+    await persist_users_only()
+    
+    return {"status": "ok", "action": payload.action, "conductor": conductor}
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
 
@@ -725,8 +952,34 @@ async def get_flota_status():
     await reload_db()
     # Convertimos el diccionario a una lista de objetos para el frontend
     flota_list = []
-    for placa, data in conductores_db.items():
-        flota_list.append({"placa": placa, **data})
+    for unidad_id, data in conductores_db.items():
+        # Check if the associated user has pending requests
+        has_pending_requests = False
+        real_placa = data.get("placa")
+        
+        conductor_email = data.get("conductor")
+        if conductor_email:
+            user = usuarios_db.get(conductor_email)
+            if user and "perfil_conductor" in user:
+                perfil = user["perfil_conductor"]
+                
+                # Get the real license plate if it exists
+                if perfil.get("placa"):
+                    real_placa = perfil.get("placa")
+                
+                solicitudes = perfil.get("solicitudes_cambio", {})
+                for k, v in solicitudes.items():
+                    if v.get("status") == "pendiente":
+                        has_pending_requests = True
+                        break
+        
+        flota_list.append({
+            "placa": unidad_id,
+            "unidad_id": unidad_id,
+            "real_placa": real_placa or unidad_id,
+            "has_pending_requests": has_pending_requests, 
+            **data
+        })
     return {"flota": flota_list}
 
 def get_micro_zona(direccion: str) -> str:
