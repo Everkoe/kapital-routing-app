@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowRight, Loader } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader, Hourglass } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import toast from 'react-hot-toast';
 
@@ -126,14 +126,15 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
       <div style={{ background: 'var(--bg-secondary)', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
         
         {isPending && !hasRejected ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: 'var(--kapital-blue-deep)' }}>
-              <h2 style={{ margin: 0 }}>⏳ Perfil en Revisión</h2>
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '20px', color: 'var(--text-primary)' }}>
+              <Hourglass size={36} color="var(--kapital-blue, #3b82f6)" />
+              <h2 style={{ margin: 0, fontSize: '1.8rem' }}>Perfil en Revisión</h2>
             </div>
-            <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '25px', lineHeight: '1.6', fontSize: '1.05rem', maxWidth: '480px', margin: '0 auto' }}>
               Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y los documentos que has subido. Por favor, regresa más tarde.
             </p>
-          </>
+          </div>
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: '#ff6b6b' }}>

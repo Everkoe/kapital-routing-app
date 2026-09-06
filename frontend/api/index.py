@@ -306,7 +306,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 class UsuarioRegistro(BaseModel):
     identifier: str
     password: str
-    nombre: str
+    nombre: Optional[str] = None
     rol: str
     telefono: Optional[str] = None
     unidad_id: Optional[str] = None
@@ -414,12 +414,10 @@ async def register_user(usuario: UsuarioRegistro):
     # Validaciones básicas para evitar 500
     if not usuario.identifier or not usuario.identifier.strip():
         raise HTTPException(status_code=400, detail="El identificador (DNI o Correo) no puede estar vacío.")
-    if not usuario.nombre or not usuario.nombre.strip():
-        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío.")
+    if usuario.rol != "Conductor" and (not usuario.nombre or not usuario.nombre.strip()):
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío para este rol.")
     if not usuario.password or len(usuario.password) < 4:
         raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres.")
-    if usuario.rol == "Conductor" and (not usuario.unidad_id or not usuario.unidad_id.strip()):
-        raise HTTPException(status_code=400, detail="Los conductores deben proporcionar un ID de unidad.")
 
     identifier_clean = usuario.identifier.strip().lower()
     if identifier_clean in [k.lower() for k in usuarios_db.keys()]:
@@ -436,7 +434,7 @@ async def register_user(usuario: UsuarioRegistro):
         "email": identifier_clean if usuario.rol != 'Conductor' else None,
         "dni": identifier_clean if usuario.rol == 'Conductor' else None,
         "password": usuario.password,
-        "nombre": usuario.nombre.strip(),
+        "nombre": usuario.nombre.strip() if usuario.nombre else ("Conductor Pendiente" if rol_solicitado == "Conductor" else "Usuario"),
         "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id.strip() if usuario.unidad_id else None,
@@ -600,7 +598,7 @@ async def bulk_users_action(payload: BulkActionPayload):
     return {"message": f"Acción '{payload.action}' aplicada a {len(payload.target_emails)} usuarios."}
 
 @app.put("/api/admin/users/approve/{target_email}")
-async def approve_user(target_email: str, admin_email: str):
+async def approve_user(target_email: str, admin_email: str, unidad_id: Optional[str] = None):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
@@ -610,6 +608,21 @@ async def approve_user(target_email: str, admin_email: str):
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     usuarios_db[target_email]["estado"] = "Activo"
+
+    # Si es conductor y el admin proporcionó un Padrón (unidad_id)
+    if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
+        usuarios_db[target_email]["unidad_id"] = unidad_id.strip()
+        # Initialize in conductores_db if not exists
+        if unidad_id.strip() not in conductores_db:
+            conductores_db[unidad_id.strip()] = {
+                "id": unidad_id.strip(),
+                "nombre": usuarios_db[target_email].get("nombre"),
+                "status": "Activo",
+                "ubicacion": "Base",
+                "capacidad": 15,
+                "turno": "08:00 AM"
+            }
+
     await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
 
@@ -906,17 +919,7 @@ async def resolve_data_update(payload: ResolveDataRequestPayload):
     new_value = solicitudes[payload.field]["new_value"]
     
     if payload.action == "approve":
-        # Special handling for vehiculo2 group — unpack all vehicle 2 fields
-        if payload.field == "vehiculo2":
-            import json
-            try:
-                vehiculo2_data = json.loads(new_value)
-                for k, v in vehiculo2_data.items():
-                    conductor["perfil_conductor"][k] = v
-            except Exception:
-                conductor["perfil_conductor"][payload.field] = new_value
-        else:
-            conductor["perfil_conductor"][payload.field] = new_value
+        conductor["perfil_conductor"][payload.field] = new_value
         solicitudes[payload.field]["status"] = "aprobado"
         msg = f"Tu solicitud para actualizar '{payload.field}' ha sido aprobada."
     else:

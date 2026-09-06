@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle } from 'lucide-react';
+import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare } from 'lucide-react';
 import DocumentVerification from './components/DocumentVerification';
 import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
@@ -134,13 +134,10 @@ const PantallaAuth = ({ onLogin }) => {
                   <option>Conductor</option>
                   <option>Gerente de Operaciones</option>
                 </select>
-                {formData.rol === 'Conductor' && (
-                  <input className="auth-input" name="unidad_id" type="text" placeholder="ID de Unidad (Ej. KAP-001)" onChange={handleInputChange} required />
-                )}
               </>
             )}
 
-            {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
+            {!isLogin && formData.rol !== 'Conductor' && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
             
             {!isLogin && formData.rol !== 'Conductor' && (
               <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />
@@ -227,9 +224,9 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
           width: '72px', height: '72px', borderRadius: '50%',
           background: accentBg, border: `2px solid ${accentColor}55`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 20px', fontSize: '2rem',
+          margin: '0 auto 20px',
         }}>
-          {config?.icon || '⚠️'}
+          {config?.icon || <AlertTriangle size={32} color="var(--primary-color)" />}
         </div>
 
         <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary, #f3f4f6)', fontSize: '1.2rem', fontWeight: 700 }}>
@@ -306,6 +303,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [actionLoading, setActionLoading] = useState(null);
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
+  const [padronModal, setPadronModal] = useState({ isOpen: false, email: null, padron: '' });
   
   // CRM Features
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -394,17 +392,17 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const requestAction = (targetEmail, action, userName) => {
     const configs = {
       approve: {
-        type: 'success', icon: '✅', title: 'Aprobar Acceso',
+        type: 'success', icon: <CheckCircle2 size={36} color="#10b981" />, title: 'Aprobar Acceso',
         message: `¿Confirmas que deseas otorgar acceso a la plataforma a este usuario? Podrá iniciar sesión de inmediato.`,
         userEmail: targetEmail, confirmText: `Aprobar a ${userName}`,
       },
       reject_pending: {
-        type: 'danger', icon: '🚫', title: 'Denegar Solicitud',
+        type: 'danger', icon: <XCircle size={36} color="#ef4444" />, title: 'Denegar Solicitud',
         message: `Esta acción rechazará la solicitud de acceso y eliminará la cuenta pendiente del sistema.`,
         userEmail: targetEmail, confirmText: 'Sí, denegar acceso',
       },
       deactivate: {
-        type: 'danger', icon: '⛔', title: 'Desactivar Usuario Activo',
+        type: 'danger', icon: <MinusCircle size={36} color="#ef4444" />, title: 'Desactivar Usuario Activo',
         message: `¿Estás seguro? Este usuario perderá acceso inmediato a la plataforma. Esta acción no se puede deshacer fácilmente.`,
         userEmail: targetEmail, confirmText: 'Sí, desactivar cuenta',
       },
@@ -436,13 +434,23 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
 
   const closeDriverModal = () => setDriverModal({ isOpen: false, user: null });
 
-  const confirmReview = async (email, action) => {
+  const confirmReview = (email, action) => {
     closeDriverModal();
+    const targetUser = users.find(u => u.email === email);
+    if (targetUser?.rol === 'Conductor' && action === 'approve') {
+      setPadronModal({ isOpen: true, email: email, padron: '' });
+      return;
+    }
+    executeReview(email, action, '');
+  };
+
+  const executeReview = async (email, action, padron) => {
     setActionLoading(email);
     try {
       const apiAction = action === 'approve' ? 'approve' : 'reject';
       const method = action === 'approve' ? 'PUT' : 'DELETE';
-      const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
+      const unidadIdParam = padron ? `&unidad_id=${encodeURIComponent(padron.trim())}` : '';
+      const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}${unidadIdParam}`, { method });
       if (res.ok) {
         toast.success(action === 'approve' ? 'Conductor aprobado' : 'Conductor rechazado');
         await fetchUsers();
@@ -455,15 +463,27 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     finally { setActionLoading(null); }
   };
 
+  const submitPadron = () => {
+    if (!padronModal.padron || !padronModal.padron.trim()) {
+      toast.error("Debe asignar un Padrón para aprobar a un conductor.");
+      return;
+    }
+    const email = padronModal.email;
+    setPadronModal({ isOpen: false, email: null, padron: '' });
+    executeReview(email, 'approve', padronModal.padron);
+  };
+
   const renderDocRow = (label, docObj) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-      <span>{label}: {docObj ? '✅ Subido' : '❌ Falta'}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {label}: {docObj ? <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><CheckSquare size={16} color="#10b981" /> Subido</span> : <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><X size={16} color="#ef4444" strokeWidth={3} /> Falta</span>}
+      </span>
       {docObj && (
         <button 
           onClick={() => toast.info(`En la versión de producción, esto abrirá el visor del documento.`)}
-          style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+          style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
         >
-          👁️ Ver Archivo
+          <Eye size={14} color="#38BDF8" /> Ver Archivo
         </button>
       )}
     </div>
@@ -481,8 +501,8 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
       {driverModal.isOpen && driverModal.user && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '600px', width: '90%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+        <div onClick={closeDriverModal} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '600px', width: '90%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
             <h3 style={{ marginTop: 0, borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>Revisión de Perfil: {driverModal.user.nombre}</h3>
             
             <div style={{ marginTop: '20px' }}>
@@ -508,7 +528,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                 {renderDocRow('Revisión Técnica', driverModal.user.perfil_conductor?.revisionTecnica)}
               </div>
               
-              <DocumentVerification 
+              {/* <DocumentVerification 
                 doc={driverModal.user?.perfil_conductor?.numDoc || driverModal.user?.nombre} 
                 placa={driverModal.user?.perfil_conductor?.vehiculoPlaca}
                 cachedResults={{
@@ -516,7 +536,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                   citv: driverModal.user?.perfil_conductor?.validacion_citv,
                   licencia: driverModal.user?.perfil_conductor?.validacion_licencia
                 }}
-              />
+              /> */}
             </div>
             
             <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>
@@ -527,6 +547,40 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
           </div>
         </div>
       )}
+
+      {padronModal.isOpen && (
+        <div onClick={() => setPadronModal({ isOpen: false, email: null, padron: '' })} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-secondary, #1a1d2e)', border: '1px solid var(--border-color, #2e303a)', borderRadius: '16px', padding: '32px 40px', maxWidth: '480px', width: '90%', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <div style={{ background: 'rgba(16, 185, 129, 0.12)', padding: '14px', borderRadius: '50%' }}>
+                <Truck size={34} color="#10b981" />
+              </div>
+            </div>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.4rem', fontWeight: 'bold' }}>Asignar Padrón</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.4' }}>
+              Asigna un número de Padrón o ID de Unidad definitivo para autorizar a este conductor.
+            </p>
+            <input 
+              type="text" 
+              className="form-input" 
+              style={{ 
+                width: '100%', marginBottom: '24px', textAlign: 'center', 
+                fontSize: '1.05rem', padding: '10px', borderRadius: '8px',
+                border: '1px solid var(--border-color)', background: 'var(--bg, #0f172a)'
+              }}
+              placeholder="Ej. KAP-001" 
+              value={padronModal.padron} 
+              onChange={e => setPadronModal({ ...padronModal, padron: e.target.value })} 
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => setPadronModal({ isOpen: false, email: null, padron: '' })} className="btn-secondary" style={{ flex: 1, padding: '10px', fontSize: '0.95rem' }}>Cancelar</button>
+              <button onClick={submitPadron} className="btn-primary" style={{ flex: 1, padding: '10px', background: '#10b981', fontSize: '0.95rem' }}>Confirmar Aprobación</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
 
         {/* Premium Header — consistent with rest of app */}
@@ -764,19 +818,21 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                                   padding: '6px 13px', borderRadius: '8px', border: '1px solid #10b98166',
                                   background: 'rgba(16,185,129,0.1)', color: '#10b981', cursor: 'pointer',
                                   fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                  display: 'flex', alignItems: 'center', gap: '6px'
                                 }}
                                   onMouseEnter={e => { e.target.style.background = '#10b981'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(16,185,129,0.4)'; }}
                                   onMouseLeave={e => { e.target.style.background = 'rgba(16,185,129,0.1)'; e.target.style.color = '#10b981'; e.target.style.boxShadow = 'none'; }}>
-                                  ✅ Aprobar
+                                  <CheckCircle2 size={14} /> Aprobar
                                 </button>
                                 <button onClick={() => requestAction(u.email, 'reject_pending', u.nombre)} style={{
                                   padding: '6px 13px', borderRadius: '8px', border: '1px solid #ef444466',
                                   background: 'rgba(239,68,68,0.1)', color: '#ef4444', cursor: 'pointer',
                                   fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                  display: 'flex', alignItems: 'center', gap: '6px'
                                 }}
                                   onMouseEnter={e => { e.target.style.background = '#ef4444'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
                                   onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.1)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
-                                  ❌ Denegar
+                                  <XCircle size={14} /> Denegar
                                 </button>
                               </>
                             )}
@@ -785,10 +841,11 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                                 padding: '6px 13px', borderRadius: '8px', border: '1px solid #3b82f666',
                                 background: 'rgba(59,130,246,0.1)', color: '#3b82f6', cursor: 'pointer',
                                 fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                display: 'flex', alignItems: 'center', gap: '6px'
                               }}
                                 onMouseEnter={e => { e.target.style.background = '#3b82f6'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(59,130,246,0.4)'; }}
                                 onMouseLeave={e => { e.target.style.background = 'rgba(59,130,246,0.1)'; e.target.style.color = '#3b82f6'; e.target.style.boxShadow = 'none'; }}>
-                                🔍 Revisar Perfil
+                                <Search size={14} /> Revisar Perfil
                               </button>
                             )}
                             {u.estado === 'Activo' && u.email !== usuarioActual.email && (
@@ -796,10 +853,11 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                                 padding: '6px 13px', borderRadius: '8px', border: '1px solid #ef444455',
                                 background: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer',
                                 fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                display: 'flex', alignItems: 'center', gap: '6px'
                               }}
                                 onMouseEnter={e => { e.target.style.background = '#ef4444'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
                                 onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.08)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
-                                ⛔ Desactivar
+                                <MinusCircle size={14} /> Desactivar
                               </button>
                             )}
                             {u.email === usuarioActual.email && (
@@ -814,7 +872,11 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
               </table>
               {users.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '56px 24px', color: 'var(--text-secondary)' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>👥</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+                    <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '50%', border: '1px solid var(--border-color)' }}>
+                      <User size={36} color="var(--text-secondary)" />
+                    </div>
+                  </div>
                   <p style={{ margin: 0, fontSize: '0.95rem' }}>No hay usuarios registrados aún.</p>
                 </div>
               )}
@@ -1066,13 +1128,6 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   const [editingField, setEditingField] = useState(null);
   const [updateRequestValue, setUpdateRequestValue] = useState('');
 
-  // Vehículo 2 multi-field modal
-  const [showVehiculo2Modal, setShowVehiculo2Modal] = useState(false);
-  const [vehiculo2Form, setVehiculo2Form] = useState({
-    placa2: '', vehiculoMarca2: '', vehiculoModelo2: '',
-    vehiculoAnio2: '', vehiculoColor2: '', capacidadVehiculo2: ''
-  });
-
   const handleRequestUpdate = async (e) => {
     e.preventDefault();
     if (!updateRequestValue.trim()) {
@@ -1127,12 +1182,8 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
     }
   };
 
-  const handleRequestVehiculo2 = async (e) => {
+  const handleHabilitarVehiculo2 = async (e) => {
     e.preventDefault();
-    if (!vehiculo2Form.placa2.trim()) {
-      toast.error('La placa del segundo vehículo es obligatoria');
-      return;
-    }
     setLoading(true);
     try {
       const res = await fetch('/api/conductor/request-update', {
@@ -1140,23 +1191,21 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: usuario.identifier,
-          field: 'vehiculo2',
-          new_value: JSON.stringify(vehiculo2Form)
+          field: 'vehiculo2_habilitado',
+          new_value: 'true'
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error al enviar solicitud');
 
-      toast.success('Solicitud de Vehículo 2 enviada. En revisión por el administrador.');
-      setShowVehiculo2Modal(false);
-      setVehiculo2Form({ placa2: '', vehiculoMarca2: '', vehiculoModelo2: '', vehiculoAnio2: '', vehiculoColor2: '', capacidadVehiculo2: '' });
+      toast.success('Solicitud enviada correctamente. En revisión por administrador.');
 
       // Update local state
       const updatedUser = { ...usuario };
       if (!updatedUser.perfil_conductor) updatedUser.perfil_conductor = {};
       if (!updatedUser.perfil_conductor.solicitudes_cambio) updatedUser.perfil_conductor.solicitudes_cambio = {};
-      updatedUser.perfil_conductor.solicitudes_cambio['vehiculo2'] = {
-        new_value: JSON.stringify(vehiculo2Form),
+      updatedUser.perfil_conductor.solicitudes_cambio['vehiculo2_habilitado'] = {
+        new_value: 'true',
         status: 'pendiente',
         timestamp: new Date().toISOString()
       };
@@ -1396,6 +1445,11 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                     {renderEditableField('Dirección', 'direccion')}
                     {renderEditableField('Teléfono Directo', 'telefonoDirecto')}
                     {renderEditableField('Teléfono de Emergencia', 'telefonoEmergencia')}
+
+                    <div style={{ gridColumn: '1 / -1', height: '1px', background: 'var(--border-color, rgba(255,255,255,0.1))', margin: '10px 0' }} />
+                    <h4 style={{ gridColumn: '1 / -1', margin: '0', color: 'var(--text-primary)' }}>Vehículo</h4>
+
+
                     {renderEditableField('Vehículo (Marca)', 'vehiculoMarca')}
                     {renderEditableField('Vehículo (Modelo)', 'vehiculoModelo')}
                     {renderEditableField('Año', 'vehiculoAnio')}
@@ -1403,6 +1457,29 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                     {renderEditableField('Placa', 'placa')}
 
                     {renderEditableField('Capacidad Vehicular', 'capacidadVehiculo', '15', ' pax')}
+
+                    {usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || usuario.perfil_conductor?.vehiculo2_habilitado === true ? (
+                      <>
+                        <div style={{ gridColumn: '1 / -1', height: '1px', background: 'var(--border-color, rgba(255,255,255,0.1))', margin: '10px 0' }} />
+                        <h4 style={{ gridColumn: '1 / -1', margin: '0', color: 'var(--text-primary)' }}>Vehículo 2</h4>
+                        {renderEditableField('Vehículo 2 (Marca)', 'vehiculoMarca2')}
+                        {renderEditableField('Vehículo 2 (Modelo)', 'vehiculoModelo2')}
+                        {renderEditableField('Año (Vehículo 2)', 'vehiculoAnio2')}
+                        {renderEditableField('Color (Vehículo 2)', 'vehiculoColor2')}
+                        {renderEditableField('Placa (Vehículo 2)', 'placa2')}
+                        {renderEditableField('Capacidad (Vehículo 2)', 'capacidadVehiculo2', '15', ' pax')}
+                      </>
+                    ) : (
+                      <div style={{ gridColumn: '1 / -1', marginTop: '10px', textAlign: 'center' }}>
+                        {usuario.perfil_conductor?.solicitudes_cambio?.vehiculo2_habilitado?.status === 'pendiente' ? (
+                          <span style={{ color: '#f59e0b', fontSize: '0.9rem' }}>⏳ Solicitud de habilitación de Vehículo 2 en revisión</span>
+                        ) : (
+                          <button type="button" onClick={handleHabilitarVehiculo2} className="btn-secondary" disabled={loading}>
+                            Solicitar Vehículo 2
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1453,78 +1530,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         )}
       </div>
       
-      {/* === VEHÍCULO 2 MULTI-FIELD MODAL === */}
-      {showVehiculo2Modal && (
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
-          onClick={() => setShowVehiculo2Modal(false)}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background: 'var(--kapital-card-bg)', borderRadius: '12px', width: '100%', maxWidth: '500px', boxShadow: '0 8px 32px rgba(0,0,0,0.28)', border: '1px solid var(--kapital-border)', overflow: 'hidden' }}
-          >
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid var(--kapital-border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(59,130,246,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <PlusCircle size={15} style={{ color: '#3b82f6' }} />
-                </div>
-                <div>
-                  <div style={{ fontWeight: '600', fontSize: '0.95rem', color: 'var(--kapital-text-primary)' }}>Solicitar Vehículo 2</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--kapital-text-secondary)', marginTop: '1px' }}>El administrador revisará y aprobará la información</div>
-                </div>
-              </div>
-              <button onClick={() => setShowVehiculo2Modal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--kapital-text-secondary)', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(148,163,184,0.15)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                <X size={18} />
-              </button>
-            </div>
-            {/* Body */}
-            <form onSubmit={handleRequestVehiculo2} style={{ padding: '22px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '18px' }}>
-                {[
-                  { label: 'Placa *', key: 'placa2', required: true },
-                  { label: 'Marca', key: 'vehiculoMarca2' },
-                  { label: 'Modelo', key: 'vehiculoModelo2' },
-                  { label: 'Año', key: 'vehiculoAnio2' },
-                  { label: 'Color', key: 'vehiculoColor2' },
-                  { label: 'Capacidad (pax)', key: 'capacidadVehiculo2' },
-                ].map(({ label, key, required }) => (
-                  <div key={key}>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '600', color: 'var(--kapital-text-secondary)', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {label}
-                    </label>
-                    <input
-                      type="text"
-                      required={required}
-                      value={vehiculo2Form[key]}
-                      onChange={e => setVehiculo2Form(prev => ({ ...prev, [key]: e.target.value }))}
-                      style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1.5px solid var(--kapital-border)', background: 'var(--kapital-bg)', color: 'var(--kapital-text-primary)', fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.15s' }}
-                      onFocus={e => e.target.style.borderColor = '#3b82f6'}
-                      onBlur={e => e.target.style.borderColor = 'var(--kapital-border)'}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button type="button" onClick={() => setShowVehiculo2Modal(false)}
-                  style={{ padding: '9px 18px', borderRadius: '8px', border: '1.5px solid var(--kapital-border)', background: 'none', color: 'var(--kapital-text-secondary)', fontWeight: '500', fontSize: '0.88rem', cursor: 'pointer' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(148,163,184,0.1)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                  Cancelar
-                </button>
-                <button type="submit" disabled={loading}
-                  style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: loading ? '#60a5fa' : '#3b82f6', color: '#fff', fontWeight: '600', fontSize: '0.88rem', cursor: loading ? 'not-allowed' : 'pointer' }}
-                  onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#2563eb'; }}
-                  onMouseLeave={e => { if (!loading) e.currentTarget.style.background = '#3b82f6'; }}>
-                  {loading ? 'Enviando...' : 'Enviar solicitud'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
 
       {editingField && (
         <div 

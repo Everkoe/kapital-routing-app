@@ -648,6 +648,16 @@ const FlotaView = ({ usuario }) => {
                       <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa || conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
                       <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo || conductorInfo.flota?.capacidad || 15} pasajeros</p>
                     </div>
+
+                    {(conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === true) && (
+                      <div className="info-section">
+                        <h4 style={{ color: 'var(--text-primary)' }}>Información del vehículo 2</h4>
+                        <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca2 || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo2 || ''}</p>
+                        <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio2 || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor2 || '—'}</p>
+                        <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa2 || '—'}</p>
+                        <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo2 || '—'} pasajeros</p>
+                      </div>
+                    )}
                   </div>
 
 
@@ -667,20 +677,15 @@ const FlotaView = ({ usuario }) => {
                             if (currentVal === undefined || currentVal === null) currentVal = '—';
                             else if (typeof currentVal === 'object') currentVal = JSON.stringify(currentVal);
 
-                            // Special render for vehiculo2 group request
-                            if (field === 'vehiculo2') {
-                              let v2 = {};
-                              try { v2 = JSON.parse(req?.new_value); } catch (_) {}
+                            // Special render for vehiculo2_habilitado
+                            if (field === 'vehiculo2_habilitado') {
                               return (
                                 <div key={field} style={{ background: 'var(--bg)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                     <div style={{ flex: 1 }}>
-                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '8px' }}>Solicitud: Vehículo 2</div>
-                                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-primary)', lineHeight: '1.8' }}>
-                                        <div><strong>Placa:</strong> {v2.placa2 || '—'}</div>
-                                        <div><strong>Marca:</strong> {v2.vehiculoMarca2 || '—'} &nbsp; <strong>Modelo:</strong> {v2.vehiculoModelo2 || '—'}</div>
-                                        <div><strong>Año:</strong> {v2.vehiculoAnio2 || '—'} &nbsp; <strong>Color:</strong> {v2.vehiculoColor2 || '—'}</div>
-                                        <div><strong>Capacidad:</strong> {v2.capacidadVehiculo2 || '—'} pax</div>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '8px' }}>Solicitud: Habilitar Vehículo 2</div>
+                                      <div style={{ fontSize: '0.85rem', color: 'var(--kapital-text-primary)' }}>
+                                        El conductor desea registrar un segundo vehículo. Al aprobar, se le habilitarán los campos en su perfil.
                                       </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: '8px', marginLeft: '12px', flexShrink: 0 }}>
@@ -808,7 +813,7 @@ const FlotaView = ({ usuario }) => {
                   </div>
 
                   {/* API VERIFICATION */}
-                  <DocumentVerification
+                  {/* <DocumentVerification
                     placa={conductorInfo.usuario.perfil_conductor?.vehiculoPlaca || conductorInfo.flota?.placa || conductorInfo.unidad_id}
                     doc={conductorInfo.usuario.perfil_conductor?.numDoc || conductorInfo.usuario.nombre}
                     cachedResults={{
@@ -816,7 +821,7 @@ const FlotaView = ({ usuario }) => {
                       citv: conductorInfo.usuario.perfil_conductor?.validacion_citv,
                       licencia: conductorInfo.usuario.perfil_conductor?.validacion_licencia
                     }}
-                  />
+                  /> */}
 
                   {/* NOTIFY DRIVER */}
                   <div className="notify-section">

@@ -12,3 +12,7 @@ dist/
 
 # Venv
 venv/
+
+# Excel and CSV
+*.xlsx
+*.csv
