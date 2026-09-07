@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import toast from 'react-hot-toast';
 
@@ -27,9 +27,6 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
     return estado === 'faltante';
   });
   const hasRejectedOrMissing = rejectedDocs.length > 0 || missingDocs.length > 0;
-  const [newFiles, setNewFiles] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchData();
@@ -131,7 +128,21 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   }
 
   return (
-    <div style={{ maxWidth: '700px', margin: '0 auto', padding: '20px' }}>
+    <>
+      {viewingDoc && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
+              <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '20px' }}>
+              <img src={viewingDoc.src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt="Documento" />
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
       <div style={{ background: 'var(--bg-secondary)', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
         
         {isPending && !hasRejectedOrMissing ? (
@@ -156,12 +167,11 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: 'var(--kapital-accent-green, #10b981)' }}>
-              <CheckCircle2 size={32} />
-              <h2 style={{ margin: 0 }}>Tus Documentos</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px', color: 'var(--text-primary)' }}>
+              <h2 style={{ margin: 0, textAlign: 'center' }}>Documentos Subidos</h2>
             </div>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '25px', lineHeight: '1.6' }}>
-              Aquí puedes ver los documentos que has proporcionado. Todos están en orden.
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '35px', lineHeight: '1.6', textAlign: 'center' }}>
+              Aquí puedes ver los documentos que has proporcionado. Estos no pueden ser modificados a menos que sean rechazados por un administrador.
             </p>
           </>
         )}
@@ -175,7 +185,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '30px' }}>
           {Object.keys(DOC_LABELS).map(docKey => {
             const hasDoc = !!usuario?.perfil_conductor?.[docKey];
             const revision = revisions[docKey];
@@ -183,7 +193,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
             
             if (estado === 'faltante' || estado === 'rechazado') {
               return (
-                <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
+                <div key={docKey} style={{ gridColumn: '1 / -1', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
                   <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)' }}>
                     {DOC_LABELS[docKey]} <span style={{ color: '#ff6b6b', fontSize: '12px' }}>({estado === 'faltante' ? 'Faltante' : 'Rechazado'})</span>
                   </h4>
@@ -197,24 +207,33 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
             }
 
             return (
-              <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h4 style={{ margin: '0 0 5px 0', color: 'var(--text-primary)' }}>
-                    {DOC_LABELS[docKey]}
-                  </h4>
-                  {hasDoc && usuario.perfil_conductor[docKey].name && (
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginTop: '4px' }}>
-                      📄 {usuario.perfil_conductor[docKey].name}
-                    </span>
-                  )}
+              <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px', background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: '25px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+                <h4 style={{ margin: 0, color: 'var(--text-primary)', textAlign: 'center', fontSize: '1.05rem' }}>
+                  {DOC_LABELS[docKey]}
+                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+                  <button 
+                    onClick={() => {
+                      const fileData = usuario.perfil_conductor[docKey];
+                      let docSrc = '';
+                      if (typeof fileData === 'string') {
+                        docSrc = fileData;
+                      } else if (fileData && typeof fileData === 'object') {
+                        docSrc = fileData.base64 || fileData.url || fileData.file || '';
+                      }
+                      setViewingDoc({ name: DOC_LABELS[docKey], src: docSrc });
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#f59e0b', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', padding: 0 }}
+                  >
+                    <FileText size={16} /> Ver Archivo
+                  </button>
+                  <span style={{ 
+                    display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', fontWeight: '600',
+                    color: estado === 'aprobado' ? '#10b981' : '#f59e0b'
+                  }}>
+                    {estado === 'aprobado' ? <><ShieldCheck size={16} /> Aprobado</> : <><Clock size={16} /> En Revisión</>}
+                  </span>
                 </div>
-                <span style={{ 
-                  padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold',
-                  background: estado === 'aprobado' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                  color: estado === 'aprobado' ? '#10b981' : '#f59e0b'
-                }}>
-                  {estado === 'aprobado' ? '✅ Aprobado' : '⏳ En Revisión'}
-                </span>
               </div>
             );
           })}
@@ -253,7 +272,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </button>
         )}
       </div>
-    </div>
+    </>
   );
 };
 
