@@ -171,6 +171,19 @@ async def reload_db():
     except Exception as e:
         print(f"Error loading from Supabase in reload: {e}")
 
+async def reload_notifications():
+    """Lightweight: only fetches the notifications list from Supabase.
+    Much faster than reload_db() for polling endpoints."""
+    global notifications_db
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1&select=usuarios", headers=HEADERS)
+            if res.status_code == 200 and len(res.json()) > 0:
+                raw = res.json()[0].get("usuarios", {})
+                notifications_db = raw.get("__notifications__", [])
+    except Exception as e:
+        print(f"[reload_notifications] Error: {e}")
+
 async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
     """Sube una imagen Base64 al bucket 'evidencias' de Supabase Storage."""
     try:
@@ -387,14 +400,18 @@ class DriverNotifyPayload(BaseModel):
 
 @app.get("/api/notifications")
 async def get_notifications(last_id: int = 0):
-    await reload_db()  # Always reload from Supabase (Vercel is stateless)
-    # Return admin-targeted notifications (driver resubmissions, SOS, etc.)
+    await reload_notifications()  # Lightweight: only loads notifications from Supabase
+    def safe_id(n):
+        try:
+            return int(float(str(n.get("id", 0))))
+        except:
+            return 0
     all_admin_notifs = [n for n in notifications_db if 
         "type" in n or 
         n.get("para") == "admin" or
         n.get("tipo") in ["resubmision", "solicitud_vehiculo2", "notificacion_admin", "sos"]
     ]
-    new_notifs = [n for n in all_admin_notifs if int(n.get("id", 0)) > last_id]
+    new_notifs = [n for n in all_admin_notifs if safe_id(n) > last_id]
     return new_notifs
 
 @app.post("/api/notifications")
@@ -825,9 +842,8 @@ class MarkReadPayload(BaseModel):
 
 @app.get("/api/conductor/notifications")
 async def get_conductor_notifications(email: str):
-    await reload_db()  # Always reload from Supabase (Vercel is stateless)
+    await reload_notifications()  # Lightweight: only loads notifications from Supabase
     user_notifs = [n for n in notifications_db if n.get("para") == email]
-    # Sort newest first
     user_notifs.sort(key=lambda x: x.get("fecha", ""), reverse=True)
     return user_notifs
 
