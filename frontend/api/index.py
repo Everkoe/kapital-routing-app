@@ -387,7 +387,14 @@ class DriverNotifyPayload(BaseModel):
 
 @app.get("/api/notifications")
 async def get_notifications(last_id: int = 0):
-    new_notifs = [n for n in notifications_db if int(n.get("id", 0)) > last_id and ("type" in n or n.get("para") == "admin")]
+    await reload_db()  # Always reload from Supabase (Vercel is stateless)
+    # Return admin-targeted notifications (driver resubmissions, SOS, etc.)
+    all_admin_notifs = [n for n in notifications_db if 
+        "type" in n or 
+        n.get("para") == "admin" or
+        n.get("tipo") in ["resubmision", "solicitud_vehiculo2", "notificacion_admin", "sos"]
+    ]
+    new_notifs = [n for n in all_admin_notifs if int(n.get("id", 0)) > last_id]
     return new_notifs
 
 @app.post("/api/notifications")
@@ -818,7 +825,7 @@ class MarkReadPayload(BaseModel):
 
 @app.get("/api/conductor/notifications")
 async def get_conductor_notifications(email: str):
-    await reload_db()
+    await reload_db()  # Always reload from Supabase (Vercel is stateless)
     user_notifs = [n for n in notifications_db if n.get("para") == email]
     # Sort newest first
     user_notifs.sort(key=lambda x: x.get("fecha", ""), reverse=True)

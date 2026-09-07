@@ -42,6 +42,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
+  const pollingIntervalRef = useRef(null);
+  const lastKnownNotifCountRef = useRef(-1); // -1 = not initialized yet
+  const wsConnectedRef = useRef(false);
 
   const usuarioRef = useRef(usuario);
   useEffect(() => {
@@ -149,8 +152,57 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     };
   }, [setUsuarioActual]);
 
+  // --- Polling de respaldo para Vercel (donde los WebSockets no persisten) ---
+  const startPolling = useCallback(() => {
+    if (pollingIntervalRef.current) return; // ya hay un polling activo
+    const userKey = usuario?.identifier || usuario?.email;
+    if (!userKey) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`);
+        if (!res.ok) return;
+        const allNotifs = await res.json();
+        const unread = allNotifs.filter(n => !n.leido);
+
+        if (lastKnownNotifCountRef.current === -1) {
+          // Primera carga: solo guardar el estado, no mostrar toasts
+          lastKnownNotifCountRef.current = allNotifs.length;
+          if (unread.length > 0) {
+            setNotificaciones(unread);
+          }
+          return;
+        }
+
+        // Hay más notificaciones que antes → mostrar las nuevas
+        if (allNotifs.length > lastKnownNotifCountRef.current) {
+          const newOnes = allNotifs.slice(0, allNotifs.length - lastKnownNotifCountRef.current);
+          newOnes.forEach(n => {
+            toast(n.mensaje || n.titulo || 'Nueva notificación del administrador', { icon: '🔔', duration: 6000 });
+          });
+          lastKnownNotifCountRef.current = allNotifs.length;
+          setNotificaciones(unread);
+        }
+      } catch (e) {
+        // silently ignore
+      }
+    };
+
+    poll(); // run immediately
+    pollingIntervalRef.current = setInterval(poll, 15000); // check every 15 seconds
+  }, [usuario]);
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     connectWebSocket();
+    // Start polling immediately as a fallback (Vercel doesn't support persistent WebSockets)
+    startPolling();
     return () => {
       // Cleanup: cerrar WS y cancelar reconexión pendiente
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
@@ -158,8 +210,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         wsRef.current.onclose = null; // Evitar reconexión al desmontar
         wsRef.current.close();
       }
+      stopPolling();
     };
-  }, [connectWebSocket]);
+  }, [connectWebSocket, startPolling, stopPolling]);
 
   const markNotificationRead = async (id) => {
     try {

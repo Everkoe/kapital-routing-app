@@ -2301,6 +2301,7 @@ function App() {
     setUsuarioActual(null);
   };
 
+
   const addLog = (message) => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prevLogs => {
@@ -2309,13 +2310,16 @@ function App() {
       return newLogs;
     });
   };
-  
+
   const isFetchingRef = React.useRef(false);
   const initializedRef = React.useRef(false);
-  const [lastNotifId, setLastNotifId] = useState(0);
+  // Use localStorage to persist lastNotifId across page reloads
+  const [lastNotifId, setLastNotifId] = useState(() => {
+    try { return parseInt(localStorage.getItem('kapital_admin_last_notif_id') || '0'); } catch { return 0; }
+  });
 
   useEffect(() => {
-    if (!usuarioActual || !['Administración', 'Administrador', 'Gerente de Operaciones'].includes(usuarioActual.rol)) return;
+    if (!usuarioActual || !['Administración', 'Administrador', 'Gerente de Operaciones', 'Admin', 'Programador de rutas'].includes(usuarioActual.rol)) return;
     
     const checkNotifications = async (suppressToasts) => {
       if (isFetchingRef.current) return;
@@ -2325,15 +2329,16 @@ function App() {
         if (res.ok) {
           const newNotifs = await res.json();
           if (newNotifs.length > 0) {
-            const maxId = Math.max(...newNotifs.map(n => n.id));
+            const maxId = Math.max(...newNotifs.map(n => parseInt(n.id) || 0));
             setLastNotifId(maxId);
+            localStorage.setItem('kapital_admin_last_notif_id', String(maxId));
             
             if (!suppressToasts) {
               newNotifs.forEach(n => {
-                const msg = n.message || n.mensaje || 'Nueva notificación';
+                const msg = n.message || n.mensaje || n.titulo || 'Nueva notificación';
                 if (n.type === 'success') toast.success(msg, { id: `notif-${n.id}` });
                 else if (n.type === 'error') toast.error(msg, { id: `notif-${n.id}`, duration: 8000 });
-                else toast(msg, { id: `notif-${n.id}`, icon: 'ℹ️' });
+                else toast(msg, { id: `notif-${n.id}`, icon: '🔔' });
               });
             }
           }
@@ -2344,16 +2349,17 @@ function App() {
       }
     };
 
-    if (lastNotifId === 0 && !initializedRef.current) {
+    if (!initializedRef.current) {
       checkNotifications(true);
     }
     
     const interval = setInterval(() => {
-      if (initializedRef.current) checkNotifications(false);
-    }, 5000);
+      checkNotifications(false);
+    }, 10000);
     
     return () => clearInterval(interval);
   }, [usuarioActual, lastNotifId]);
+
 
   const renderVista = () => {
     if (usuarioActual?.rol === 'Conductor') {
