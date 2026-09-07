@@ -13,6 +13,26 @@ const FlotaView = ({ usuario }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [baseFilter, setBaseFilter] = useState('Todas');
+  const [baseDropdownOpen, setBaseDropdownOpen] = useState(false);
+  const baseDropdownRef = useRef(null);
+
+  const BASE_OPTIONS = [
+    { key: 'Todas', label: 'Todas las Bases' },
+    { key: 'MASIVO', label: 'Masivo General' },
+    { key: 'REMISSE', label: 'Remisse' },
+    { key: 'SHARF MOTORIZADO', label: 'Sharf Motorizado' }
+  ];
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (baseDropdownRef.current && !baseDropdownRef.current.contains(event.target)) {
+        setBaseDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -368,10 +388,13 @@ const FlotaView = ({ usuario }) => {
   if (isLoading && flota.length === 0) return <div className="card" style={{ padding: '60px', textAlign: 'center' }}><GlobalLoader text="Cargando datos de flota..." /></div>;
   if (error) return <div className="error-message">Error: {error}</div>;
 
-  const filteredFlota = flota.filter(vehiculo => 
-    (vehiculo.placa || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredFlota = flota.filter(vehiculo => {
+    const matchesSearch = (vehiculo.placa || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (vehiculo.unidad_id || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesBase = baseFilter === 'Todas' || (vehiculo.base && vehiculo.base.toLowerCase().trim().includes(baseFilter.toLowerCase().trim()));
+    return matchesSearch && matchesBase;
+  });
 
   // KPIs calculations
   const totalUnits = flota.length;
@@ -408,16 +431,76 @@ const FlotaView = ({ usuario }) => {
               {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
             </div>
             
-            <div style={{ position: 'relative', width: '100%' }}>
-              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
-              <input
-                type="text"
-                placeholder="Buscar unidad o conductor..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flota-search-input-override"
-                style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.875rem', transition: 'border-color 0.2s', boxSizing: 'border-box' }}
-              />
+            <div style={{ display: 'flex', gap: '10px', width: '100%', position: 'relative' }}>
+              <div ref={baseDropdownRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setBaseDropdownOpen(!baseDropdownOpen)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '8px 14px', borderRadius: '8px',
+                    border: `1px solid ${baseDropdownOpen ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                    background: 'var(--bg)',
+                    cursor: 'pointer', transition: 'all 0.2s',
+                    boxShadow: baseDropdownOpen ? '0 0 0 3px rgba(0,229,191,0.1)' : 'none',
+                    height: '100%',
+                    minWidth: '200px',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>BASE</span>
+                    <span style={{ width: '1px', height: '14px', background: 'var(--border-color)', display: 'inline-block' }} />
+                    <span style={{ color: baseFilter !== 'Todas' ? 'var(--primary-color)' : 'var(--text-primary)', whiteSpace: 'nowrap', fontSize: '0.875rem' }}>
+                      {BASE_OPTIONS.find(b => b.key === baseFilter)?.label || 'Todas las Bases'}
+                    </span>
+                  </div>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ transition: 'transform 0.2s', transform: baseDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', opacity: 0.5 }}>
+                    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+
+                {baseDropdownOpen && (
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 100,
+                    background: 'var(--bg)', border: '1px solid var(--border-color)',
+                    borderRadius: '10px', padding: '6px',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+                    minWidth: '220px',
+                    animation: 'dropdownIn 0.15s ease-out',
+                  }}>
+                    <style>{`@keyframes dropdownIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }`}</style>
+                    {BASE_OPTIONS.map(({ key, label }) => (
+                      <button key={key}
+                        onClick={() => { setBaseFilter(key); setBaseDropdownOpen(false); }}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '9px 12px', borderRadius: '7px', border: 'none',
+                          background: baseFilter === key ? 'var(--accent-bg)' : 'transparent',
+                          color: baseFilter === key ? 'var(--primary-color)' : 'var(--text-primary)',
+                          fontWeight: baseFilter === key ? 700 : 500,
+                          fontSize: '0.875rem', cursor: 'pointer', transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => { if (baseFilter !== key) e.target.style.background = 'var(--bg-secondary)'; }}
+                        onMouseLeave={e => { e.target.style.background = baseFilter === key ? 'var(--accent-bg)' : 'transparent'; }}
+                      >
+                        {label}
+                        {baseFilter === key && <span style={{ float: 'right', opacity: 0.7 }}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+                <input
+                  type="text"
+                  placeholder="Buscar unidad o conductor..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="flota-search-input-override"
+                  style={{ width: '100%', height: '100%', minHeight: '38px', padding: '7px 12px 7px 32px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.875rem', transition: 'border-color 0.2s', boxSizing: 'border-box' }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -461,7 +544,7 @@ const FlotaView = ({ usuario }) => {
       <table className="flota-table">
         <thead>
           <tr>
-            <th>{isCliente ? 'PADRON' : 'Unidad (Placa)'}</th>
+            <th>PADRÓN</th>
             <th>{isCliente ? 'NAME' : 'Conductor'}</th>
             {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
@@ -494,12 +577,12 @@ const FlotaView = ({ usuario }) => {
               getStatus(vehiculo.licencia).status === 'danger';
 
             return (
-              <tr key={vehiculo.placa || index} className={hasDanger ? 'row-danger' : ''}>
-                <td style={{ fontWeight: 'bold' }}>{vehiculo.placa}</td>
+              <tr key={vehiculo.unidad_id || index} className={hasDanger ? 'row-danger' : ''}>
+                <td style={{ fontWeight: 'bold' }}>{vehiculo.unidad_id}</td>
                 <td>
                   <span
                     style={{ cursor: 'pointer', textDecoration: 'underline', color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                    onClick={() => handleOpenConductor(vehiculo.placa)}
+                    onClick={() => handleOpenConductor(vehiculo.unidad_id)}
                     title="Ver perfil del conductor"
                   >
                     {vehiculo.chofer}

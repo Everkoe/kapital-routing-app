@@ -4,6 +4,7 @@ import os
 import re
 import unicodedata
 import glob
+import random
 
 # Configuración de Supabase
 SUPABASE_URL = "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1"
@@ -28,13 +29,11 @@ def clean_email(name):
         return f"{parts[0]}@kapital.com"
     return "conductor@kapital.com"
 
-def find_column(df_columns, possible_names):
-    for col in df_columns:
-        clean_col = str(col).strip().upper()
-        for name in possible_names:
-            if name in clean_col:
-                return col
-    return None
+def format_dni(dni):
+    dni_str = str(dni).strip()
+    if dni_str.endswith('.0'):
+        dni_str = dni_str[:-2]
+    return dni_str
 
 def main():
     # Buscar todos los archivos Excel en la carpeta actual
@@ -51,7 +50,12 @@ def main():
     
     app_state = res.json()[0]
     usuarios_db = app_state.get("usuarios", {})
-    flota = app_state.get("flota", {})
+    
+    # Asegurarnos de que exista el objeto de la flota
+    if "__flota__" not in usuarios_db:
+        usuarios_db["__flota__"] = {}
+        
+    flota = usuarios_db["__flota__"]
     
     nuevos_accesos = []
 
@@ -66,71 +70,104 @@ def main():
             continue
             
         for sheet_name in xls.sheet_names:
-            # Ignorar hojas de bajas/cesados
-            if "BAJA" in sheet_name.upper() or "CESADO" in sheet_name.upper() or "INACTIVO" in sheet_name.upper():
-                print(f"  -> Ignorando hoja (bajas): {sheet_name}")
-                continue
-                
             print(f"  -> Leyendo hoja: {sheet_name}")
             
-            # Buscar fila de cabeceras (a veces es 0, a veces 1 o 2)
+            # Asumimos que la fila 0 es la cabecera en el nuevo Excel maestro
             df = None
-            for r in range(5):
-                temp_df = pd.read_excel(excel_path, sheet_name=sheet_name, header=r)
-                cols = [str(c).upper() for c in temp_df.columns]
-                # Criterio: Debe tener una columna que parezca ser de DNI o Trabajador
-                if any("DNI" in c for c in cols) or any("TRABAJADOR" in c for c in cols) or any("APELLIDOS" in c for c in cols):
-                    df = temp_df
-                    break
-                    
-            if df is None or df.empty:
-                print(f"     No se encontraron cabeceras válidas. Saltando...")
+            try:
+                df = pd.read_excel(excel_path, sheet_name=sheet_name, dtype=str)
+            except Exception as e:
+                print(f"Error al leer hoja: {e}")
                 continue
                 
-            # Mapeo inteligente de columnas
-            col_name = find_column(df.columns, ["APELLIDOS Y NOMBRES", "TRABAJADOR", "NOMBRE"])
-            col_dni = find_column(df.columns, ["DNI / CE", "DNI/CE", "DNI", "DOCUMENTO"])
-            col_padron = find_column(df.columns, ["PADRON", "PADRÓN"])
-            col_placa = find_column(df.columns, ["PLACA", "PLACA "])
-            col_correo = find_column(df.columns, ["CORREO ELECTRONICO", "CORREO", "EMAIL"])
-            col_celular = find_column(df.columns, ["CELULAR", "TELEFONO", "MOVIL"])
-            col_estatus = find_column(df.columns, ["ESTATUS", "ESTADO", "ESTATUT"])
+            if df is None or df.empty:
+                print(f"     Hoja vacía. Saltando...")
+                continue
+                
+            # Limpiar nombres de columnas para facilitar la búsqueda
+            def normalize_col(c):
+                import unicodedata
+                return unicodedata.normalize('NFKD', str(c)).encode('ascii', 'ignore').decode('utf-8').strip().upper()
 
-            if not col_name or not col_dni:
-                print(f"     Faltan columnas clave (Nombre o DNI). Saltando...")
+            cols = {normalize_col(c): c for c in df.columns}
+            
+            # Nombres de las columnas sin acentos (gracias a normalize_col)
+            col_base = cols.get("BASE")
+            col_nombre = cols.get("NOMBRES Y APELLIDOS")
+            col_direccion = cols.get("DIRECCION")
+            col_dni = cols.get("DNI")
+            col_fecha_nac = cols.get("FECHA DE NACIMIENTO") or cols.get("FECHA DE NAC")
+            col_celular = cols.get("CELULAR")
+            col_padron = cols.get("PADRON")
+            col_placa = cols.get("PLACA")
+            col_tipo = cols.get("TIPO DE VEHICULO")
+            col_capacidad = cols.get("CAPACIDAD")
+            col_marca = cols.get("MARCA")
+            col_modelo = cols.get("MODELO")
+            col_ano = cols.get("ANO")
+            col_color = cols.get("COLOR")
+            col_grupo = cols.get("GRUPO")
+
+            if not col_nombre or not col_dni or not col_padron:
+                print(f"     Faltan columnas clave (NOMBRES Y APELLIDOS, DNI o PADRON). Revisa el Excel.")
                 continue
 
+            count = 0
             for index, row in df.iterrows():
-                # Filtro de Estatus (si existe la columna)
-                if col_estatus:
-                    estatus = str(row[col_estatus]).strip().upper()
-                    if "ACTIVO" not in estatus and "ALTA" not in estatus and estatus not in ["NAN", ""]:
-                        # Si la hoja en sí misma se llama ALTA o ACTIVOS, perdonamos el estatus
-                        if sheet_name.upper() not in ["ALTA", "ALTAS", "ACTIVOS"]:
-                            continue
-                    
-                nombre = str(row[col_name]).strip()
-                dni = str(row[col_dni]).strip()
+                nombre = str(row[col_nombre]).strip()
+                dni = format_dni(row[col_dni])
                 if not nombre or nombre == 'nan' or not dni or dni == 'nan':
                     continue
                     
-                padron = str(row[col_padron]).strip() if col_padron else f"EXT-{dni[-4:]}" 
-                if padron == 'nan' or not padron: padron = f"EXT-{dni[-4:]}"
+                padron = str(row[col_padron]).strip()
+                if not padron or padron == 'nan': 
+                    continue
                     
+                base = str(row[col_base]).strip() if col_base else ""
+                if base == 'nan': base = ""
+                
+                direccion = str(row[col_direccion]).strip() if col_direccion else ""
+                if direccion == 'nan': direccion = ""
+                
+                fecha_nac = str(row[col_fecha_nac]).strip() if col_fecha_nac else ""
+                if fecha_nac == 'nan': fecha_nac = ""
+                # Formatear fecha para evitar los "00:00:00"
+                if fecha_nac and " " in fecha_nac:
+                    fecha_nac = fecha_nac.split(" ")[0]
+                
+                celular = str(row[col_celular]).strip() if col_celular else ""
+                if celular == 'nan' or celular.endswith('.0'): 
+                    celular = celular.replace('.0', '')
+                
                 placa = str(row[col_placa]).strip() if col_placa else ""
                 if placa == 'nan': placa = ""
-                    
-                correo = str(row[col_correo]).strip() if col_correo else ""
-                if correo == 'nan' or not correo:
-                    correo = clean_email(nombre)
-                    
-                celular = str(row[col_celular]).strip() if col_celular else ""
-                if celular == 'nan': celular = ""
-                    
-                password = dni
+                
+                tipo = str(row[col_tipo]).strip() if col_tipo else "Van"
+                if tipo == 'nan': tipo = "Van"
+                
+                capacidad_str = str(row[col_capacidad]).strip() if col_capacidad else "10"
+                if capacidad_str == 'nan' or capacidad_str.endswith('.0'): 
+                    capacidad_str = capacidad_str.replace('.0', '')
+                capacidad = int(capacidad_str) if capacidad_str.isdigit() else 10
+                
+                marca = str(row[col_marca]).strip() if col_marca else ""
+                if marca == 'nan': marca = ""
+                
+                modelo = str(row[col_modelo]).strip() if col_modelo else ""
+                if modelo == 'nan': modelo = ""
+                
+                ano = str(row[col_ano]).strip() if col_ano else ""
+                if ano == 'nan' or ano.endswith('.0'): 
+                    ano = ano.replace('.0', '')
+                
+                color = str(row[col_color]).strip() if col_color else ""
+                if color == 'nan': color = ""
+                
+                correo = clean_email(nombre)
+                password = f"kap{random.randint(1000, 9999)}"
                 email_key = correo.lower()
                 
-                # Crear en usuarios_db
+                # 1. Crear en usuarios_db
                 usuarios_db[email_key] = {
                     "email": email_key,
                     "password": password,
@@ -139,54 +176,77 @@ def main():
                     "celular": celular,
                     "estado": "Activo",
                     "unidad_id": padron,
+                    "needs_password_change": True,
                     "perfil_conductor": {
+                        "tipoDoc": "DNI",
                         "numDoc": dni,
-                        "vehiculoPlaca": placa
+                        "fechaNacimiento": fecha_nac,
+                        "direccion": direccion,
+                        "telefonoDirecto": celular,
+                        "placa": placa,
+                        "capacidadVehiculo": str(capacidad),
+                        "vehiculoTipo": tipo,
+                        "vehiculoMarca": marca,
+                        "vehiculoModelo": modelo,
+                        "vehiculoAnio": ano,
+                        "vehiculoColor": color
                     }
                 }
                 
-                # Crear en flota
-                if padron not in flota:
-                    flota[padron] = {
-                        "capacidad": 15,
-                        "tipo": "Van",
-                        "chofer": nombre,
-                        "placa": placa
-                    }
-                    
+                # 2. Actualizar/Crear en flota_db (usando padron como llave)
+                # NOTA: si la placa ya existe con otro padron, esto asume que en el nuevo Excel no hay duplicados.
+                flota[padron] = {
+                    "unidad_id": padron,
+                    "placa": placa,
+                    "base": base,
+                    "chofer": nombre,
+                    "tipo": tipo,
+                    "capacidad": capacidad,
+                    "marca": marca,
+                    "modelo": modelo,
+                    "ano": ano,
+                    "color": color,
+                    # Dejamos estos campos vacíos para llenado manual posterior
+                    "soat": "", "revision": "", "atu": "", "licencia": "",
+                    "soat_doc": "", "revision_doc": "", "atu_doc": "", "licencia_doc": ""
+                }
+                
                 nuevos_accesos.append({
-                    "Archivo Origen": excel_path,
-                    "Hoja": sheet_name,
-                    "Nombre": nombre,
                     "Padrón": padron,
-                    "Placa": placa,
+                    "Base": base,
+                    "Nombre": nombre,
+                    "DNI": dni,
                     "Correo (Usuario)": email_key,
                     "Contraseña": password
                 })
+                count += 1
                 
-    print(f"\n=========================================")
-    print(f"Total de conductores procesados: {len(nuevos_accesos)}")
-    
-    if len(nuevos_accesos) > 0:
-        print("Sincronizando con la nube (Supabase)...")
-        app_state["usuarios"] = usuarios_db
-        app_state["flota"] = flota
-        
-        update_res = requests.patch(
-            f"{SUPABASE_URL}/app_state?id=eq.1", 
-            headers=HEADERS, 
-            json=app_state
-        )
-        
-        if update_res.status_code in [200, 204]:
-            print("¡ÉXITO! Base de datos actualizada correctamente.")
-            df_accesos = pd.DataFrame(nuevos_accesos)
-            df_accesos.to_csv("accesos_generados_multiples.csv", index=False, encoding='utf-8-sig')
-            print("Se ha generado el archivo 'accesos_generados_multiples.csv' con todas las credenciales.")
-        else:
-            print(f"ERROR al actualizar Supabase: {update_res.text}")
-    else:
+            print(f"     => Procesados {count} conductores/vehículos.")
+
+    if not nuevos_accesos:
         print("No se encontraron registros válidos para importar.")
+        return
+
+    print(f"\nSe van a insertar/actualizar {len(nuevos_accesos)} registros. Actualizando Supabase...")
+    
+    # Parchear el app_state (se envía el diccionario usuarios completo, que ahora contiene la flota limpia y actualizada)
+    payload = {
+        "usuarios": usuarios_db
+    }
+    
+    update_res = requests.patch(
+        f"{SUPABASE_URL}/app_state?id=eq.1", 
+        headers=HEADERS, 
+        json=payload
+    )
+    
+    if update_res.status_code in [200, 204]:
+        print("¡ÉXITO! Base de datos actualizada correctamente.")
+        df_accesos = pd.DataFrame(nuevos_accesos)
+        df_accesos.to_csv("accesos_generados_multiples.csv", index=False, encoding='utf-8-sig')
+        print("Se ha generado el archivo 'accesos_generados_multiples.csv' con todas las credenciales.")
+    else:
+        print(f"ERROR al actualizar Supabase: {update_res.text}")
 
 if __name__ == "__main__":
     main()

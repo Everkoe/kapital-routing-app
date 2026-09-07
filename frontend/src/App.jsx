@@ -181,6 +181,83 @@ const PantallaAuth = ({ onLogin }) => {
 };
 
 
+// --- Componente de Cambio de Contraseña Forzado ---
+const PasswordChangeModal = ({ user, onSuccess, onCancel }) => {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    
+    if (newPassword.length < 4) {
+      setError('La contraseña debe tener al menos 4 caracteres.');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: user.identifier || user.dni,
+          old_password: user.identifier || user.dni, // Usamos el DNI/identifier como la contraseña antigua
+          new_password: newPassword
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Error al actualizar contraseña.');
+      }
+
+      toast.success('Contraseña actualizada correctamente.');
+      onSuccess({ ...user, needs_password_change: false });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-form-wrapper" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div className="auth-form-card">
+          <div className="auth-logo-container">
+            <ShieldCheck size={48} color="var(--kapital-accent-green)" />
+          </div>
+          <form onSubmit={handleSubmit} className="auth-form">
+            <h2>Actualización Requerida</h2>
+            <p className="auth-subtitle">
+              Por motivos de seguridad, debes establecer una contraseña privada nueva para continuar.
+            </p>
+            {error && <p className="error-message" style={{textAlign: 'center'}}>{error}</p>}
+            
+            <input className="auth-input" type="password" placeholder="Nueva Contraseña" onChange={(e) => setNewPassword(e.target.value)} required />
+            <input className="auth-input" type="password" placeholder="Confirmar Nueva Contraseña" onChange={(e) => setConfirmPassword(e.target.value)} required />
+            
+            <button type="submit" className="auth-button" disabled={isLoading}>
+              {isLoading ? 'Actualizando...' : 'Guardar y Continuar'}
+            </button>
+            <button type="button" onClick={onCancel} className="auth-button" style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text)', marginTop: '10px' }}>
+              Cancelar
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Componentes de Vistas ---
 // --- Confirmation Modal ---
 const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
@@ -2148,6 +2225,7 @@ function App() {
 
 
   const [usuarioActual, setUsuarioActual] = useState(null);
+  const [pendingPasswordChangeUser, setPendingPasswordChangeUser] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
   const [vistaParams, setVistaParams] = useState({});
@@ -2237,8 +2315,12 @@ function App() {
   }, []);
 
   const handleLogin = (userData) => {
-    localStorage.setItem('kapital_user', JSON.stringify(userData));
-    setUsuarioActual(userData);
+    if (userData.needs_password_change) {
+      setPendingPasswordChangeUser(userData);
+    } else {
+      localStorage.setItem('kapital_user', JSON.stringify(userData));
+      setUsuarioActual(userData);
+    }
   };
 
   const handleLogout = () => {
@@ -2325,6 +2407,21 @@ function App() {
 
 
   if (!usuarioActual) {
+    if (pendingPasswordChangeUser) {
+      return (
+        <>
+          <Toaster position="top-right" />
+          <PasswordChangeModal 
+            user={pendingPasswordChangeUser} 
+            onSuccess={(updatedUser) => {
+              setPendingPasswordChangeUser(null);
+              handleLogin(updatedUser);
+            }}
+            onCancel={() => setPendingPasswordChangeUser(null)}
+          />
+        </>
+      );
+    }
     return (
       <>
         <Toaster position="top-right" toastOptions={{

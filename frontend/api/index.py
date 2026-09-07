@@ -357,6 +357,11 @@ class UsuarioUpdate(BaseModel):
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
 
+class ChangePasswordRequest(BaseModel):
+    identifier: str
+    old_password: str
+    new_password: str
+
 class DriverProfilePayload(BaseModel):
     email: str
     perfilData: dict
@@ -475,8 +480,13 @@ async def login_user(usuario: UsuarioLogin):
             if k.lower() == identifier_clean.lower():
                 user_in_db = v
                 break
+            # Check if DNI matches
+            perfil = v.get("perfil_conductor", {})
+            if perfil and perfil.get("numDoc") == identifier_clean:
+                user_in_db = v
+                break
                 
-    if not user_in_db or user_in_db["password"] != usuario.password:
+    if not user_in_db or user_in_db.get("password") != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
     
     # Verificar si está pendiente de aprobación
@@ -498,8 +508,39 @@ async def login_user(usuario: UsuarioLogin):
         "empresa_id": user_in_db.get("empresa_id"),
         "avatar": user_in_db.get("avatar"),
         "estado": user_in_db.get("estado", "Activo"),
+        "needs_password_change": user_in_db.get("needs_password_change", False),
         "profileComplete": "perfil_conductor" in user_in_db
     }
+
+@app.post("/api/auth/change-password")
+async def change_password(req: ChangePasswordRequest):
+    await reload_db()
+    identifier_clean = req.identifier.strip()
+    user_in_db = usuarios_db.get(identifier_clean)
+    if not user_in_db:
+        for k, v in usuarios_db.items():
+            if k.lower() == identifier_clean.lower():
+                user_in_db = v
+                break
+            perfil = v.get("perfil_conductor", {})
+            if perfil and perfil.get("numDoc") == identifier_clean:
+                user_in_db = v
+                break
+                
+    if not user_in_db:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        
+    if user_in_db.get("password") != req.old_password:
+        raise HTTPException(status_code=401, detail="La contraseña actual es incorrecta.")
+        
+    if len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
+        
+    user_in_db["password"] = req.new_password
+    user_in_db["needs_password_change"] = False
+    
+    await persist_users_only()
+    return {"message": "Contraseña actualizada exitosamente."}
 
 @app.get("/api/user/profile")
 async def get_profile(email: str):
