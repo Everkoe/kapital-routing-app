@@ -18,6 +18,9 @@ const DOC_LABELS = {
 const DocumentResubmission = ({ usuario, onComplete }) => {
   const [notifications, setNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [newFiles, setNewFiles] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewingDoc, setViewingDoc] = useState(null);
   const revisions = usuario?.perfil_conductor?.revision_docs || {};
   const rejectedDocs = Object.keys(revisions).filter(key => revisions[key].estado?.toLowerCase() === 'rechazado');
   const missingDocs = Object.keys(DOC_LABELS).filter(key => {
