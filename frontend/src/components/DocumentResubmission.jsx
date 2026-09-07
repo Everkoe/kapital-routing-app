@@ -272,6 +272,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </button>
         )}
       </div>
+    </div>
     </>
   );
 };
