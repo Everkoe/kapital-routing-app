@@ -146,35 +146,32 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </div>
         </div>
       )}
-      <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-      <div style={{ background: 'var(--bg-secondary)', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+      <div>
         
         {isPending && !hasRejectedOrMissing ? (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '20px', color: 'var(--text-primary)' }}>
-              <Hourglass size={36} color="var(--kapital-blue, #3b82f6)" />
-              <h2 style={{ margin: 0, fontSize: '1.8rem' }}>Perfil en Revisión</h2>
+          <div style={{ textAlign: 'center', padding: '10px 0 20px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '10px', color: 'var(--text-primary)' }}>
+              <Hourglass size={22} color="var(--kapital-blue, #3b82f6)" />
+              <h4 style={{ margin: 0, fontSize: '1rem' }}>Perfil en Revisión</h4>
             </div>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '25px', lineHeight: '1.6', fontSize: '1.05rem', maxWidth: '480px', margin: '0 auto' }}>
-              Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y los documentos que has subido. Por favor, regresa más tarde.
+            <p style={{ color: 'var(--text-secondary)', lineHeight: '1.6', fontSize: '0.9rem', maxWidth: '480px', margin: '0 auto' }}>
+              Hemos recibido tu información. Nuestro equipo está verificando tus documentos.
             </p>
           </div>
         ) : hasRejectedOrMissing ? (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: '#ff6b6b' }}>
-              <AlertTriangle size={32} />
-              <h2 style={{ margin: 0 }}>Documentos Observados</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', color: '#ff6b6b' }}>
+              <AlertTriangle size={22} />
+              <h4 style={{ margin: 0 }}>Documentos Observados</h4>
             </div>
-            <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
-              Necesitamos que subas o corrijas los siguientes documentos para completar tu perfil.
+            <p style={{ color: 'var(--text)', marginBottom: '20px', lineHeight: '1.6', fontSize: '0.9rem' }}>
+              Necesitamos que subas o corrijas los siguientes documentos.
             </p>
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px', color: 'var(--text-primary)' }}>
-              <h2 style={{ margin: 0, textAlign: 'center' }}>Documentos Subidos</h2>
-            </div>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '35px', lineHeight: '1.6', textAlign: 'center' }}>
+            <h4 style={{ margin: '0 0 8px 0', textAlign: 'center', color: 'var(--text-primary)' }}>Documentos Subidos</h4>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '25px', lineHeight: '1.6', textAlign: 'center', fontSize: '0.9rem' }}>
               Aquí puedes ver los documentos que has proporcionado. Estos no pueden ser modificados a menos que sean rechazados por un administrador.
             </p>
           </>
@@ -276,7 +273,6 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </button>
         )}
       </div>
-    </div>
     </>
   );
 };

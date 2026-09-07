@@ -1561,19 +1561,20 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                         )}
                       </div>
                     )}
+                    {/* Separador y Documentos */}
+                    <div style={{ gridColumn: '1 / -1', height: '1px', background: 'var(--border-color, rgba(255,255,255,0.1))', margin: '20px 0' }} />
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <DocumentResubmission 
+                        usuario={usuario} 
+                        onComplete={(updatedUser) => {
+                          setUsuarioActual(updatedUser);
+                          toast.success("Documentos enviados. Tu perfil está ahora en revisión.");
+                        }} 
+                      />
+                    </div>
                   </div>
                 </div>
               )}
-
-
-
-              <DocumentResubmission 
-                usuario={usuario} 
-                onComplete={(updatedUser) => {
-                  setUsuarioActual(updatedUser);
-                  toast.success("Documentos enviados. Tu perfil está ahora en revisión.");
-                }} 
-              />
             </div>
           </div>
         )}
