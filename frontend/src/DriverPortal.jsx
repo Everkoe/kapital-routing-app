@@ -307,7 +307,22 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     );
   }
 
-  if (usuario.estado === 'Documentos Observados' || usuario.estado === 'Pendiente Revisión') {
+  const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
+
+  const hasMissingDocs = REQUIRED_DOCS.some(key => {
+    const hasDoc = !!usuario?.perfil_conductor?.[key];
+    const isPendingOrRejected = usuario?.perfil_conductor?.revision_docs?.[key]?.estado;
+    return !hasDoc && !isPendingOrRejected;
+  });
+
+  const hasRejectedDocs = Object.values(usuario?.perfil_conductor?.revision_docs || {})
+    .some(rev => rev.estado?.toLowerCase() === 'rechazado');
+
+  const isPending = usuario?.estado === 'Pendiente Revisión' || usuario?.estado === 'Documentos Observados';
+
+  const needsDocumentAction = hasMissingDocs || hasRejectedDocs || isPending;
+
+  if (needsDocumentAction) {
     return (
       <main style={{ padding: '20px', minHeight: '100vh', background: 'var(--bg)' }}>
         <DocumentResubmission usuario={usuario} onComplete={handleResubmissionComplete} />

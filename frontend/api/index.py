@@ -470,21 +470,24 @@ async def register_user(usuario: UsuarioRegistro):
     return {"message": "Usuario registrado exitosamente.", "estado": estado}
 
 
+
+def get_user_by_identifier(identifier: str):
+    if not identifier: return None
+    identifier_clean = identifier.strip()
+    user = usuarios_db.get(identifier_clean)
+    if user: return user
+    for k, v in usuarios_db.items():
+        if k.lower() == identifier_clean.lower():
+            return v
+        perfil = v.get("perfil_conductor", {})
+        if perfil and perfil.get("numDoc") == identifier_clean:
+            return v
+    return None
+
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin):
     await reload_db()
-    identifier_clean = usuario.identifier.strip()
-    user_in_db = usuarios_db.get(identifier_clean)
-    if not user_in_db:
-        for k, v in usuarios_db.items():
-            if k.lower() == identifier_clean.lower():
-                user_in_db = v
-                break
-            # Check if DNI matches
-            perfil = v.get("perfil_conductor", {})
-            if perfil and perfil.get("numDoc") == identifier_clean:
-                user_in_db = v
-                break
+    user_in_db = get_user_by_identifier(usuario.identifier)
                 
     if not user_in_db or user_in_db.get("password") != usuario.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
@@ -515,17 +518,7 @@ async def login_user(usuario: UsuarioLogin):
 @app.post("/api/auth/change-password")
 async def change_password(req: ChangePasswordRequest):
     await reload_db()
-    identifier_clean = req.identifier.strip()
-    user_in_db = usuarios_db.get(identifier_clean)
-    if not user_in_db:
-        for k, v in usuarios_db.items():
-            if k.lower() == identifier_clean.lower():
-                user_in_db = v
-                break
-            perfil = v.get("perfil_conductor", {})
-            if perfil and perfil.get("numDoc") == identifier_clean:
-                user_in_db = v
-                break
+    user_in_db = get_user_by_identifier(req.identifier)
                 
     if not user_in_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -544,7 +537,7 @@ async def change_password(req: ChangePasswordRequest):
 
 @app.get("/api/user/profile")
 async def get_profile(email: str):
-    user = usuarios_db.get(email)
+    user = get_user_by_identifier(email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     return {
@@ -563,7 +556,7 @@ async def get_profile(email: str):
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate):
     await reload_db()
-    user = usuarios_db.get(update_data.identifier)
+    user = get_user_by_identifier(update_data.identifier)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     
@@ -601,7 +594,7 @@ async def update_profile(update_data: UsuarioUpdate):
 @app.get("/api/admin/users")
 async def get_all_users(email: str):
     await reload_db()
-    req_user = usuarios_db.get(email)
+    req_user = get_user_by_identifier(email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
     
@@ -689,7 +682,7 @@ async def review_driver_doc(payload: DriverDocReviewPayload):
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
-    conductor = usuarios_db.get(payload.conductor_email)
+    conductor = get_user_by_identifier(payload.conductor_email)
     if not conductor:
         conductor = {
             "identifier": payload.conductor_email,
@@ -763,7 +756,7 @@ async def notify_driver(payload: DriverNotifyPayload):
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
 
-    conductor = usuarios_db.get(payload.conductor_email)
+    conductor = get_user_by_identifier(payload.conductor_email)
     if not conductor:
         conductor = {
             "identifier": payload.conductor_email,
@@ -804,7 +797,7 @@ async def notify_driver(payload: DriverNotifyPayload):
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):
     await reload_db()
-    user = usuarios_db.get(payload.email)
+    user = get_user_by_identifier(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     
@@ -858,7 +851,7 @@ class ResolveDataRequestPayload(BaseModel):
 
 @app.post("/api/conductor/resubmit-docs")
 async def resubmit_driver_docs(payload: ResubmitDocsPayload):
-    user = usuarios_db.get(payload.email)
+    user = get_user_by_identifier(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Conductor no encontrado.")
     
@@ -906,7 +899,7 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
 
 @app.post("/api/conductor/request-update")
 async def request_data_update(payload: UpdateDataRequestPayload):
-    user = usuarios_db.get(payload.email)
+    user = get_user_by_identifier(payload.email)
     if not user or user.get("rol") != "Conductor":
         raise HTTPException(status_code=404, detail="Conductor no encontrado")
     
@@ -949,7 +942,7 @@ async def resolve_data_update(payload: ResolveDataRequestPayload):
     if not admin or admin.get("rol") not in ["Administración", "Administrador", "Gerente de Operaciones"]:
         raise HTTPException(status_code=403, detail="No autorizado")
         
-    conductor = usuarios_db.get(payload.conductor_email)
+    conductor = get_user_by_identifier(payload.conductor_email)
     if not conductor or "perfil_conductor" not in conductor:
         raise HTTPException(status_code=404, detail="Conductor no encontrado")
         

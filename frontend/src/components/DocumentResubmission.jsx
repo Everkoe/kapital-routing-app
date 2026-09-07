@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowRight, Loader, Hourglass } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2 } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import toast from 'react-hot-toast';
 
@@ -19,6 +19,14 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   const [notifications, setNotifications] = useState([]);
   const revisions = usuario?.perfil_conductor?.revision_docs || {};
   const rejectedDocs = Object.keys(revisions).filter(key => revisions[key].estado?.toLowerCase() === 'rechazado');
+  const missingDocs = Object.keys(DOC_LABELS).filter(key => {
+    if (key === 'revisionTecnica') return false; // Optional document
+    const hasDoc = !!usuario?.perfil_conductor?.[key];
+    const revision = revisions[key];
+    const estado = revision ? revision.estado?.toLowerCase() : (hasDoc ? 'pendiente' : 'faltante');
+    return estado === 'faltante';
+  });
+  const hasRejectedOrMissing = rejectedDocs.length > 0 || missingDocs.length > 0;
   const [newFiles, setNewFiles] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,8 +85,8 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   };
 
   const handleSubmit = async () => {
-    // Validate that all rejected docs have a new file
-    const missing = rejectedDocs.filter(key => !newFiles[key]);
+    // Validate that all rejected/missing docs have a new file
+    const missing = [...rejectedDocs, ...missingDocs].filter(key => !newFiles[key]);
     if (missing.length > 0) {
       toast.error('Por favor sube todos los documentos solicitados.');
       return;
@@ -111,6 +119,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
 
   const isPending = usuario.estado === 'Pendiente Revisión';
   const hasRejected = rejectedDocs.length > 0;
+  // We don't change hasRejected here to avoid breaking the logic that displays the "Último mensaje de Administración" if there are actually rejected ones.
 
   if (isLoading) {
     return (
@@ -125,7 +134,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '20px' }}>
       <div style={{ background: 'var(--bg-secondary)', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
         
-        {isPending && !hasRejected ? (
+        {isPending && !hasRejectedOrMissing ? (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '20px', color: 'var(--text-primary)' }}>
               <Hourglass size={36} color="var(--kapital-blue, #3b82f6)" />
@@ -135,14 +144,24 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
               Hemos recibido tu información exitosamente. Nuestro equipo está verificando tus datos y los documentos que has subido. Por favor, regresa más tarde.
             </p>
           </div>
-        ) : (
+        ) : hasRejectedOrMissing ? (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: '#ff6b6b' }}>
               <AlertTriangle size={32} />
               <h2 style={{ margin: 0 }}>Documentos Observados</h2>
             </div>
             <p style={{ color: 'var(--text)', marginBottom: '25px', lineHeight: '1.6' }}>
-              Hemos revisado tu perfil y necesitamos que corrijas o vuelvas a subir algunos documentos para poder activarlo.
+              Necesitamos que subas o corrijas los siguientes documentos para completar tu perfil.
+            </p>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', color: 'var(--kapital-accent-green, #10b981)' }}>
+              <CheckCircle2 size={32} />
+              <h2 style={{ margin: 0 }}>Tus Documentos</h2>
+            </div>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '25px', lineHeight: '1.6' }}>
+              Aquí puedes ver los documentos que has proporcionado. Todos están en orden.
             </p>
           </>
         )}
@@ -162,16 +181,14 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
             const revision = revisions[docKey];
             const estado = revision ? revision.estado?.toLowerCase() : (hasDoc ? 'pendiente' : 'faltante');
             
-            if (estado === 'faltante') return null;
-
-            if (estado === 'rechazado') {
+            if (estado === 'faltante' || estado === 'rechazado') {
               return (
                 <div key={docKey} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
                   <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)' }}>
-                    {DOC_LABELS[docKey]} <span style={{ color: '#ff6b6b', fontSize: '12px' }}>(Rechazado)</span>
+                    {DOC_LABELS[docKey]} <span style={{ color: '#ff6b6b', fontSize: '12px' }}>({estado === 'faltante' ? 'Faltante' : 'Rechazado'})</span>
                   </h4>
                   <FileUploadZone 
-                    label={`Sube el nuevo ${DOC_LABELS[docKey]}`}
+                    label={`Sube el ${estado === 'faltante' ? '' : 'nuevo '}${DOC_LABELS[docKey]}`}
                     file={newFiles[docKey]}
                     onFileSelect={(f) => handleFileChange(docKey, f)}
                   />
@@ -203,7 +220,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           })}
         </div>
 
-        {hasRejected && (
+        {hasRejectedOrMissing && (
           <button 
             onClick={handleSubmit}
             disabled={isSubmitting}

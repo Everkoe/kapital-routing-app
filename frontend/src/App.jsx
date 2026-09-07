@@ -3,8 +3,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare } from 'lucide-react';
+import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check } from 'lucide-react';
 import DocumentVerification from './components/DocumentVerification';
+import DocumentResubmission from './components/DocumentResubmission';
 import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
 import LiveMap from './LiveMap';
@@ -90,6 +91,9 @@ const PantallaAuth = ({ onLogin }) => {
       }
       
       if (isLogin) {
+        if (data && data.needs_password_change) {
+          data.typedPassword = formData.password;
+        }
         onLogin(data);
       } else {
         toast.success('¡Solicitud enviada! Tu cuenta está Pendiente de Aprobación por Administración.', { duration: 5000 });
@@ -208,8 +212,8 @@ const PasswordChangeModal = ({ user, onSuccess, onCancel }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          identifier: user.identifier || user.dni,
-          old_password: user.identifier || user.dni, // Usamos el DNI/identifier como la contraseña antigua
+          identifier: user.identifier || user.dni || user.email,
+          old_password: user.typedPassword || user.identifier || user.dni,
           new_password: newPassword
         }),
       });
@@ -1563,45 +1567,13 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
 
 
 
-              <h3 className="profile-section-title">Documentos Subidos</h3>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>Aquí puedes ver los documentos que has proporcionado. Estos no pueden ser modificados a menos que sean rechazados por un administrador.</p>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-                {Object.keys(DOC_LABELS).map(docKey => {
-                  const fileUrl = usuario.perfil_conductor?.[docKey];
-                  const statusObj = usuario.perfil_conductor?.revision_docs?.[docKey];
-                  const estado = statusObj ? statusObj.estado?.toLowerCase() : (fileUrl ? 'pendiente' : 'faltante');
-
-                  if (!fileUrl && estado === 'faltante') return null;
-
-                  return (
-                    <div key={docKey} style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--kapital-border)' }}>
-                      <h4 style={{ margin: '0 0 10px 0', color: 'var(--text-primary)' }}>{DOC_LABELS[docKey]}</h4>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        {fileUrl ? (
-                          <button type="button" onClick={(e) => { 
-                            e.preventDefault(); 
-                            let docSrc = '';
-                            if (typeof fileUrl === 'string') {
-                              docSrc = fileUrl;
-                            } else if (fileUrl && typeof fileUrl === 'object') {
-                              docSrc = fileUrl.base64 || fileUrl.url || fileUrl.file || '';
-                            }
-                            setViewingDoc({ name: DOC_LABELS[docKey], src: docSrc }); 
-                          }} style={{ background: 'none', border: 'none', color: 'var(--kapital-accent-orange)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.95rem', fontWeight: 500, padding: 0 }}>
-                            <FileText size={16} /> Ver Archivo
-                          </button>
-                        ) : (
-                          <span style={{ color: 'var(--text-secondary)' }}>Sin archivo</span>
-                        )}
-                        {estado === 'aprobado' && <span style={{ color: 'var(--kapital-accent-green)', fontWeight: 'bold', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}><ShieldCheck size={16}/> Aprobado</span>}
-                        {estado === 'rechazado' && <span style={{ color: '#ff6b6b', fontWeight: 'bold', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}><AlertTriangle size={16}/> Rechazado</span>}
-                        {estado === 'pendiente' && <span style={{ color: '#eab308', fontWeight: 'bold', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={16}/> En Revisión</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <DocumentResubmission 
+                usuario={usuario} 
+                onComplete={(updatedUser) => {
+                  setUsuarioActual(updatedUser);
+                  toast.success("Documentos enviados. Tu perfil está ahora en revisión.");
+                }} 
+              />
             </div>
           </div>
         )}
@@ -2383,6 +2355,24 @@ function App() {
   }, [usuarioActual, lastNotifId]);
 
   const renderVista = () => {
+    if (usuarioActual?.rol === 'Conductor') {
+      const p = usuarioActual?.perfil_conductor;
+      if (!p) {
+        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+      }
+      const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
+      const hasMissing = REQUIRED_DOCS.some(k => {
+        const hasDoc = !!p[k];
+        const isPendingOrRejected = p.revision_docs?.[k]?.estado;
+        return !hasDoc && !isPendingOrRejected;
+      });
+      const hasRejected = Object.values(p.revision_docs || {}).some(r => r.estado?.toLowerCase() === 'rechazado');
+      const isPending = usuarioActual?.estado === 'Pendiente Revisión' || usuarioActual?.estado === 'Documentos Observados';
+      
+      if (hasMissing || hasRejected || isPending) {
+        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+      }
+    }
 
     switch (vistaActual) {
       case 'flota': return <FlotaView usuario={usuarioActual} />;
