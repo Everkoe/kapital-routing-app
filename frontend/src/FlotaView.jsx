@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload } from 'lucide-react';
 import { GlobalLoader } from './App';
 import DocumentVerification from './components/DocumentVerification';
 
@@ -139,6 +139,42 @@ const FlotaView = ({ usuario }) => {
       const data = await res.json();
       setLocalRevisionDocs(data.revision_docs || {});
       toast.success(`Documento marcado como ${estado === 'aprobado' ? '✅ Aprobado' : '❌ Rechazado'}`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setReviewLoading(prev => ({ ...prev, [campo]: false }));
+    }
+  };
+
+  const handleAdminUploadDoc = async (campo, file) => {
+    if (!file || !conductorInfo || !usuario) return;
+    setReviewLoading(prev => ({ ...prev, [campo]: true }));
+    try {
+      const pseudoUrl = file.name;
+      const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
+      
+      const res = await fetch('/api/conductor/resubmit-docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: driverEmail, docs: { [campo]: pseudoUrl } })
+      });
+      if (!res.ok) throw new Error('Error al subir documento');
+      
+      const updatedConductorInfo = { ...conductorInfo };
+      if (updatedConductorInfo.usuario && !updatedConductorInfo.usuario.perfil_conductor) {
+        updatedConductorInfo.usuario.perfil_conductor = {};
+      }
+      if (updatedConductorInfo.usuario) {
+        updatedConductorInfo.usuario.perfil_conductor[campo] = pseudoUrl;
+      }
+      setConductorInfo(updatedConductorInfo);
+      
+      setLocalRevisionDocs(prev => ({
+        ...prev,
+        [campo]: { estado: 'pendiente' }
+      }));
+
+      toast.success('Documento subido por el administrador.');
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -870,6 +906,10 @@ const FlotaView = ({ usuario }) => {
                                 }}>
                                   <Eye size={13} /> Ver
                                 </button>
+                                <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px' }} title="Reemplazar archivo">
+                                  <Upload size={13} /> 
+                                  <input type="file" style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
+                                </label>
                                 <button
                                   className="btn-approve-doc"
                                   disabled={isLoading || rev?.estado === 'aprobado'}
@@ -887,7 +927,13 @@ const FlotaView = ({ usuario }) => {
                               </div>
                             )}
                             {!fileData && (
-                              <p className="review-doc-missing">El conductor aún no ha subido este documento.</p>
+                              <div className="review-doc-actions" style={{ justifyContent: 'space-between', marginTop: '10px' }}>
+                                <p className="review-doc-missing" style={{ margin: 0 }}>El conductor aún no ha subido este documento.</p>
+                                <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                                  <Upload size={13} /> Subir
+                                  <input type="file" style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
+                                </label>
+                              </div>
                             )}
                           </div>
                         );
