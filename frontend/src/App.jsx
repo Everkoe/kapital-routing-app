@@ -1228,7 +1228,10 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error al solicitar cambio');
+      const errDetail = typeof data.detail === 'string' ? data.detail 
+        : Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+        : data.detail ? JSON.stringify(data.detail) : 'Error al solicitar cambio';
+      if (!res.ok) throw new Error(errDetail);
       
       toast.success('Solicitud enviada correctamente. En revisión por administrador.');
       setEditingField(null);
@@ -1277,7 +1280,10 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error al enviar solicitud');
+      const errDetail2 = typeof data.detail === 'string' ? data.detail 
+        : Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+        : data.detail ? JSON.stringify(data.detail) : 'Error al enviar solicitud';
+      if (!res.ok) throw new Error(errDetail2);
 
       toast.success('Solicitud enviada correctamente. En revisión por administrador.');
 
@@ -1316,9 +1322,17 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
     e.preventDefault();
     setLoading(true);
     
+    // Ensure identifier is always a valid string (never null/undefined)
+    const identifier = usuario.identifier || usuario.email;
+    if (!identifier) {
+      toast.error('No se pudo identificar al usuario. Por favor vuelve a iniciar sesión.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const payload = {
-        identifier: usuario.identifier,
+        identifier,
         nombre: formData.nombre !== usuario.nombre ? formData.nombre : undefined,
         current_password: formData.current_password || undefined,
         new_password: formData.new_password || undefined,
@@ -1338,7 +1352,10 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
           onLogout();
           return;
         }
-        throw new Error(data.detail || 'Error al actualizar perfil');
+        const errMsg = typeof data.detail === 'string' ? data.detail 
+          : Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+          : data.detail ? JSON.stringify(data.detail) : 'Error al actualizar perfil';
+        throw new Error(errMsg);
       }
       
       setUsuarioActual(data);
