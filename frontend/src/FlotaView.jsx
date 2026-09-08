@@ -1402,28 +1402,63 @@ const FlotaView = ({ usuario }) => {
       `}</style>
 
       {/* DOCUMENT VIEWER MODAL */}
-      {viewingDoc && (
-        <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
-          <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
-            <div className="doc-viewer-header">
-              <h3>{viewingDoc.name}</h3>
-              <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
-            </div>
-            <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '20px', textAlign: 'center' }}>
-              {(!viewingDoc.src || viewingDoc.src === '') ? (
-                <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
-                  <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible o dañado</h4>
-                  <p style={{ fontSize: '14px', color: '#ccc' }}>El archivo no se cargó correctamente al servidor. Por favor, solicite al conductor que lo vuelva a subir.</p>
-                </div>
-              ) : typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.includes('.pdf')) ? (
-                <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
-              ) : (
-                <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
-              )}
+      {viewingDoc && (() => {
+        const src = viewingDoc.src || '';
+        const isPdf = src.startsWith('data:application/pdf') || src.includes('application/pdf') || src.endsWith('.pdf');
+        const openPdf = () => {
+          try {
+            // Handle base64 data URI
+            if (src.startsWith('data:')) {
+              const base64Data = src.split(',')[1];
+              const byteChars = atob(base64Data);
+              const byteArr = new Uint8Array(byteChars.length);
+              for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+              const blob = new Blob([byteArr], { type: 'application/pdf' });
+              window.open(URL.createObjectURL(blob), '_blank');
+            } else {
+              // It's a regular URL — open directly
+              window.open(src, '_blank');
+            }
+          } catch (e) {
+            const a = document.createElement('a');
+            a.href = src; a.download = `${viewingDoc.name}.pdf`; a.target = '_blank'; a.click();
+          }
+        };
+        return (
+          <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
+            <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
+              <div className="doc-viewer-header">
+                <h3>{viewingDoc.name}</h3>
+                <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
+              </div>
+              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '30px', textAlign: 'center' }}>
+                {!src ? (
+                  <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
+                    <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible o dañado</h4>
+                    <p style={{ fontSize: '14px', color: '#ccc' }}>El archivo no se cargó correctamente. Por favor solicita al conductor que lo vuelva a subir.</p>
+                  </div>
+                ) : isPdf ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+                    <div style={{ fontSize: '4rem' }}>📄</div>
+                    <h3 style={{ margin: 0 }}>{viewingDoc.name}</h3>
+                    <p style={{ color: '#aaa', margin: 0 }}>Documento PDF. Haz clic para abrirlo en una nueva pestaña.</p>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button onClick={openPdf} style={{ padding: '12px 24px', background: '#38BDF8', border: 'none', borderRadius: '8px', color: '#000', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>
+                        🔍 Abrir en nueva pestaña
+                      </button>
+                      <a href={src} download={`${viewingDoc.name}.pdf`} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center' }}>
+                        ⬇ Descargar
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <img src={src} alt={viewingDoc.name} className="doc-image" />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
