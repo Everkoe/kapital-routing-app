@@ -385,6 +385,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
   const [padronModal, setPadronModal] = useState({ isOpen: false, email: null, padron: '' });
+  const [adminDocViewer, setAdminDocViewer] = useState(null); // { name, src }
   
   // CRM Features
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -554,6 +555,12 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     executeReview(email, 'approve', padronModal.padron);
   };
 
+  const openAdminDoc = (label, docObj) => {
+    const src = typeof docObj === 'string' ? docObj : docObj?.url || docObj?.data || null;
+    if (!src) return;
+    setAdminDocViewer({ name: label, src });
+  };
+
   const renderDocRow = (label, docObj) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -561,7 +568,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       </span>
       {docObj && (
         <button 
-          onClick={() => toast.info(`En la versión de producción, esto abrirá el visor del documento.`)}
+          onClick={() => openAdminDoc(label, docObj)}
           style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
         >
           <Eye size={14} color="#38BDF8" /> Ver Archivo
@@ -661,6 +668,54 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
           </div>
         </div>
       )}
+
+      {/* Admin Document Viewer Modal - handles both PDF and images */}
+      {adminDocViewer && (() => {
+        const src = adminDocViewer.src || '';
+        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
+        let pdfBlobUrl = null;
+        if (isPdf && src.startsWith('data:')) {
+          try {
+            const base64Data = src.split(',')[1];
+            const byteChars = atob(base64Data);
+            const byteArr = new Uint8Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+            const blob = new Blob([byteArr], { type: 'application/pdf' });
+            pdfBlobUrl = URL.createObjectURL(blob);
+          } catch (e) { pdfBlobUrl = null; }
+        } else if (isPdf) {
+          pdfBlobUrl = src;
+        }
+        return (
+          <div onClick={() => setAdminDocViewer(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+              <div style={{ padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{adminDocViewer.name}</h3>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {isPdf && pdfBlobUrl && (
+                    <a href={pdfBlobUrl} download={`${adminDocViewer.name}.pdf`} style={{ color: '#38BDF8', fontSize: '0.85rem', textDecoration: 'none', padding: '4px 10px', border: '1px solid #38BDF8', borderRadius: '6px' }}>⬇ Descargar</a>
+                  )}
+                  <button onClick={() => setAdminDocViewer(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '10px', minHeight: '500px' }}>
+                {isPdf ? (
+                  pdfBlobUrl ? (
+                    <iframe src={pdfBlobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title="Visor PDF" />
+                  ) : (
+                    <div style={{ color: '#aaa', textAlign: 'center' }}>
+                      <p>No se pudo previsualizar este PDF.</p>
+                      <a href={src} download="documento.pdf" style={{ color: '#38BDF8' }}>Descargar PDF</a>
+                    </div>
+                  )
+                ) : (
+                  <img src={src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt={adminDocViewer.name} />
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
 
