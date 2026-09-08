@@ -1760,27 +1760,73 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
 
 
 
-      {viewingDoc && (
-        <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
-          <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
-            <div className="doc-viewer-header">
-              <h3>{viewingDoc.name}</h3>
-              <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
-            </div>
-            <div className="doc-viewer-body">
-              {(!viewingDoc.src || viewingDoc.src === '') ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
-                  <p>No se pudo cargar el documento o el archivo está vacío.</p>
+      {viewingDoc && (() => {
+        // Determine if it's a PDF
+        const src = viewingDoc.src || '';
+        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
+        
+        // For PDFs: convert base64 data URI to a Blob URL (works in all browsers incl. Brave/Chrome)
+        let pdfBlobUrl = null;
+        if (isPdf && src.startsWith('data:')) {
+          try {
+            const base64Data = src.split(',')[1];
+            const byteChars = atob(base64Data);
+            const byteArr = new Uint8Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+            const blob = new Blob([byteArr], { type: 'application/pdf' });
+            pdfBlobUrl = URL.createObjectURL(blob);
+          } catch (e) {
+            pdfBlobUrl = null;
+          }
+        } else if (isPdf) {
+          pdfBlobUrl = src; // already a URL
+        }
+
+        return (
+          <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
+            <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
+              <div className="doc-viewer-header">
+                <h3>{viewingDoc.name}</h3>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {isPdf && pdfBlobUrl && (
+                    <a
+                      href={pdfBlobUrl}
+                      download={`${viewingDoc.name}.pdf`}
+                      style={{ color: 'var(--primary)', fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', border: '1px solid var(--primary)', borderRadius: '6px' }}
+                    >
+                      ⬇ Descargar PDF
+                    </a>
+                  )}
+                  <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
                 </div>
-              ) : typeof viewingDoc.src === 'string' && (viewingDoc.src.includes('application/pdf') || viewingDoc.src.endsWith('.pdf') || viewingDoc.src.startsWith('data:application/pdf')) ? (
-                <iframe src={viewingDoc.src} className="doc-iframe" title="Visor de Documento" />
-              ) : (
-                <img src={viewingDoc.src} alt={viewingDoc.name} className="doc-image" />
-              )}
+              </div>
+              <div className="doc-viewer-body">
+                {(!src || src === '') ? (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
+                    <p>No se pudo cargar el documento o el archivo está vacío.</p>
+                  </div>
+                ) : isPdf ? (
+                  pdfBlobUrl ? (
+                    <iframe
+                      src={pdfBlobUrl}
+                      className="doc-iframe"
+                      title="Visor de Documento"
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                    />
+                  ) : (
+                    <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
+                      <p>No se pudo previsualizar este PDF en el navegador.</p>
+                      <a href={src} download="documento.pdf" style={{ color: 'var(--primary)' }}>Haz clic aquí para descargarlo</a>
+                    </div>
+                  )
+                ) : (
+                  <img src={src} alt={viewingDoc.name} className="doc-image" />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

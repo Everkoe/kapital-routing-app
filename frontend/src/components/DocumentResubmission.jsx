@@ -133,19 +133,54 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
 
   return (
     <>
-      {viewingDoc && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
-            <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
-              <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '20px' }}>
-              <img src={viewingDoc.src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt="Documento" />
+      {viewingDoc && (() => {
+        const src = viewingDoc.src || '';
+        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
+        let pdfBlobUrl = null;
+        if (isPdf && src.startsWith('data:')) {
+          try {
+            const base64Data = src.split(',')[1];
+            const byteChars = atob(base64Data);
+            const byteArr = new Uint8Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+            const blob = new Blob([byteArr], { type: 'application/pdf' });
+            pdfBlobUrl = URL.createObjectURL(blob);
+          } catch (e) { pdfBlobUrl = null; }
+        } else if (isPdf) {
+          pdfBlobUrl = src;
+        }
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+              <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {isPdf && pdfBlobUrl && (
+                    <a href={pdfBlobUrl} download={`${viewingDoc.name}.pdf`} style={{ color: 'var(--primary, #3b82f6)', fontSize: '0.85rem', textDecoration: 'none', padding: '4px 10px', border: '1px solid var(--primary, #3b82f6)', borderRadius: '6px' }}>
+                      ⬇ Descargar
+                    </a>
+                  )}
+                  <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '10px', minHeight: '500px' }}>
+                {isPdf ? (
+                  pdfBlobUrl ? (
+                    <iframe src={pdfBlobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title="Visor PDF" />
+                  ) : (
+                    <div style={{ color: '#aaa', textAlign: 'center' }}>
+                      <p>No se pudo previsualizar este PDF.</p>
+                      <a href={src} download="documento.pdf" style={{ color: '#3b82f6' }}>Descargar PDF</a>
+                    </div>
+                  )
+                ) : (
+                  <img src={src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt="Documento" />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       <div>
         
         {isPending && !hasRejectedOrMissing ? (
