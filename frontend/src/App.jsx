@@ -2293,6 +2293,22 @@ function App() {
     } else {
       localStorage.setItem('kapital_user', JSON.stringify(userData));
       setUsuarioActual(userData);
+
+      // Immediately fetch fresh profile so perfil_conductor is loaded before
+      // renderVista evaluates it — prevents the "Documentos Faltantes" flash on login
+      const userKey = userData.identifier || userData.email;
+      if (userKey) {
+        fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data) {
+              const freshUser = { ...userData, ...data };
+              localStorage.setItem('kapital_user', JSON.stringify(freshUser));
+              setUsuarioActual(freshUser);
+            }
+          })
+          .catch(err => console.warn('Error fetching fresh profile on login:', err));
+      }
     }
   };
 
@@ -2364,6 +2380,14 @@ function App() {
   const renderVista = () => {
     if (usuarioActual?.rol === 'Conductor') {
       const p = usuarioActual?.perfil_conductor;
+
+      // Fast-path: if driver is already 'Activo', skip doc checks entirely
+      // This prevents the "Documentos Faltantes" flash right after login
+      const isActive = usuarioActual?.estado === 'Activo';
+      if (isActive) {
+        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+      }
+
       if (!p) {
         return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
       }
