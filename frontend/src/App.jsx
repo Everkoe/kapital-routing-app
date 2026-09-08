@@ -672,44 +672,46 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       {/* Admin Document Viewer Modal - handles both PDF and images */}
       {adminDocViewer && (() => {
         const src = adminDocViewer.src || '';
-        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
-        let pdfBlobUrl = null;
-        if (isPdf && src.startsWith('data:')) {
+        const isPdf = src.startsWith('data:application/pdf') || src.includes('application/pdf') || src.endsWith('.pdf');
+        const openAdminPdf = () => {
           try {
             const base64Data = src.split(',')[1];
             const byteChars = atob(base64Data);
             const byteArr = new Uint8Array(byteChars.length);
             for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
             const blob = new Blob([byteArr], { type: 'application/pdf' });
-            pdfBlobUrl = URL.createObjectURL(blob);
-          } catch (e) { pdfBlobUrl = null; }
-        } else if (isPdf) {
-          pdfBlobUrl = src;
-        }
+            window.open(URL.createObjectURL(blob), '_blank');
+          } catch (e) {
+            const a = document.createElement('a');
+            a.href = src;
+            a.download = `${adminDocViewer.name}.pdf`;
+            a.click();
+          }
+        };
         return (
           <div onClick={() => setAdminDocViewer(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '700px', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{adminDocViewer.name}</h3>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {isPdf && pdfBlobUrl && (
-                    <a href={pdfBlobUrl} download={`${adminDocViewer.name}.pdf`} style={{ color: '#38BDF8', fontSize: '0.85rem', textDecoration: 'none', padding: '4px 10px', border: '1px solid #38BDF8', borderRadius: '6px' }}>⬇ Descargar</a>
-                  )}
-                  <button onClick={() => setAdminDocViewer(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
-                </div>
+                <button onClick={() => setAdminDocViewer(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
               </div>
-              <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '10px', minHeight: '500px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', padding: '50px 40px', textAlign: 'center' }}>
                 {isPdf ? (
-                  pdfBlobUrl ? (
-                    <iframe src={pdfBlobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title="Visor PDF" />
-                  ) : (
-                    <div style={{ color: '#aaa', textAlign: 'center' }}>
-                      <p>No se pudo previsualizar este PDF.</p>
-                      <a href={src} download="documento.pdf" style={{ color: '#38BDF8' }}>Descargar PDF</a>
+                  <>
+                    <div style={{ fontSize: '4rem' }}>📄</div>
+                    <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{adminDocViewer.name}</h3>
+                    <p style={{ color: '#aaa', margin: 0 }}>Documento PDF. Haz clic para abrirlo o descargarlo.</p>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button onClick={openAdminPdf} style={{ padding: '12px 24px', background: '#38BDF8', border: 'none', borderRadius: '8px', color: '#000', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>
+                        🔍 Abrir en nueva pestaña
+                      </button>
+                      <a href={src} download={`${adminDocViewer.name}.pdf`} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem' }}>
+                        ⬇ Descargar
+                      </a>
                     </div>
-                  )
+                  </>
                 ) : (
-                  <img src={src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt={adminDocViewer.name} />
+                  <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt={adminDocViewer.name} />
                 )}
               </div>
             </div>
@@ -1816,64 +1818,60 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
 
 
       {viewingDoc && (() => {
-        // Determine if it's a PDF
         const src = viewingDoc.src || '';
-        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
-        
-        // For PDFs: convert base64 data URI to a Blob URL (works in all browsers incl. Brave/Chrome)
-        let pdfBlobUrl = null;
-        if (isPdf && src.startsWith('data:')) {
+        const isPdf = src.startsWith('data:application/pdf') || src.includes('application/pdf') || src.endsWith('.pdf');
+
+        const openPdf = () => {
           try {
             const base64Data = src.split(',')[1];
             const byteChars = atob(base64Data);
             const byteArr = new Uint8Array(byteChars.length);
             for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
             const blob = new Blob([byteArr], { type: 'application/pdf' });
-            pdfBlobUrl = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
           } catch (e) {
-            pdfBlobUrl = null;
+            // Fallback: direct download
+            const a = document.createElement('a');
+            a.href = src;
+            a.download = `${viewingDoc.name}.pdf`;
+            a.click();
           }
-        } else if (isPdf) {
-          pdfBlobUrl = src; // already a URL
-        }
+        };
 
         return (
           <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
             <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
               <div className="doc-viewer-header">
                 <h3>{viewingDoc.name}</h3>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {isPdf && pdfBlobUrl && (
-                    <a
-                      href={pdfBlobUrl}
-                      download={`${viewingDoc.name}.pdf`}
-                      style={{ color: 'var(--primary)', fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', border: '1px solid var(--primary)', borderRadius: '6px' }}
-                    >
-                      ⬇ Descargar PDF
-                    </a>
-                  )}
-                  <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
-                </div>
+                <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
               </div>
               <div className="doc-viewer-body">
-                {(!src || src === '') ? (
+                {!src ? (
                   <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
-                    <p>No se pudo cargar el documento o el archivo está vacío.</p>
+                    <p>No se pudo cargar el documento.</p>
                   </div>
                 ) : isPdf ? (
-                  pdfBlobUrl ? (
-                    <iframe
-                      src={pdfBlobUrl}
-                      className="doc-iframe"
-                      title="Visor de Documento"
-                      style={{ width: '100%', height: '100%', border: 'none' }}
-                    />
-                  ) : (
-                    <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
-                      <p>No se pudo previsualizar este PDF en el navegador.</p>
-                      <a href={src} download="documento.pdf" style={{ color: 'var(--primary)' }}>Haz clic aquí para descargarlo</a>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', padding: '60px 40px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '5rem' }}>📄</div>
+                    <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
+                    <p style={{ color: 'var(--text-secondary)', margin: 0 }}>Este documento es un PDF. Haz clic para abrirlo.</p>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button
+                        onClick={openPdf}
+                        style={{ padding: '12px 28px', background: 'var(--primary, #3b82f6)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}
+                      >
+                        🔍 Abrir PDF en nueva pestaña
+                      </button>
+                      <a
+                        href={src}
+                        download={`${viewingDoc.name}.pdf`}
+                        style={{ padding: '12px 28px', background: 'transparent', border: '1px solid var(--primary, #3b82f6)', borderRadius: '8px', color: 'var(--primary, #3b82f6)', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
+                      >
+                        ⬇ Descargar PDF
+                      </a>
                     </div>
-                  )
+                  </div>
                 ) : (
                   <img src={src} alt={viewingDoc.name} className="doc-image" />
                 )}

@@ -135,46 +135,44 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
     <>
       {viewingDoc && (() => {
         const src = viewingDoc.src || '';
-        const isPdf = src.includes('application/pdf') || src.endsWith('.pdf') || src.startsWith('data:application/pdf');
-        let pdfBlobUrl = null;
-        if (isPdf && src.startsWith('data:')) {
+        const isPdf = src.startsWith('data:application/pdf') || src.includes('application/pdf') || src.endsWith('.pdf');
+        const openPdf = () => {
           try {
             const base64Data = src.split(',')[1];
             const byteChars = atob(base64Data);
             const byteArr = new Uint8Array(byteChars.length);
             for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
             const blob = new Blob([byteArr], { type: 'application/pdf' });
-            pdfBlobUrl = URL.createObjectURL(blob);
-          } catch (e) { pdfBlobUrl = null; }
-        } else if (isPdf) {
-          pdfBlobUrl = src;
-        }
+            window.open(URL.createObjectURL(blob), '_blank');
+          } catch (e) {
+            const a = document.createElement('a');
+            a.href = src; a.download = `${viewingDoc.name}.pdf`; a.click();
+          }
+        };
         return (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div style={{ width: '100%', maxWidth: '700px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {isPdf && pdfBlobUrl && (
-                    <a href={pdfBlobUrl} download={`${viewingDoc.name}.pdf`} style={{ color: 'var(--primary, #3b82f6)', fontSize: '0.85rem', textDecoration: 'none', padding: '4px 10px', border: '1px solid var(--primary, #3b82f6)', borderRadius: '6px' }}>
-                      ⬇ Descargar
-                    </a>
-                  )}
-                  <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
-                </div>
+                <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
               </div>
-              <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', padding: '10px', minHeight: '500px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', padding: '50px 40px', textAlign: 'center' }}>
                 {isPdf ? (
-                  pdfBlobUrl ? (
-                    <iframe src={pdfBlobUrl} style={{ width: '100%', height: '70vh', border: 'none' }} title="Visor PDF" />
-                  ) : (
-                    <div style={{ color: '#aaa', textAlign: 'center' }}>
-                      <p>No se pudo previsualizar este PDF.</p>
-                      <a href={src} download="documento.pdf" style={{ color: '#3b82f6' }}>Descargar PDF</a>
+                  <>
+                    <div style={{ fontSize: '4rem' }}>📄</div>
+                    <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
+                    <p style={{ color: 'var(--text-muted, #aaa)', margin: 0 }}>Documento PDF. Haz clic para abrirlo.</p>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button onClick={openPdf} style={{ padding: '12px 24px', background: 'var(--primary, #3b82f6)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>
+                        🔍 Abrir en nueva pestaña
+                      </button>
+                      <a href={src} download={`${viewingDoc.name}.pdf`} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid var(--primary, #3b82f6)', borderRadius: '8px', color: 'var(--primary, #3b82f6)', textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem' }}>
+                        ⬇ Descargar
+                      </a>
                     </div>
-                  )
+                  </>
                 ) : (
-                  <img src={src} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} alt="Documento" />
+                  <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt="Documento" />
                 )}
               </div>
             </div>
