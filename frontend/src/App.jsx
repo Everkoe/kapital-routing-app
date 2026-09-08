@@ -2381,27 +2381,31 @@ function App() {
     if (usuarioActual?.rol === 'Conductor') {
       const p = usuarioActual?.perfil_conductor;
 
-      // Fast-path: if driver is already 'Activo', skip doc checks entirely
-      // This prevents the "Documentos Faltantes" flash right after login
+      // Fast-path: if driver is already 'Activo' and on the main dashboard view,
+      // skip doc checks entirely — prevents the "Documentos Faltantes" flash on login.
+      // Only applies to 'dashboard' so other routes (e.g. 'perfil') still work normally.
       const isActive = usuarioActual?.estado === 'Activo';
-      if (isActive) {
+      if (isActive && (vistaActual === 'dashboard' || vistaActual === 'default')) {
         return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
       }
 
-      if (!p) {
+      if (!p && vistaActual === 'dashboard') {
         return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
       }
-      const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
-      const hasMissing = REQUIRED_DOCS.some(k => {
-        const hasDoc = !!p[k];
-        const isPendingOrRejected = p.revision_docs?.[k]?.estado;
-        return !hasDoc && !isPendingOrRejected;
-      });
-      const hasRejected = Object.values(p.revision_docs || {}).some(r => r.estado?.toLowerCase() === 'rechazado');
-      const isPending = usuarioActual?.estado === 'Pendiente Revisión' || usuarioActual?.estado === 'Documentos Observados';
-      
-      if (hasMissing || hasRejected || isPending) {
-        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+
+      if (p) {
+        const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
+        const hasMissing = REQUIRED_DOCS.some(k => {
+          const hasDoc = !!p[k];
+          const isPendingOrRejected = p.revision_docs?.[k]?.estado;
+          return !hasDoc && !isPendingOrRejected;
+        });
+        const hasRejected = Object.values(p.revision_docs || {}).some(r => r.estado?.toLowerCase() === 'rechazado');
+        const isPending = usuarioActual?.estado === 'Pendiente Revisión' || usuarioActual?.estado === 'Documentos Observados';
+        
+        if (hasMissing || hasRejected || isPending) {
+          return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+        }
       }
     }
 
