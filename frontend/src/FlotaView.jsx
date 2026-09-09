@@ -162,7 +162,7 @@ const FlotaView = ({ usuario }) => {
       const res = await fetch('/api/conductor/resubmit-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: driverEmail, docs: { [campo]: fileObj } })
+        body: JSON.stringify({ email: driverEmail, docs: { [campo]: fileObj }, uploaded_by: 'admin' })
       });
       if (!res.ok) throw new Error('Error al subir documento');
       
@@ -1396,7 +1396,7 @@ const FlotaView = ({ usuario }) => {
         }
         .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
         .doc-viewer-body {
-          padding: 0; background: #e2e8f0; display: flex; align-items: center; justify-content: center;
+          padding: 0; background: var(--kapital-bg, #e2e8f0); display: flex; align-items: center; justify-content: center;
           height: 80vh; max-height: 800px;
         }
         .doc-iframe {
@@ -1411,6 +1411,7 @@ const FlotaView = ({ usuario }) => {
       {viewingDoc && (() => {
         const src = viewingDoc.src || '';
         const hasData = src.startsWith('data:') || src.startsWith('http');
+        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
         const downloadDoc = () => {
           if (!hasData) return;
           const a = document.createElement('a');
@@ -1420,19 +1421,26 @@ const FlotaView = ({ usuario }) => {
         };
         return (
           <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
-            <div className="doc-viewer-content" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px' }}>
+            <div className="doc-viewer-content" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto' }}>
               <div className="doc-viewer-header">
                 <h3>{viewingDoc.name}</h3>
                 <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
               </div>
-              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '30px', textAlign: 'center', gap: '16px' }}>
+              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: 'var(--text-primary)', padding: '40px 30px', textAlign: 'center', gap: '16px' }}>
                 {hasData ? (
-                  <>
+                  isPdf ? (
+                    <div style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+                        <FileText size={72} color="#38BDF8" />
+                      </div>
+                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
+                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
+                        <Download size={20} /> Descargar para visualizar
+                      </button>
+                    </div>
+                  ) : (
                     <img src={src} alt={viewingDoc.name} className="doc-image" />
-                    <button onClick={downloadDoc} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
-                      ⬇ Descargar
-                    </button>
-                  </>
+                  )
                 ) : (
                   <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
                     <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible</h4>

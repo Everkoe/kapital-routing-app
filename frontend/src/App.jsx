@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check } from 'lucide-react';
+import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import DocumentVerification from './components/DocumentVerification';
 import DocumentResubmission from './components/DocumentResubmission';
 import { Toaster, toast } from 'react-hot-toast';
@@ -673,6 +673,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       {adminDocViewer && (() => {
         const src = adminDocViewer.src || '';
         const hasData = src.startsWith('data:') || src.startsWith('http');
+        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
         const downloadDoc = () => {
           if (!hasData) return;
           const a = document.createElement('a');
@@ -682,19 +683,26 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
         };
         return (
           <div onClick={() => setAdminDocViewer(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{adminDocViewer.name}</h3>
                 <button onClick={() => setAdminDocViewer(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px 30px' }}>
                 {hasData ? (
-                  <>
+                  isPdf ? (
+                    <div style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+                        <FileText size={72} color="#38BDF8" />
+                      </div>
+                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
+                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
+                        <Download size={20} /> Descargar para visualizar
+                      </button>
+                    </div>
+                  ) : (
                     <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt={adminDocViewer.name} />
-                    <button onClick={downloadDoc} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
-                      ⬇ Descargar
-                    </button>
-                  </>
+                  )
                 ) : (
                   <div style={{ padding: '60px 20px', textAlign: 'center' }}>
                     <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</div>
@@ -1809,6 +1817,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
       {viewingDoc && (() => {
         const src = viewingDoc.src || '';
         const hasData = src.startsWith('data:') || src.startsWith('http');
+        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
         const downloadDoc = () => {
           if (!hasData) return;
           const a = document.createElement('a');
@@ -1818,19 +1827,26 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         };
         return (
           <div onClick={() => setViewingDoc(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{viewingDoc.name}</h3>
                 <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px 30px' }}>
                 {hasData ? (
-                  <>
+                  isPdf ? (
+                    <div style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+                        <FileText size={72} color="#38BDF8" />
+                      </div>
+                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
+                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
+                        <Download size={20} /> Descargar para visualizar
+                      </button>
+                    </div>
+                  ) : (
                     <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt={viewingDoc.name} />
-                    <button onClick={downloadDoc} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
-                      ⬇ Descargar
-                    </button>
-                  </>
+                  )
                 ) : (
                   <div style={{ padding: '60px 20px', textAlign: 'center' }}>
                     <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</div>

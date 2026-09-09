@@ -860,6 +860,7 @@ async def mark_notification_read(payload: MarkReadPayload):
 class ResubmitDocsPayload(BaseModel):
     email: str
     docs: Dict[str, Any]
+    uploaded_by: str = "conductor"
 
 class UpdateDataRequestPayload(BaseModel):
     email: str
@@ -899,24 +900,25 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
     
     await persist_users_only()
 
-    # Notify admins in real-time that conductor re-submitted docs
-    conductor_nombre = user.get("nombre", payload.email)
-    notif_obj = {
-        "id": len(notifications_db) + 1,
-        "tipo": "docs_resubmitted",
-        "type": "info", # To be picked up by App.jsx polling
-        "title": "📥 Documentos resubidos",
-        "message": f"{conductor_nombre} ha subido nuevamente sus documentos para revisión.",
-        "conductor_id": payload.email,
-        "conductor_nombre": conductor_nombre,
-        "para": "admin",
-        "timestamp": __import__('datetime').datetime.now().isoformat()
-    }
-    notifications_db.append(notif_obj)
+    # Notify admins only if the driver uploaded the documents
+    if getattr(payload, 'uploaded_by', 'conductor') != 'admin':
+        conductor_nombre = user.get("nombre", payload.email)
+        notif_obj = {
+            "id": len(notifications_db) + 1,
+            "tipo": "docs_resubmitted",
+            "type": "info", # To be picked up by App.jsx polling
+            "title": "📥 Documentos resubidos",
+            "message": f"{conductor_nombre} ha subido nuevamente sus documentos para revisión.",
+            "conductor_id": payload.email,
+            "conductor_nombre": conductor_nombre,
+            "para": "admin",
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+        notifications_db.append(notif_obj)
 
-    # Broadcast to all connected admins
-    for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
-        await ws_manager.broadcast_to_role(role, notif_obj)
+        # Broadcast to all connected admins
+        for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
+            await ws_manager.broadcast_to_role(role, notif_obj)
 
     return {"message": "Documentos actualizados exitosamente", "estado": user["estado"], "user": user}
 

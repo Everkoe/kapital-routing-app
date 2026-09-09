@@ -1112,7 +1112,7 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
 .doc-viewer-body {
-  padding: 0; background: #e2e8f0; display: flex; align-items: center; justify-content: center;
+  padding: 0; background: var(--kapital-bg, #e2e8f0); display: flex; align-items: center; justify-content: center;
   height: 80vh; max-height: 800px;
 }
 .doc-iframe {

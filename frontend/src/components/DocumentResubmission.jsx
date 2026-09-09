@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock, Download } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import toast from 'react-hot-toast';
 
@@ -136,6 +136,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
       {viewingDoc && (() => {
         const src = viewingDoc.src || '';
         const hasData = src.startsWith('data:') || src.startsWith('http');
+        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
         const downloadDoc = () => {
           if (!hasData) return;
           const a = document.createElement('a');
@@ -145,19 +146,26 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
         };
         return (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div style={{ width: '100%', maxWidth: '900px', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
                 <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px 30px' }}>
                 {hasData ? (
-                  <>
+                  isPdf ? (
+                    <div style={{ padding: '20px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+                        <FileText size={72} color="#38BDF8" />
+                      </div>
+                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
+                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
+                        <Download size={20} /> Descargar para visualizar
+                      </button>
+                    </div>
+                  ) : (
                     <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt="Documento" />
-                    <button onClick={downloadDoc} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid var(--primary, #3b82f6)', borderRadius: '8px', color: 'var(--primary, #3b82f6)', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
-                      ⬇ Descargar
-                    </button>
-                  </>
+                  )
                 ) : (
                   <div style={{ padding: '40px 20px', textAlign: 'center' }}>
                     <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</div>
