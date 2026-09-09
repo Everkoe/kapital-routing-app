@@ -918,7 +918,7 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
     for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
         await ws_manager.broadcast_to_role(role, notif_obj)
 
-    return {"message": "Documentos actualizados exitosamente", "estado": user["estado"]}
+    return {"message": "Documentos actualizados exitosamente", "estado": user["estado"], "user": user}
 
 @app.post("/api/conductor/request-update")
 async def request_data_update(payload: UpdateDataRequestPayload):

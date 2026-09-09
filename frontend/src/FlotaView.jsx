@@ -150,13 +150,19 @@ const FlotaView = ({ usuario }) => {
     if (!file || !conductorInfo || !usuario) return;
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      const pseudoUrl = file.name;
+      const fileObj = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve({ name: file.name, size: file.size, type: file.type, base64: e.target.result });
+        reader.onerror = (err) => reject(new Error('Error al leer el archivo'));
+        reader.readAsDataURL(file);
+      });
+
       const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
       
       const res = await fetch('/api/conductor/resubmit-docs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: driverEmail, docs: { [campo]: pseudoUrl } })
+        body: JSON.stringify({ email: driverEmail, docs: { [campo]: fileObj } })
       });
       if (!res.ok) throw new Error('Error al subir documento');
       
@@ -165,7 +171,7 @@ const FlotaView = ({ usuario }) => {
         updatedConductorInfo.usuario.perfil_conductor = {};
       }
       if (updatedConductorInfo.usuario) {
-        updatedConductorInfo.usuario.perfil_conductor[campo] = pseudoUrl;
+        updatedConductorInfo.usuario.perfil_conductor[campo] = fileObj;
       }
       setConductorInfo(updatedConductorInfo);
       
@@ -1026,7 +1032,7 @@ const FlotaView = ({ usuario }) => {
                   <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
                       📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
@@ -1039,7 +1045,7 @@ const FlotaView = ({ usuario }) => {
                   <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
                       📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
@@ -1052,7 +1058,7 @@ const FlotaView = ({ usuario }) => {
                   <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
                       📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
@@ -1065,7 +1071,7 @@ const FlotaView = ({ usuario }) => {
                   <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*,.pdf" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
                       📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}
@@ -1401,64 +1407,45 @@ const FlotaView = ({ usuario }) => {
         }
       `}</style>
 
-      {/* DOCUMENT VIEWER MODAL */}
+      {/* DOCUMENT VIEWER MODAL - image only */}
       {viewingDoc && (() => {
         const src = viewingDoc.src || '';
-        const isPdf = src.startsWith('data:application/pdf') || src.includes('application/pdf') || src.endsWith('.pdf');
-        const openPdf = () => {
-          try {
-            // Handle base64 data URI
-            if (src.startsWith('data:')) {
-              const base64Data = src.split(',')[1];
-              const byteChars = atob(base64Data);
-              const byteArr = new Uint8Array(byteChars.length);
-              for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
-              const blob = new Blob([byteArr], { type: 'application/pdf' });
-              window.open(URL.createObjectURL(blob), '_blank');
-            } else {
-              // It's a regular URL — open directly
-              window.open(src, '_blank');
-            }
-          } catch (e) {
-            const a = document.createElement('a');
-            a.href = src; a.download = `${viewingDoc.name}.pdf`; a.target = '_blank'; a.click();
-          }
+        const hasData = src.startsWith('data:') || src.startsWith('http');
+        const downloadDoc = () => {
+          if (!hasData) return;
+          const a = document.createElement('a');
+          a.href = src;
+          a.download = viewingDoc.name;
+          a.click();
         };
         return (
           <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
-            <div className="doc-viewer-content" onClick={e => e.stopPropagation()}>
+            <div className="doc-viewer-content" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '900px' }}>
               <div className="doc-viewer-header">
                 <h3>{viewingDoc.name}</h3>
                 <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
               </div>
-              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '30px', textAlign: 'center' }}>
-                {!src ? (
+              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: '#fff', padding: '30px', textAlign: 'center', gap: '16px' }}>
+                {hasData ? (
+                  <>
+                    <img src={src} alt={viewingDoc.name} className="doc-image" />
+                    <button onClick={downloadDoc} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
+                      ⬇ Descargar
+                    </button>
+                  </>
+                ) : (
                   <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
-                    <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible o dañado</h4>
+                    <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible</h4>
                     <p style={{ fontSize: '14px', color: '#ccc' }}>El archivo no se cargó correctamente. Por favor solicita al conductor que lo vuelva a subir.</p>
                   </div>
-                ) : isPdf ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-                    <div style={{ fontSize: '4rem' }}>📄</div>
-                    <h3 style={{ margin: 0 }}>{viewingDoc.name}</h3>
-                    <p style={{ color: '#aaa', margin: 0 }}>Documento PDF. Haz clic para abrirlo en una nueva pestaña.</p>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                      <button onClick={openPdf} style={{ padding: '12px 24px', background: '#38BDF8', border: 'none', borderRadius: '8px', color: '#000', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>
-                        🔍 Abrir en nueva pestaña
-                      </button>
-                      <a href={src} download={`${viewingDoc.name}.pdf`} style={{ padding: '12px 24px', background: 'transparent', border: '1px solid #38BDF8', borderRadius: '8px', color: '#38BDF8', textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem', display: 'flex', alignItems: 'center' }}>
-                        ⬇ Descargar
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <img src={src} alt={viewingDoc.name} className="doc-image" />
                 )}
               </div>
             </div>
           </div>
         );
       })()}
+
+
     </div>
   );
 };

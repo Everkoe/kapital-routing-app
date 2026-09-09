@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
 import { UploadCloud, File, X, CheckCircle } from 'lucide-react';
 
-const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [], 'application/pdf': [] }, maxFiles = 1 }) => {
+const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [] }, maxFiles = 1 }) => {
   const onDrop = useCallback(acceptedFiles => {
     if (acceptedFiles.length > 0) {
       onFileSelect(acceptedFiles[0]);
@@ -42,7 +42,7 @@ const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [], '
             ) : (
               <p>Arrastra tu archivo aquí o <span>haz clic para explorar</span></p>
             )}
-            <span className="upload-hint">PDF o Imagen, máx 5MB</span>
+            <span className="upload-hint">PNG, JPG o WebP, máx 5MB</span>
           </motion.div>
         </div>
       ) : (

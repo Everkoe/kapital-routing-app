@@ -344,7 +344,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   };
 
   const handleResubmissionComplete = (data) => {
-    const updatedUser = { ...usuario, estado: data.estado || 'Pendiente Revisión' };
+    const updatedUser = data.user || { ...usuario, estado: data.estado || 'Pendiente Revisión' };
     localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
     if (setUsuarioActual) {
       setUsuarioActual(updatedUser);
