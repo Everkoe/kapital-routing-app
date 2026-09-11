@@ -16,3 +16,14 @@ venv/
 # Excel and CSV
 *.xlsx
 *.csv
+
+# IDE
+.idea/
+
+# Claude Code
+.claude/
+
+# Debug / scratch scripts
+scratch/
+list_routes.py
+test_docs_flow.py
