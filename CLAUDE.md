@@ -21,9 +21,15 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   tenerlo en cuenta al debuggear "datos que desaparecen".
 - **Gemini AI**: integrado vía REST puro (sin SDK, "para ahorrar espacio en Vercel") como "Kapital Copilot",
   un asistente conversacional para el Programador de rutas (`CopilotChat.jsx` + `SYSTEM_PROMPT` en `api/index.py`).
-- **Conocido pendiente de limpieza**: `SUPABASE_URL`/`SUPABASE_KEY` están hardcodeadas en
-  [frontend/api/index.py:38-39](frontend/api/index.py:38) en vez de leerse de `.env` como indica
-  `.env.example`. Es una publishable key (no secreta), pero conviene migrarlo a `os.environ` en algún momento.
+- **Migración de configuración en curso**: `SUPABASE_URL`/`SUPABASE_KEY` ya priorizan variables de entorno,
+  pero conservan valores fallback temporalmente para no interrumpir Vercel. El fallback se retirará después de
+  verificar las variables del despliegue. `JSON_PE_TOKEN` y `GEMINI_API_KEY` también están documentados en `.env.example`.
+- **Migración de contraseñas preparada, todavía no activada**: el backend lee hashes PBKDF2 y texto plano. Solo
+  escribe/migra hashes cuando `KAPITAL_PASSWORD_HASH_WRITE=true`; mantenerla en `false` durante el primer despliegue
+  compatible para conservar un rollback seguro.
+- **Sesiones en transición**: el login ya emite una cookie opaca `HttpOnly` y persiste únicamente su hash. La
+  obligatoriedad por endpoint todavía no está activada; debe probarse antes de retirar la autorización heredada
+  basada en identificadores enviados por el navegador.
 
 ## 3. Stack Tecnológico
 
@@ -36,7 +42,7 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
 - `framer-motion` — animaciones
 
-**Backend** (`frontend/api/index.py`, FastAPI/Python, ~1984 líneas en un solo archivo)
+**Backend** (`frontend/api/index.py`, FastAPI/Python, ~2137 líneas en un solo archivo)
 - `fastapi`, `uvicorn`, `pandas`, `openpyxl`, `httpx`, `python-dotenv`
 - WebSockets nativos para eventos en tiempo real (`WebSocketManager`, broadcast por rol)
 - Sin SDK de Supabase ni de Gemini — todo por REST directo (decisión deliberada por límites de tamaño en Vercel)

@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import pandas as pd
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Response, UploadFile
 
 from api import index as backend
 
@@ -15,6 +15,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._random_state = random.getstate()
+        self._password_hash_write_enabled = backend.PASSWORD_HASH_WRITE_ENABLED
+        backend.PASSWORD_HASH_WRITE_ENABLED = True
         self._state = {
             "usuarios_db": copy.deepcopy(backend.usuarios_db),
             "conductores_db": copy.deepcopy(backend.conductores_db),
@@ -34,6 +36,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         random.setstate(self._random_state)
+        backend.PASSWORD_HASH_WRITE_ENABLED = self._password_hash_write_enabled
         backend.usuarios_db.clear()
         backend.usuarios_db.update(self._state["usuarios_db"])
         backend.conductores_db.clear()
@@ -61,6 +64,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response["estado"], "Activo")
         self.assertEqual(backend.usuarios_db["admin@example.com"]["rol"], "Administración")
+        stored_password = backend.usuarios_db["admin@example.com"]["password"]
+        self.assertNotEqual(stored_password, "safe-password")
+        self.assertTrue(backend.verify_password("safe-password", stored_password))
 
     async def test_later_registration_remains_pending(self):
         backend.usuarios_db["admin@example.com"] = {
@@ -99,7 +105,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         with patch.object(backend, "reload_db", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
                 await backend.login_user(
-                    backend.UsuarioLogin(identifier="planner@example.com", password="safe-password")
+                    backend.UsuarioLogin(identifier="planner@example.com", password="safe-password"),
+                    Response(),
                 )
 
         self.assertEqual(caught.exception.status_code, 403)
@@ -122,8 +129,10 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()),
         ):
+            http_response = Response()
             response = await backend.login_user(
-                backend.UsuarioLogin(identifier="driver-001", password="safe-password")
+                backend.UsuarioLogin(identifier="driver-001", password="safe-password"),
+                http_response,
             )
 
         expected_fields = {
@@ -132,6 +141,12 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(set(response), expected_fields)
         self.assertTrue(response["profileComplete"])
+        self.assertTrue(backend.usuarios_db["driver-001"]["password"].startswith("pbkdf2_sha256$"))
+        self.assertIn("HttpOnly", http_response.headers["set-cookie"])
+        self.assertNotIn(
+            http_response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1],
+            str(backend.usuarios_db["driver-001"]["_auth_sessions"]),
+        )
 
     async def test_route_assignment_preserves_passengers_and_capacity(self):
         backend.conductores_db["K-001"] = {
@@ -452,6 +467,105 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(summary, backend.routes_summary)
         self.assertNotIn("agentes", summary[0])
+
+    async def test_password_change_accepts_legacy_password_and_stores_hash(self):
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001",
+            "password": "legacy-password",
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+            "needs_password_change": True,
+        }
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            await backend.change_password(backend.ChangePasswordRequest(
+                identifier="driver-001",
+                old_password="legacy-password",
+                new_password="new-safe-password",
+            ))
+
+        stored_password = backend.usuarios_db["driver-001"]["password"]
+        self.assertNotEqual(stored_password, "new-safe-password")
+        self.assertTrue(backend.verify_password("new-safe-password", stored_password))
+        self.assertFalse(backend.usuarios_db["driver-001"]["needs_password_change"])
+        persist.assert_awaited_once()
+
+    async def test_profile_endpoint_rejects_direct_role_change(self):
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001",
+            "password": backend.hash_password("safe-password"),
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.update_profile(backend.UsuarioUpdate(
+                    identifier="driver-001",
+                    rol="Administración",
+                ))
+
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(backend.usuarios_db["driver-001"]["rol"], "Conductor")
+
+    async def test_hash_compatibility_mode_reads_hashes_without_rewriting_plaintext(self):
+        hashed = backend.hash_password("already-hashed-password")
+        self.assertTrue(backend.verify_password("already-hashed-password", hashed))
+
+        backend.PASSWORD_HASH_WRITE_ENABLED = False
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001",
+            "email": None,
+            "dni": "driver-001",
+            "password": "legacy-password",
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            await backend.login_user(
+                backend.UsuarioLogin(identifier="driver-001", password="legacy-password"),
+                Response(),
+            )
+
+        self.assertEqual(backend.usuarios_db["driver-001"]["password"], "legacy-password")
+
+    def test_session_lookup_accepts_valid_token_and_rejects_unknown_token(self):
+        user = {
+            "identifier": "driver-001",
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        backend.usuarios_db["driver-001"] = user
+        raw_token = backend.issue_session(user)
+
+        self.assertIs(backend.get_user_by_session(raw_token), user)
+        self.assertIsNone(backend.get_user_by_session("unknown-token"))
+
+    async def test_current_user_dependency_accepts_session_cookie(self):
+        user = {
+            "identifier": "driver-001",
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        backend.usuarios_db["driver-001"] = user
+        raw_token = backend.issue_session(user)
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            current_user = await backend.get_current_user(raw_token)
+
+        self.assertIs(current_user, user)
 
 
 if __name__ == "__main__":

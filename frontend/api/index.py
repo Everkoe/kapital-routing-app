@@ -1,6 +1,6 @@
 # api/index.py
 import pandas as pd
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -12,9 +12,12 @@ import random
 import os
 import io
 from copy import copy as _copy_style
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote
 import base64
+import hashlib
+import hmac
+import secrets
 from dotenv import load_dotenv
 from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
@@ -35,13 +38,139 @@ Reglas del negocio que debes conocer:
 - La app muestra gráficos de "Carga por Unidad" y "Eficiencia Global".
 Responde siempre de manera concisa, profesional, y directa (sin introducciones robóticas). Usa viñetas si es necesario."""
 
-SUPABASE_URL = "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1"
-SUPABASE_KEY = "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o"
+# Transitional fallback: production keeps working while the same values are
+# configured in Vercel. Phase 1 will remove the fallbacks after deployment
+# configuration has been verified.
+SUPABASE_URL = os.environ.get(
+    "SUPABASE_URL",
+    "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1",
+).rstrip("/")
+SUPABASE_KEY = os.environ.get(
+    "SUPABASE_KEY",
+    "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o",
+)
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json"
 }
+
+PASSWORD_SCHEME = "pbkdf2_sha256"
+PASSWORD_ITERATIONS = 310_000
+PASSWORD_HASH_WRITE_ENABLED = os.environ.get(
+    "KAPITAL_PASSWORD_HASH_WRITE",
+    "false",
+).strip().lower() in {"1", "true", "yes", "on"}
+SESSION_COOKIE_NAME = "kapital_session"
+SESSION_TTL_HOURS = int(os.environ.get("KAPITAL_SESSION_TTL_HOURS", "12"))
+
+
+def hash_password(password: str, *, salt: bytes | None = None) -> str:
+    """Return a salted PBKDF2 hash suitable for storage in the legacy user JSON."""
+    if not isinstance(password, str) or not password:
+        raise ValueError("Password cannot be empty")
+    password_salt = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        password_salt,
+        PASSWORD_ITERATIONS,
+    )
+    return "$".join((
+        PASSWORD_SCHEME,
+        str(PASSWORD_ITERATIONS),
+        base64.urlsafe_b64encode(password_salt).decode("ascii"),
+        base64.urlsafe_b64encode(digest).decode("ascii"),
+    ))
+
+
+def verify_password(password: str, stored_password: str | None) -> bool:
+    """Verify both modern hashes and legacy plaintext during migration."""
+    if not isinstance(password, str) or not isinstance(stored_password, str):
+        return False
+    if not stored_password.startswith(f"{PASSWORD_SCHEME}$"):
+        return hmac.compare_digest(password, stored_password)
+    try:
+        scheme, iterations_text, salt_text, digest_text = stored_password.split("$", 3)
+        if scheme != PASSWORD_SCHEME:
+            return False
+        iterations = int(iterations_text)
+        salt = base64.urlsafe_b64decode(salt_text.encode("ascii"))
+        expected = base64.urlsafe_b64decode(digest_text.encode("ascii"))
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return hmac.compare_digest(actual, expected)
+    except (TypeError, ValueError):
+        return False
+
+
+def password_needs_upgrade(stored_password: str | None) -> bool:
+    if not isinstance(stored_password, str) or not stored_password.startswith(f"{PASSWORD_SCHEME}$"):
+        return True
+    try:
+        return int(stored_password.split("$", 2)[1]) < PASSWORD_ITERATIONS
+    except (TypeError, ValueError, IndexError):
+        return True
+
+
+def password_for_storage(password: str) -> str:
+    """Keep rollback-safe plaintext until hash writing is explicitly enabled."""
+    return hash_password(password) if PASSWORD_HASH_WRITE_ENABLED else password
+
+
+def issue_session(user: Dict[str, Any]) -> str:
+    """Create an opaque session while storing only its SHA-256 digest."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    expires_at = now + (SESSION_TTL_HOURS * 60 * 60)
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    current_sessions = user.get("_auth_sessions", [])
+    valid_sessions = [
+        session for session in current_sessions
+        if isinstance(session, dict) and int(session.get("expires_at", 0)) > now
+    ]
+    valid_sessions = valid_sessions[-4:]
+    valid_sessions.append({
+        "token_hash": token_hash,
+        "created_at": now,
+        "expires_at": expires_at,
+    })
+    user["_auth_sessions"] = valid_sessions
+    return raw_token
+
+
+def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
+    """Resolve a valid opaque session without exposing tokens in app_state."""
+    if not raw_token:
+        return None
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    now = int(datetime.now(timezone.utc).timestamp())
+    for user in usuarios_db.values():
+        if not isinstance(user, dict):
+            continue
+        for session in user.get("_auth_sessions", []):
+            if not isinstance(session, dict) or int(session.get("expires_at", 0)) <= now:
+                continue
+            if hmac.compare_digest(session.get("token_hash", ""), token_hash):
+                return user
+    return None
+
+
+async def get_current_user(
+    session_token: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> Dict[str, Any]:
+    """FastAPI dependency prepared for the authorization rollout."""
+    await reload_db()
+    user = get_user_by_session(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if user.get("estado", "Activo") != "Activo":
+        raise HTTPException(status_code=403, detail="La cuenta no está activa.")
+    return user
 
 # --- Estado Global en Memoria ---
 rutas_estado_actual: List[Dict[str, Any]] = []
@@ -467,7 +596,7 @@ async def register_user(usuario: UsuarioRegistro):
         "identifier": identifier_clean,
         "email": identifier_clean if usuario.rol != 'Conductor' else None,
         "dni": identifier_clean if usuario.rol == 'Conductor' else None,
-        "password": usuario.password,
+        "password": password_for_storage(usuario.password),
         "nombre": usuario.nombre.strip() if usuario.nombre else ("Conductor Pendiente" if rol_solicitado == "Conductor" else "Usuario"),
         "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
         "telefono": usuario.telefono,
@@ -514,12 +643,18 @@ def get_user_by_identifier(identifier: str):
     return None
 
 @app.post("/api/auth/login")
-async def login_user(usuario: UsuarioLogin):
+async def login_user(usuario: UsuarioLogin, response: Response):
     await reload_db()
     user_in_db = get_user_by_identifier(usuario.identifier)
                 
-    if not user_in_db or user_in_db.get("password") != usuario.password:
+    stored_password = user_in_db.get("password") if user_in_db else None
+    if not user_in_db or not verify_password(usuario.password, stored_password):
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
+
+    # Transparent migration: a successful login upgrades legacy plaintext (or
+    # an older PBKDF2 cost) without forcing a password reset or changing UX.
+    if PASSWORD_HASH_WRITE_ENABLED and password_needs_upgrade(stored_password):
+        user_in_db["password"] = hash_password(usuario.password)
     
     # Verificar si está pendiente de aprobación
     if user_in_db.get("estado", "Activo") == "Pendiente":
@@ -527,7 +662,18 @@ async def login_user(usuario: UsuarioLogin):
 
     # Registrar última conexión
     user_in_db["last_login"] = datetime.now().isoformat()
+    session_token = issue_session(user_in_db)
     await persist_users_only()
+
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_token,
+        max_age=SESSION_TTL_HOURS * 60 * 60,
+        httponly=True,
+        secure=bool(os.environ.get("VERCEL")),
+        samesite="lax",
+        path="/",
+    )
 
     
     return {
@@ -552,13 +698,13 @@ async def change_password(req: ChangePasswordRequest):
     if not user_in_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
-    if user_in_db.get("password") != req.old_password:
+    if not verify_password(req.old_password, user_in_db.get("password")):
         raise HTTPException(status_code=401, detail="La contraseña actual es incorrecta.")
         
     if len(req.new_password) < 4:
         raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
         
-    user_in_db["password"] = req.new_password
+    user_in_db["password"] = password_for_storage(req.new_password)
     user_in_db["needs_password_change"] = False
     
     await persist_users_only()
@@ -588,12 +734,20 @@ async def update_profile(update_data: UsuarioUpdate):
     user = get_user_by_identifier(update_data.identifier)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    # Roles are managed only through administrative workflows. Keeping the
+    # field in the request model gives old clients an explicit error instead of
+    # silently accepting a privilege escalation attempt.
+    if update_data.rol is not None:
+        raise HTTPException(status_code=400, detail="El rol no puede modificarse desde el perfil.")
     
     # Validar password actual si se intenta cambiar la password
     if update_data.new_password:
-        if user["password"] != update_data.current_password:
+        if len(update_data.new_password) < 4:
+            raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
+        if not verify_password(update_data.current_password or "", user.get("password")):
             raise HTTPException(status_code=401, detail="Contraseña actual incorrecta.")
-        user["password"] = update_data.new_password
+        user["password"] = password_for_storage(update_data.new_password)
 
     if update_data.nombre: user["nombre"] = update_data.nombre
     if update_data.avatar: user["avatar"] = update_data.avatar
@@ -602,7 +756,6 @@ async def update_profile(update_data: UsuarioUpdate):
             user["perfil_conductor"] = {}
         user["perfil_conductor"]["fotoVehiculo"] = update_data.fotoVehiculo
     if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
-    if update_data.rol: user["rol"] = update_data.rol
 
     await persist_users_only()
     return {
