@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Keep lint focused on application code. The local Python environment may
+  // contain vendored JavaScript (for example scikit-learn HTML assets).
+  globalIgnores(['dist', 'venv', 'node_modules']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

@@ -22,7 +22,7 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **Gemini AI**: integrado vía REST puro (sin SDK, "para ahorrar espacio en Vercel") como "Kapital Copilot",
   un asistente conversacional para el Programador de rutas (`CopilotChat.jsx` + `SYSTEM_PROMPT` en `api/index.py`).
 - **Conocido pendiente de limpieza**: `SUPABASE_URL`/`SUPABASE_KEY` están hardcodeadas en
-  [frontend/api/index.py:33-34](frontend/api/index.py:33) en vez de leerse de `.env` como indica
+  [frontend/api/index.py:38-39](frontend/api/index.py:38) en vez de leerse de `.env` como indica
   `.env.example`. Es una publishable key (no secreta), pero conviene migrarlo a `os.environ` en algún momento.
 
 ## 3. Stack Tecnológico
@@ -36,14 +36,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
 - `framer-motion` — animaciones
 
-**Backend** (`frontend/api/index.py`, FastAPI/Python, ~1740 líneas en un solo archivo)
+**Backend** (`frontend/api/index.py`, FastAPI/Python, ~1984 líneas en un solo archivo)
 - `fastapi`, `uvicorn`, `pandas`, `openpyxl`, `httpx`, `python-dotenv`
 - WebSockets nativos para eventos en tiempo real (`WebSocketManager`, broadcast por rol)
 - Sin SDK de Supabase ni de Gemini — todo por REST directo (decisión deliberada por límites de tamaño en Vercel)
 
 ## 4. Arquitectura por Roles
 
-`App.jsx` (136KB, componente raíz) enruta según rol a un portal distinto:
+`App.jsx` (~53KB / ~1130 líneas, componente raíz) enruta según rol a un portal distinto:
 
 | Rol | Componente | Archivo |
 |---|---|---|

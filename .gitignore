@@ -29,3 +29,7 @@ venv/
 scratch/
 list_routes.py
 test_docs_flow.py
+
+# Local safety artifacts (may contain production PII)
+/backups/
+/artifacts/

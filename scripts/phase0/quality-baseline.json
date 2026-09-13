@@ -1,0 +1,7 @@
+{
+  "eslint_errors": 118,
+  "eslint_warnings": 5,
+  "hardcoded_hex_in_jsx": 342,
+  "named_white_black_in_jsx": 27,
+  "emoji_codepoints_in_jsx": 50
+}
