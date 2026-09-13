@@ -1030,7 +1030,7 @@ function App() {
     }
 
     switch (vistaActual) {
-      case 'flota': return <FlotaView usuario={usuarioActual} />;
+      case 'flota': return <FlotaView usuario={usuarioActual} initialBase={vistaParams?.base} />;
       case 'reportes': return <VistaReportes />;
       case 'configuracion': return <VistaConfiguracion />;
       case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} initialTab={vistaParams?.tab || 'Todos'} />;

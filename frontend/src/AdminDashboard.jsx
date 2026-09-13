@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List } from 'lucide-react';
+import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
 
@@ -119,6 +119,21 @@ export default function AdminDashboard({ onNavigate, usuario }) {
     { label: 'Sin documento',          count: docCounts.sin_documento, color: '#9ca3af' },
   ];
 
+  // Distribución de flota por base (Masivo / Remisse / Motorizado)
+  const baseCounts = flota.reduce((acc, v) => {
+    const b = (v.base || '').toUpperCase();
+    if (b.includes('REMISSE')) acc.remisse++;
+    else if (b.includes('SHARF') || b.includes('MOTORIZADO')) acc.motorizado++;
+    else if (b.includes('MASIVO')) acc.masivo++;
+    else acc.otras++;
+    return acc;
+  }, { masivo: 0, remisse: 0, motorizado: 0, otras: 0 });
+  const baseStats = [
+    { key: 'MASIVO',     label: 'Masivo',     count: baseCounts.masivo,     Icon: CarFront, color: '#38bdf8' },
+    { key: 'REMISSE',    label: 'Remisse',    count: baseCounts.remisse,    Icon: Layers,   color: '#10b981' },
+    { key: 'MOTORIZADO', label: 'Motorizado', count: baseCounts.motorizado, Icon: Bike,     color: '#f59e0b' },
+  ];
+
   const recentActivity = [];
   recentActivity.push({ Icon: UserCircle, title: 'Usuario inició sesión', subtitle: usuario?.email || 'admin', time: fmtTime(loadTime) });
   flota.slice(-2).reverse().forEach((v, i) => {
@@ -234,6 +249,61 @@ export default function AdminDashboard({ onNavigate, usuario }) {
           </div>
         </div>
 
+      </div>
+
+      {/* DISTRIBUCIÓN POR BASE */}
+      <div style={card}>
+        <div style={sectionHeader}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Layers size={18} color="var(--text-secondary)" />
+            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Distribución de flota por base</h3>
+          </div>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Total: {totalFlota} unidades</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+          {baseStats.map(({ key, label, count, Icon, color }) => {
+            const pct = totalFlota > 0 ? Math.round((count / totalFlota) * 100) : 0;
+            return (
+              <div
+                key={key}
+                onClick={() => onNavigate('flota', { base: key })}
+                onMouseEnter={e => e.currentTarget.style.borderColor = color}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-color, #334155)'}
+                style={{
+                  background: 'var(--bg-primary, rgba(0,0,0,0.15))',
+                  border: '1px solid var(--border-color, #334155)',
+                  borderRadius: '10px',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.2s',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+                  <div style={{ padding: '7px', background: `${color}1a`, color, borderRadius: '9px', display: 'flex' }}>
+                    <Icon size={18} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  <span style={{ fontSize: '1.9rem', fontWeight: 700, lineHeight: 1 }}>{count}</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>unidades</span>
+                </div>
+                <div style={{ height: '5px', background: 'var(--border-color, rgba(255,255,255,0.08))', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.6s ease' }} />
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{pct}% del total</span>
+              </div>
+            );
+          })}
+        </div>
+        {baseCounts.otras > 0 && (
+          <div style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+            + {baseCounts.otras} unidad{baseCounts.otras === 1 ? '' : 'es'} en otras bases o sin base asignada.
+          </div>
+        )}
       </div>
 
       {/* MIDDLE ROW */}

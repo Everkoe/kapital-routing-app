@@ -7,13 +7,23 @@ import DocumentVerification from './components/DocumentVerification';
 import './App.css';
 
 
-const FlotaView = ({ usuario }) => {
+// Traduce el shortcut recibido desde el dashboard al valor exacto usado en BASE_OPTIONS.
+const _resolveInitialBase = (raw) => {
+  if (!raw) return 'Todas';
+  const upper = String(raw).toUpperCase();
+  if (upper === 'MOTORIZADO' || upper.includes('SHARF')) return 'SHARF MOTORIZADO';
+  if (upper === 'REMISSE') return 'REMISSE';
+  if (upper === 'MASIVO') return 'MASIVO';
+  return 'Todas';
+};
+
+const FlotaView = ({ usuario, initialBase }) => {
   const isCliente = usuario?.rol === 'Cliente';
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [baseFilter, setBaseFilter] = useState('Todas');
+  const [baseFilter, setBaseFilter] = useState(() => _resolveInitialBase(initialBase));
   const [baseDropdownOpen, setBaseDropdownOpen] = useState(false);
   const baseDropdownRef = useRef(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
