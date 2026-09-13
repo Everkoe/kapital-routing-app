@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
 
@@ -16,6 +17,8 @@ const FlotaView = ({ usuario }) => {
   const [baseFilter, setBaseFilter] = useState('Todas');
   const [baseDropdownOpen, setBaseDropdownOpen] = useState(false);
   const baseDropdownRef = useRef(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef(null);
 
   const BASE_OPTIONS = [
     { key: 'Todas', label: 'Todas las Bases' },
@@ -24,10 +27,19 @@ const FlotaView = ({ usuario }) => {
     { key: 'SHARF MOTORIZADO', label: 'Sharf Motorizado' }
   ];
 
+  const EXPORT_OPTIONS = [
+    { key: 'MASIVO', label: 'BASE MASIVO 2026', filename: 'BASE MASIVO 2026.xlsx' },
+    { key: 'REMISSE', label: 'BASE REMISSE 2026', filename: 'BASE REMISSE 2026.xlsx' },
+    { key: 'TODAS', label: 'Todas las bases (una hoja)', filename: 'BASE FLOTA 2026.xlsx' },
+  ];
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (baseDropdownRef.current && !baseDropdownRef.current.contains(event.target)) {
         setBaseDropdownOpen(false);
+      }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setExportMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -390,20 +402,72 @@ const FlotaView = ({ usuario }) => {
     reader.readAsDataURL(file);
   };
 
-  const handleExport = () => {
-    const headers = ['UNIDAD (PLACA)', 'CONDUCTOR', 'TIPO / CAP.', 'SOAT', 'REV. TECNICA', 'T.U.C (ATU)', 'LICENCIA MTC'];
-    const rows = flota.map(v => [
-      v.placa, v.chofer, `${v.tipo} (${v.capacidad} pax)`,
-      v.soat, v.revision, v.atu, v.licencia
-    ]);
-    const csvContent = "data:text/csv;charset=utf-8," + 
-      [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "Matriz_Legal_Flota.csv");
-    document.body.appendChild(link);
-    link.click();
+  // Exporta un .xlsx con el layout oficial de "BASE MASIVO 2026" / "BASE REMISSE 2026".
+  // baseKey: 'MASIVO' | 'REMISSE' | 'TODAS'. TODAS incluye toda la flota en una hoja
+  // manteniendo la columna BASE para diferenciar.
+  const EXPORT_HEADERS = [
+    'BASE', 'NOMBRES Y APELLIDOS', 'DIRECCION', 'DNI', 'FECHA DE NACIMIENTO',
+    'CELULAR', 'PADRÓN', 'PLACA', 'TIPO DE VEHÍCULO', 'CAPACIDAD',
+    'MARCA', 'MODELO', 'AÑO', 'COLOR', 'GRUPO'
+  ];
+  // Anchos aproximados (en caracteres) tomados del template original.
+  const EXPORT_COL_WIDTHS = [10, 34, 44, 12, 18, 12, 10, 12, 16, 10, 14, 22, 8, 22, 14];
+
+  const grupoPorBase = (base) => {
+    const b = (base || '').toUpperCase();
+    if (b.includes('REMISSE')) return 'REMISSE';
+    if (b.includes('MASIVO')) return 'TP';
+    if (b.includes('SHARF')) return 'SHARF';
+    return '';
+  };
+
+  const buildExportRow = (v) => {
+    const baseUpper = (v.base || '').toUpperCase();
+    return [
+      baseUpper,
+      v.chofer || '',
+      v.direccion || '',
+      v.dni || '',
+      v.fecha_nacimiento || '',
+      v.celular || v.telefono || '',
+      v.unidad_id || v.padron || '',
+      v.real_placa || v.placa || '',
+      (v.tipo || '').toUpperCase(),
+      v.capacidad ?? '',
+      (v.marca || '').toUpperCase(),
+      (v.modelo || '').toUpperCase(),
+      v.ano || '',
+      (v.color || '').toUpperCase(),
+      grupoPorBase(v.base),
+    ];
+  };
+
+  const handleExportBase = (baseKey) => {
+    setExportMenuOpen(false);
+
+    const rows = flota.filter(v => {
+      if (baseKey === 'TODAS') return true;
+      const b = (v.base || '').toUpperCase();
+      return b.includes(baseKey);
+    });
+
+    if (rows.length === 0) {
+      toast.error(`No hay unidades registradas para la base ${baseKey}.`);
+      return;
+    }
+
+    const dataMatrix = [EXPORT_HEADERS, ...rows.map(buildExportRow)];
+    const ws = XLSX.utils.aoa_to_sheet(dataMatrix);
+    ws['!cols'] = EXPORT_COL_WIDTHS.map(w => ({ wch: w }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
+
+    const option = EXPORT_OPTIONS.find(o => o.key === baseKey);
+    const filename = option?.filename || 'BASE FLOTA.xlsx';
+    XLSX.writeFile(wb, filename);
+
+    toast.success(`Exportado ${rows.length} unidad${rows.length === 1 ? '' : 'es'} a ${filename}`);
   };
 
   const handleSubmit = async (e) => {
@@ -468,7 +532,66 @@ const FlotaView = ({ usuario }) => {
           {/* Right Column */}
           <div className="flota-header-right" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'stretch', flex: '0 0 auto' }}>
             <div className="flota-header-buttons" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <button className="btn-secondary" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}><Download size={14} /> Exportar Excel</button>
+              <div ref={exportMenuRef} style={{ position: 'relative' }}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setExportMenuOpen(o => !o)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '0.85rem' }}
+                >
+                  <Download size={14} /> Exportar Excel
+                  <ChevronDown size={14} style={{ opacity: 0.7, transition: 'transform 0.2s', transform: exportMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                </button>
+                {exportMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      right: 0,
+                      background: 'var(--bg-secondary, #1e293b)',
+                      border: '1px solid var(--border-color, #334155)',
+                      borderRadius: '10px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)',
+                      minWidth: '240px',
+                      overflow: 'hidden',
+                      zIndex: 30,
+                    }}
+                  >
+                    <div style={{
+                      padding: '10px 14px',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-secondary)',
+                      borderBottom: '1px solid var(--border-color)',
+                    }}>
+                      Elegir base a exportar
+                    </div>
+                    {EXPORT_OPTIONS.map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => handleExportBase(opt.key)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          padding: '10px 14px',
+                          fontSize: '0.875rem',
+                          textAlign: 'left',
+                          background: 'transparent',
+                          color: 'var(--text-primary)',
+                          border: 'none',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg, rgba(255,255,255,0.04))'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
               {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
             </div>

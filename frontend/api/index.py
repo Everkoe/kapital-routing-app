@@ -1012,35 +1012,55 @@ async def resolve_data_update(payload: ResolveDataRequestPayload):
 @app.get("/api/flota")
 async def get_flota_status():
     await reload_db()
-    # Convertimos el diccionario a una lista de objetos para el frontend
+    # Índice inverso: unidad_id (padrón K-027) -> usuario con perfil_conductor.
+    # Permite enriquecer cada unidad con datos personales (direccion, DNI, fecha
+    # de nacimiento, celular) necesarios para la exportación al formato oficial
+    # BASE MASIVO / BASE REMISSE.
+    perfil_por_unidad: Dict[str, Dict[str, Any]] = {}
+    for _email, u in usuarios_db.items():
+        if not isinstance(u, dict):
+            continue
+        uid = u.get("unidad_id")
+        if uid and isinstance(u.get("perfil_conductor"), dict):
+            perfil_por_unidad[uid] = u
+
     flota_list = []
     for unidad_id, data in conductores_db.items():
-        # Check if the associated user has pending requests
         has_pending_requests = False
         real_placa = data.get("placa")
-        
-        conductor_email = data.get("conductor")
-        if conductor_email:
-            user = usuarios_db.get(conductor_email)
-            if user and "perfil_conductor" in user:
-                perfil = user["perfil_conductor"]
-                
-                # Get the real license plate if it exists
-                if perfil.get("placa"):
-                    real_placa = perfil.get("placa")
-                
-                solicitudes = perfil.get("solicitudes_cambio", {})
-                for k, v in solicitudes.items():
-                    if v.get("status") == "pendiente":
-                        has_pending_requests = True
-                        break
-        
+
+        user = perfil_por_unidad.get(unidad_id)
+        perfil = user.get("perfil_conductor", {}) if user else {}
+
+        if perfil:
+            if perfil.get("placa"):
+                real_placa = perfil.get("placa")
+            solicitudes = perfil.get("solicitudes_cambio", {}) or {}
+            for _k, v in solicitudes.items():
+                if isinstance(v, dict) and v.get("status") == "pendiente":
+                    has_pending_requests = True
+                    break
+
+        direccion = perfil.get("direccion", "") or ""
+        dni = perfil.get("numDoc", "") or ""
+        fecha_nacimiento = perfil.get("fechaNacimiento", "") or ""
+        celular = (
+            perfil.get("telefonoDirecto")
+            or (user.get("celular") if user else None)
+            or data.get("telefono", "")
+            or ""
+        )
+
         flota_list.append({
             "placa": unidad_id,
             "unidad_id": unidad_id,
             "real_placa": real_placa or unidad_id,
-            "has_pending_requests": has_pending_requests, 
-            **data
+            "has_pending_requests": has_pending_requests,
+            "direccion": direccion,
+            "dni": dni,
+            "fecha_nacimiento": fecha_nacimiento,
+            "celular": celular,
+            **data,
         })
     return {"flota": flota_list}
 
