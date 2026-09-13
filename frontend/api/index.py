@@ -10,9 +10,14 @@ import httpx
 import json
 import random
 import os
+import io
+from copy import copy as _copy_style
 from datetime import datetime
+from urllib.parse import quote
 import base64
 from dotenv import load_dotenv
+from fastapi.responses import StreamingResponse
+from openpyxl import load_workbook
 
 load_dotenv()
 
@@ -1063,6 +1068,153 @@ async def get_flota_status():
             **data,
         })
     return {"flota": flota_list}
+
+
+# --- Exportación oficial de flota (usa plantillas xlsx originales para
+# preservar cabecera, colores por GRUPO, ancho de columna y estilos) ---
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+_TEMPLATE_FILES = {
+    "MASIVO": "base_masivo.xlsx",
+    "REMISSE": "base_remisse.xlsx",
+}
+_grupo_por_padron_cache: Optional[Dict[str, str]] = None
+
+
+def _leer_grupo_por_padron() -> Dict[str, str]:
+    """Extrae el mapa padrón -> GRUPO desde AMBAS plantillas (source of truth)."""
+    result: Dict[str, str] = {}
+    for fname in _TEMPLATE_FILES.values():
+        path = os.path.join(TEMPLATES_DIR, fname)
+        if not os.path.exists(path):
+            continue
+        wb = load_workbook(path, data_only=True)
+        ws = wb.active
+        for r in range(2, ws.max_row + 1):
+            padron = ws.cell(r, 7).value
+            grupo = ws.cell(r, 15).value
+            if padron:
+                result[str(padron).strip()] = (str(grupo).strip() if grupo else "")
+    return result
+
+
+def _get_grupo_por_padron() -> Dict[str, str]:
+    global _grupo_por_padron_cache
+    if _grupo_por_padron_cache is None:
+        _grupo_por_padron_cache = _leer_grupo_por_padron()
+    return _grupo_por_padron_cache
+
+
+@app.get("/api/flota/export")
+async def export_flota(base: str = "MASIVO"):
+    """Genera un .xlsx idéntico al template BASE MASIVO 2026 / BASE REMISSE 2026,
+    rellenando cada fila con los datos actuales de Supabase. Preserva encabezados,
+    colores del GRUPO (TP/KONECTA/TP-KONECTA/REMISSE) y anchos de columna.
+
+    base = MASIVO | REMISSE | TODAS
+    """
+    base_key = (base or "MASIVO").upper().strip()
+    if base_key not in ("MASIVO", "REMISSE", "TODAS"):
+        raise HTTPException(status_code=400, detail="base debe ser MASIVO, REMISSE o TODAS")
+
+    await reload_db()
+
+    # Índice usuario por unidad (mismo criterio que /api/flota)
+    perfil_por_unidad: Dict[str, Dict[str, Any]] = {}
+    for _email, u in usuarios_db.items():
+        if isinstance(u, dict) and u.get("unidad_id") and isinstance(u.get("perfil_conductor"), dict):
+            perfil_por_unidad[u["unidad_id"]] = u
+
+    def _incluye(unidad_base: str) -> bool:
+        b = (unidad_base or "").upper()
+        if base_key == "TODAS":
+            return True
+        return base_key in b
+
+    unidades = sorted(
+        [(uid, d) for uid, d in conductores_db.items() if _incluye(d.get("base", ""))],
+        key=lambda x: x[0],
+    )
+
+    template_file = _TEMPLATE_FILES["REMISSE"] if base_key == "REMISSE" else _TEMPLATE_FILES["MASIVO"]
+    template_path = os.path.join(TEMPLATES_DIR, template_file)
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=500, detail=f"Template no encontrado: {template_file}")
+
+    wb = load_workbook(template_path)
+    ws = wb.active
+
+    # Captura estilos de la fila 2 (para nuevas unidades) y estilo por valor de GRUPO
+    base_row_styles = {c: _copy_style(ws.cell(2, c)._style) for c in range(1, 16)}
+    grupo_style_by_value: Dict[str, Any] = {}
+    for r in range(2, ws.max_row + 1):
+        g = ws.cell(r, 15).value
+        if g:
+            key = str(g).strip()
+            if key not in grupo_style_by_value:
+                grupo_style_by_value[key] = _copy_style(ws.cell(r, 15)._style)
+
+    # Limpia todas las filas de datos, conserva header
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+
+    grupo_map = _get_grupo_por_padron()
+
+    for i, (uid, data) in enumerate(unidades, start=2):
+        user = perfil_por_unidad.get(uid)
+        perfil = user.get("perfil_conductor", {}) if user else {}
+
+        base_val = (data.get("base") or "").upper()
+        celular = (
+            perfil.get("telefonoDirecto")
+            or (user.get("celular") if user else None)
+            or data.get("telefono")
+            or ""
+        )
+        grupo = grupo_map.get(uid, "")
+
+        values = [
+            base_val,
+            data.get("chofer") or "",
+            perfil.get("direccion") or "",
+            perfil.get("numDoc") or "",
+            perfil.get("fechaNacimiento") or "",
+            celular,
+            uid,
+            data.get("placa") or "",
+            (data.get("tipo") or "").upper(),
+            data.get("capacidad") or "",
+            (data.get("marca") or "").upper(),
+            (data.get("modelo") or "").upper(),
+            data.get("ano") or "",
+            (data.get("color") or "").upper(),
+            grupo,
+        ]
+
+        for c, val in enumerate(values, start=1):
+            cell = ws.cell(i, c, value=val)
+            cell._style = _copy_style(base_row_styles[c])
+            if c == 15 and grupo and grupo in grupo_style_by_value:
+                cell._style = _copy_style(grupo_style_by_value[grupo])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename_map = {
+        "MASIVO": "BASE MASIVO 2026.xlsx",
+        "REMISSE": "BASE REMISSE 2026.xlsx",
+        "TODAS": "BASE FLOTA 2026.xlsx",
+    }
+    filename = filename_map[base_key]
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+    }
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 def get_micro_zona(direccion: str) -> str:
     direccion = direccion.lower()

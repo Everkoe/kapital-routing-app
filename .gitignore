@@ -16,6 +16,8 @@ venv/
 # Excel and CSV
 *.xlsx
 *.csv
+# Plantillas oficiales del backend (necesarias en el deploy de Vercel)
+!frontend/api/templates/*.xlsx
 
 # IDE
 .idea/

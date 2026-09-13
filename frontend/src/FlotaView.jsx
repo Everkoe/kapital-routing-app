@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import * as XLSX from 'xlsx';
 import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
@@ -402,72 +401,33 @@ const FlotaView = ({ usuario }) => {
     reader.readAsDataURL(file);
   };
 
-  // Exporta un .xlsx con el layout oficial de "BASE MASIVO 2026" / "BASE REMISSE 2026".
-  // baseKey: 'MASIVO' | 'REMISSE' | 'TODAS'. TODAS incluye toda la flota en una hoja
-  // manteniendo la columna BASE para diferenciar.
-  const EXPORT_HEADERS = [
-    'BASE', 'NOMBRES Y APELLIDOS', 'DIRECCION', 'DNI', 'FECHA DE NACIMIENTO',
-    'CELULAR', 'PADRÓN', 'PLACA', 'TIPO DE VEHÍCULO', 'CAPACIDAD',
-    'MARCA', 'MODELO', 'AÑO', 'COLOR', 'GRUPO'
-  ];
-  // Anchos aproximados (en caracteres) tomados del template original.
-  const EXPORT_COL_WIDTHS = [10, 34, 44, 12, 18, 12, 10, 12, 16, 10, 14, 22, 8, 22, 14];
-
-  const grupoPorBase = (base) => {
-    const b = (base || '').toUpperCase();
-    if (b.includes('REMISSE')) return 'REMISSE';
-    if (b.includes('MASIVO')) return 'TP';
-    if (b.includes('SHARF')) return 'SHARF';
-    return '';
-  };
-
-  const buildExportRow = (v) => {
-    const baseUpper = (v.base || '').toUpperCase();
-    return [
-      baseUpper,
-      v.chofer || '',
-      v.direccion || '',
-      v.dni || '',
-      v.fecha_nacimiento || '',
-      v.celular || v.telefono || '',
-      v.unidad_id || v.padron || '',
-      v.real_placa || v.placa || '',
-      (v.tipo || '').toUpperCase(),
-      v.capacidad ?? '',
-      (v.marca || '').toUpperCase(),
-      (v.modelo || '').toUpperCase(),
-      v.ano || '',
-      (v.color || '').toUpperCase(),
-      grupoPorBase(v.base),
-    ];
-  };
-
-  const handleExportBase = (baseKey) => {
+  // Delega la generación al backend, que rellena la plantilla oficial
+  // (BASE MASIVO 2026 / BASE REMISSE 2026) con datos frescos de Supabase.
+  // Así preservamos los colores por GRUPO, cabecera coloreada y anchos de columna.
+  const handleExportBase = async (baseKey) => {
     setExportMenuOpen(false);
-
-    const rows = flota.filter(v => {
-      if (baseKey === 'TODAS') return true;
-      const b = (v.base || '').toUpperCase();
-      return b.includes(baseKey);
-    });
-
-    if (rows.length === 0) {
-      toast.error(`No hay unidades registradas para la base ${baseKey}.`);
-      return;
-    }
-
-    const dataMatrix = [EXPORT_HEADERS, ...rows.map(buildExportRow)];
-    const ws = XLSX.utils.aoa_to_sheet(dataMatrix);
-    ws['!cols'] = EXPORT_COL_WIDTHS.map(w => ({ wch: w }));
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
-
     const option = EXPORT_OPTIONS.find(o => o.key === baseKey);
-    const filename = option?.filename || 'BASE FLOTA.xlsx';
-    XLSX.writeFile(wb, filename);
-
-    toast.success(`Exportado ${rows.length} unidad${rows.length === 1 ? '' : 'es'} a ${filename}`);
+    const filename = option?.filename || 'BASE FLOTA 2026.xlsx';
+    const toastId = toast.loading(`Generando ${filename}...`);
+    try {
+      const res = await fetch(`/api/flota/export?base=${encodeURIComponent(baseKey)}`);
+      if (!res.ok) {
+        const detail = await res.text().catch(() => res.statusText);
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Descargado: ${filename}`, { id: toastId });
+    } catch (err) {
+      toast.error(`No se pudo exportar: ${err.message || err}`, { id: toastId });
+    }
   };
 
   const handleSubmit = async (e) => {
