@@ -17,14 +17,18 @@ El rol Programador de rutas y su motor no cambian durante esta etapa.
 - El login crea una sesión opaca en una cookie `HttpOnly` y guarda únicamente
   el SHA-256 del token. Las últimas cinco sesiones válidas por usuario se
   conservan durante 12 horas por defecto.
+- Perfil y gestión de usuarios ya pueden exigir que la cookie corresponda al
+  usuario o administrador declarado. La exigencia se activa con
+  `KAPITAL_AUTH_ENFORCED=true` después del despliegue compatible.
 - La configuración de Supabase prioriza variables de entorno, manteniendo un
   fallback temporal hasta verificar Vercel.
 
 ## Compatibilidad
 
 No se cambian formularios, navegación, estilos ni respuestas públicas del login.
-El login ya crea la sesión compatible; la siguiente entrega aplicará esa sesión
-a los endpoints y centralizará la autorización antes de volverla obligatoria.
+El login ya crea la sesión compatible y perfil/usuarios ya la reconocen. La
+siguiente entrega cubrirá los endpoints activos restantes y el manejo frontend
+de expiración antes de volverla obligatoria.
 
 ## Despliegue reversible
 
@@ -32,7 +36,11 @@ a los endpoints y centralizará la autorización antes de volverla obligatoria.
 2. Confirmar login y cambio de contraseña en Preview y producción. Esta versión
    ya sabe leer ambos formatos, pero todavía escribe el formato anterior.
 3. Configurar `KAPITAL_PASSWORD_HASH_WRITE=true` en Vercel y volver a desplegar.
-4. Si se requiere rollback, volver como mínimo a la versión del paso 1, que ya
+4. Mantener `KAPITAL_AUTH_ENFORCED=false` hasta que todos los endpoints activos
+   y el manejo frontend de respuestas 401 estén instrumentados.
+5. Después, validar renovación de sesión y activar la exigencia primero en
+   Preview y luego en producción.
+6. Si se requiere rollback, volver como mínimo a la versión del paso 1, que ya
    reconoce los hashes generados.
 
 No debe activarse la escritura de hashes antes de desplegar la compatibilidad de

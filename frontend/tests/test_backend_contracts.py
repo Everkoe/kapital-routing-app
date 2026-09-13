@@ -16,7 +16,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self._random_state = random.getstate()
         self._password_hash_write_enabled = backend.PASSWORD_HASH_WRITE_ENABLED
+        self._auth_enforced = backend.AUTH_ENFORCED
         backend.PASSWORD_HASH_WRITE_ENABLED = True
+        backend.AUTH_ENFORCED = False
         self._state = {
             "usuarios_db": copy.deepcopy(backend.usuarios_db),
             "conductores_db": copy.deepcopy(backend.conductores_db),
@@ -37,6 +39,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         random.setstate(self._random_state)
         backend.PASSWORD_HASH_WRITE_ENABLED = self._password_hash_write_enabled
+        backend.AUTH_ENFORCED = self._auth_enforced
         backend.usuarios_db.clear()
         backend.usuarios_db.update(self._state["usuarios_db"])
         backend.conductores_db.clear()
@@ -566,6 +569,56 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             current_user = await backend.get_current_user(raw_token)
 
         self.assertIs(current_user, user)
+
+    async def test_enforced_profile_access_rejects_another_users_session(self):
+        backend.AUTH_ENFORCED = True
+        owner = {
+            "identifier": "driver-001",
+            "email": None,
+            "nombre": "Owner Driver",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        other = {
+            "identifier": "driver-002",
+            "email": None,
+            "nombre": "Other Driver",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        backend.usuarios_db.update({"driver-001": owner, "driver-002": other})
+        other_token = backend.issue_session(other)
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.get_profile("driver-001", other_token)
+
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_enforced_admin_access_rejects_spoofed_admin_identifier(self):
+        backend.AUTH_ENFORCED = True
+        admin = {
+            "identifier": "admin@example.com",
+            "email": "admin@example.com",
+            "nombre": "Admin Baseline",
+            "rol": "Administración",
+            "estado": "Activo",
+        }
+        driver = {
+            "identifier": "driver-001",
+            "email": None,
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        backend.usuarios_db.update({"admin@example.com": admin, "driver-001": driver})
+        driver_token = backend.issue_session(driver)
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.get_all_users("admin@example.com", driver_token)
+
+        self.assertEqual(caught.exception.status_code, 403)
 
 
 if __name__ == "__main__":

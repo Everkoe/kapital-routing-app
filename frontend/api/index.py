@@ -4,7 +4,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Respon
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Dict, Any, List, Optional
+from typing import Annotated, Dict, Any, List, Optional
 
 import httpx
 import json
@@ -63,6 +63,11 @@ PASSWORD_HASH_WRITE_ENABLED = os.environ.get(
 ).strip().lower() in {"1", "true", "yes", "on"}
 SESSION_COOKIE_NAME = "kapital_session"
 SESSION_TTL_HOURS = int(os.environ.get("KAPITAL_SESSION_TTL_HOURS", "12"))
+AUTH_ENFORCED = os.environ.get(
+    "KAPITAL_AUTH_ENFORCED",
+    "false",
+).strip().lower() in {"1", "true", "yes", "on"}
+SessionCookie = Annotated[Optional[str], Cookie(alias=SESSION_COOKIE_NAME)]
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -160,9 +165,7 @@ def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def get_current_user(
-    session_token: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-) -> Dict[str, Any]:
+async def get_current_user(session_token: SessionCookie = None) -> Dict[str, Any]:
     """FastAPI dependency prepared for the authorization rollout."""
     await reload_db()
     user = get_user_by_session(session_token)
@@ -171,6 +174,31 @@ async def get_current_user(
     if user.get("estado", "Activo") != "Activo":
         raise HTTPException(status_code=403, detail="La cuenta no está activa.")
     return user
+
+
+def require_request_actor(
+    session_token: str | None,
+    *,
+    expected_user: Optional[Dict[str, Any]] = None,
+    allowed_roles: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Validate the session when Phase 1 enforcement is enabled.
+
+    With enforcement disabled this is intentionally a no-op, allowing the
+    compatibility release to be deployed before existing sessions are renewed.
+    """
+    if not AUTH_ENFORCED:
+        return None
+    actor = get_user_by_session(session_token)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if actor.get("estado", "Activo") != "Activo":
+        raise HTTPException(status_code=403, detail="La cuenta no está activa.")
+    if expected_user is not None and actor is not expected_user:
+        raise HTTPException(status_code=403, detail="No puedes operar sobre otro usuario.")
+    if allowed_roles is not None and actor.get("rol") not in allowed_roles:
+        raise HTTPException(status_code=403, detail="El rol actual no tiene permiso para esta acción.")
+    return actor
 
 # --- Estado Global en Memoria ---
 rutas_estado_actual: List[Dict[str, Any]] = []
@@ -711,10 +739,12 @@ async def change_password(req: ChangePasswordRequest):
     return {"message": "Contraseña actualizada exitosamente."}
 
 @app.get("/api/user/profile")
-async def get_profile(email: str):
+async def get_profile(email: str, session_token: SessionCookie = None):
+    await reload_db()
     user = get_user_by_identifier(email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    require_request_actor(session_token, expected_user=user)
     return {
         "email": user["email"],
         "nombre": user["nombre"],
@@ -729,11 +759,12 @@ async def get_profile(email: str):
     }
 
 @app.put("/api/user/profile")
-async def update_profile(update_data: UsuarioUpdate):
+async def update_profile(update_data: UsuarioUpdate, session_token: SessionCookie = None):
     await reload_db()
     user = get_user_by_identifier(update_data.identifier)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    require_request_actor(session_token, expected_user=user)
 
     # Roles are managed only through administrative workflows. Keeping the
     # field in the request model gives old clients an explicit error instead of
@@ -774,11 +805,12 @@ async def update_profile(update_data: UsuarioUpdate):
 
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
-async def get_all_users(email: str):
+async def get_all_users(email: str, session_token: SessionCookie = None):
     await reload_db()
     req_user = get_user_by_identifier(email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
     # Devolver lista de usuarios sin contraseñas
     lista_usuarios = []
@@ -795,11 +827,12 @@ async def get_all_users(email: str):
     return {"usuarios": lista_usuarios}
 
 @app.post("/api/admin/users/bulk")
-async def bulk_users_action(payload: BulkActionPayload):
+async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCookie = None):
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
     for target in payload.target_emails:
         if target in usuarios_db:
@@ -814,11 +847,17 @@ async def bulk_users_action(payload: BulkActionPayload):
     return {"message": f"Acción '{payload.action}' aplicada a {len(payload.target_emails)} usuarios."}
 
 @app.put("/api/admin/users/approve/{target_email}")
-async def approve_user(target_email: str, admin_email: str, unidad_id: Optional[str] = None):
+async def approve_user(
+    target_email: str,
+    admin_email: str,
+    unidad_id: Optional[str] = None,
+    session_token: SessionCookie = None,
+):
     await reload_db()
     req_user = usuarios_db.get(admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -854,11 +893,12 @@ def _require_admin(admin_email: str) -> Dict[str, Any]:
 
 
 @app.delete("/api/admin/users/reject/{target_email}")
-async def reject_user(target_email: str, admin_email: str):
+async def reject_user(target_email: str, admin_email: str, session_token: SessionCookie = None):
     """Deniega una solicitud PENDIENTE de acceso. Borra la cuenta por completo
     (la cuenta aún no fue aprobada, no hay historial que preservar)."""
     await reload_db()
-    _require_admin(admin_email)
+    req_user = _require_admin(admin_email)
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -869,13 +909,14 @@ async def reject_user(target_email: str, admin_email: str):
 
 
 @app.patch("/api/admin/users/deactivate/{target_email}")
-async def deactivate_user(target_email: str, admin_email: str):
+async def deactivate_user(target_email: str, admin_email: str, session_token: SessionCookie = None):
     """Da de baja a un usuario activo sin borrar sus datos. Mantiene la entrada
     en usuarios_db (incluida perfil_conductor) y la vinculación con
     conductores_db, marcando estado='Inactivo'. El usuario aparecerá en la
     pestaña Inactivos y puede ser reactivado o eliminado permanentemente."""
     await reload_db()
-    _require_admin(admin_email)
+    req_user = _require_admin(admin_email)
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
@@ -889,11 +930,12 @@ async def deactivate_user(target_email: str, admin_email: str):
 
 
 @app.patch("/api/admin/users/reactivate/{target_email}")
-async def reactivate_user(target_email: str, admin_email: str):
+async def reactivate_user(target_email: str, admin_email: str, session_token: SessionCookie = None):
     """Reactiva a un usuario previamente desactivado (Inactivo o Rechazado con
     datos preservados). Restaura estado='Activo'."""
     await reload_db()
-    _require_admin(admin_email)
+    req_user = _require_admin(admin_email)
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
@@ -905,12 +947,13 @@ async def reactivate_user(target_email: str, admin_email: str):
 
 
 @app.delete("/api/admin/users/permanent/{target_email}")
-async def permanent_delete_user(target_email: str, admin_email: str):
+async def permanent_delete_user(target_email: str, admin_email: str, session_token: SessionCookie = None):
     """Elimina definitivamente al usuario y todos sus datos. Además libera la
     unidad asociada en conductores_db (si es Conductor). Solo debe usarse desde
     la pestaña Inactivos como acción irreversible de seguridad."""
     await reload_db()
-    _require_admin(admin_email)
+    req_user = _require_admin(admin_email)
+    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
