@@ -689,19 +689,89 @@ async def approve_user(target_email: str, admin_email: str, unidad_id: Optional[
     await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
 
+_ADMIN_ROLES = ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]
+
+
+def _require_admin(admin_email: str) -> Dict[str, Any]:
+    """Valida que admin_email exista y tenga rol administrativo. Retorna el user."""
+    req_user = usuarios_db.get(admin_email)
+    if not req_user or req_user.get("rol") not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    return req_user
+
+
 @app.delete("/api/admin/users/reject/{target_email}")
 async def reject_user(target_email: str, admin_email: str):
+    """Deniega una solicitud PENDIENTE de acceso. Borra la cuenta por completo
+    (la cuenta aún no fue aprobada, no hay historial que preservar)."""
     await reload_db()
-    req_user = usuarios_db.get(admin_email)
-    if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
-        raise HTTPException(status_code=403, detail="Acceso denegado.")
-    
+    _require_admin(admin_email)
+
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-        
+
     del usuarios_db[target_email]
     await persist_users_only()
     return {"message": f"Usuario {target_email} rechazado y eliminado."}
+
+
+@app.patch("/api/admin/users/deactivate/{target_email}")
+async def deactivate_user(target_email: str, admin_email: str):
+    """Da de baja a un usuario activo sin borrar sus datos. Mantiene la entrada
+    en usuarios_db (incluida perfil_conductor) y la vinculación con
+    conductores_db, marcando estado='Inactivo'. El usuario aparecerá en la
+    pestaña Inactivos y puede ser reactivado o eliminado permanentemente."""
+    await reload_db()
+    _require_admin(admin_email)
+
+    user = usuarios_db.get(target_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if target_email == admin_email:
+        raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta.")
+
+    user["estado"] = "Inactivo"
+    await persist_users_only()
+    return {"message": f"Usuario {target_email} desactivado.", "estado": "Inactivo"}
+
+
+@app.patch("/api/admin/users/reactivate/{target_email}")
+async def reactivate_user(target_email: str, admin_email: str):
+    """Reactiva a un usuario previamente desactivado (Inactivo o Rechazado con
+    datos preservados). Restaura estado='Activo'."""
+    await reload_db()
+    _require_admin(admin_email)
+
+    user = usuarios_db.get(target_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    user["estado"] = "Activo"
+    await persist_users_only()
+    return {"message": f"Usuario {target_email} reactivado.", "estado": "Activo"}
+
+
+@app.delete("/api/admin/users/permanent/{target_email}")
+async def permanent_delete_user(target_email: str, admin_email: str):
+    """Elimina definitivamente al usuario y todos sus datos. Además libera la
+    unidad asociada en conductores_db (si es Conductor). Solo debe usarse desde
+    la pestaña Inactivos como acción irreversible de seguridad."""
+    await reload_db()
+    _require_admin(admin_email)
+
+    user = usuarios_db.get(target_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if target_email == admin_email:
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
+
+    unidad = user.get("unidad_id")
+    del usuarios_db[target_email]
+    if unidad and unidad in conductores_db:
+        del conductores_db[unidad]
+
+    await persist()
+    return {"message": f"Usuario {target_email} eliminado permanentemente."}
 
 @app.post("/api/admin/driver/review")
 async def review_driver_doc(payload: DriverDocReviewPayload):

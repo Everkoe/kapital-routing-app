@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, CheckSquare, X, Eye, FileText, Download, Truck, Shield, Search, User } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, CheckSquare, X, Eye, FileText, Download, Truck, Shield, Search, User, Trash2, RotateCcw } from 'lucide-react';
 import { GlobalLoader } from './GlobalLoader';
 import DocumentVerification from './DocumentVerification';
 
@@ -101,16 +101,22 @@ const RoleBadge = ({ rol }) => {
   return <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', color:c, background:bg, border:`1px solid ${c}44` }}>{rol}</span>;
 };
 const StatusBadge = ({ estado }) => {
-  const isPending = estado === 'Pendiente';
+  const isPending = (estado || '').includes('Pendiente');
+  const isInactive = estado === 'Inactivo' || estado === 'Rechazado';
+  const color = isInactive ? '#94a3b8' : isPending ? '#f59e0b' : '#10b981';
+  const bg = isInactive ? 'rgba(148,163,184,0.14)' : isPending ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)';
+  const border = isInactive ? '#94a3b855' : isPending ? '#f59e0b44' : '#10b98144';
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:'5px',
       padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700,
-      color: isPending ? '#f59e0b' : '#10b981',
-      background: isPending ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
-      border: `1px solid ${isPending ? '#f59e0b44' : '#10b98144'}`,
+      color, background: bg, border: `1px solid ${border}`,
     }}>
-      <span style={{ width:'6px', height:'6px', borderRadius:'50%', background: isPending ? '#f59e0b' : '#10b981', display:'inline-block', boxShadow: isPending ? '0 0 6px #f59e0b' : '0 0 6px #10b981' }} />
+      <span style={{
+        width:'6px', height:'6px', borderRadius:'50%',
+        background: color, display:'inline-block',
+        boxShadow: isInactive ? 'none' : `0 0 6px ${color}`,
+      }} />
       {estado}
     </span>
   );
@@ -182,7 +188,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     let matchesTab = false;
     if (activeTab === 'Todos') matchesTab = true;
     else if (activeTab === 'Pendientes') matchesTab = u.estado.includes('Pendiente');
-    else if (activeTab === 'Rechazados') matchesTab = u.estado === 'Rechazado' || u.estado === 'Inactivo';
+    else if (activeTab === 'Inactivos') matchesTab = u.estado === 'Inactivo' || u.estado === 'Rechazado';
     else matchesTab = u.estado === 'Activo' && !!u.last_login;
 
     let matchesRole = false;
@@ -211,6 +217,19 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
 
   const closeModal = () => setModal({ isOpen: false, config: null, onConfirm: null });
 
+  // Cada acción declara su endpoint + método. Así separamos claramente:
+  //   - deactivate  (soft, PATCH)  -> mantiene datos, marca Inactivo
+  //   - reactivate  (soft, PATCH)  -> vuelve a Activo
+  //   - reject_pending (hard, DEL) -> denegar solicitud pendiente
+  //   - permanent_delete (hard, DEL) -> borrar todo, solo desde Inactivos
+  const ACTION_ROUTES = {
+    approve:          { path: 'approve',    method: 'PUT'    },
+    reject_pending:   { path: 'reject',     method: 'DELETE' },
+    deactivate:       { path: 'deactivate', method: 'PATCH'  },
+    reactivate:       { path: 'reactivate', method: 'PATCH'  },
+    permanent_delete: { path: 'permanent',  method: 'DELETE' },
+  };
+
   const requestAction = (targetEmail, action, userName) => {
     const configs = {
       approve: {
@@ -224,12 +243,23 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
         userEmail: targetEmail, confirmText: 'Sí, denegar acceso',
       },
       deactivate: {
-        type: 'danger', icon: <MinusCircle size={36} color="#ef4444" />, title: 'Desactivar Usuario Activo',
-        message: `¿Estás seguro? Este usuario perderá acceso inmediato a la plataforma. Esta acción no se puede deshacer fácilmente.`,
-        userEmail: targetEmail, confirmText: 'Sí, desactivar cuenta',
+        type: 'danger', icon: <MinusCircle size={36} color="#ef4444" />, title: 'Desactivar Usuario',
+        message: `El usuario perderá acceso inmediato pero sus datos (perfil, documentos y unidad asignada) se mantendrán. Podrás reactivarlo o eliminarlo definitivamente desde la pestaña Inactivos.`,
+        userEmail: targetEmail, confirmText: 'Sí, desactivar',
+      },
+      reactivate: {
+        type: 'success', icon: <RotateCcw size={36} color="#10b981" />, title: 'Reactivar Usuario',
+        message: `Se restaurará el acceso a la plataforma para este usuario con todos sus datos originales.`,
+        userEmail: targetEmail, confirmText: `Sí, reactivar a ${userName}`,
+      },
+      permanent_delete: {
+        type: 'danger', icon: <Trash2 size={36} color="#ef4444" />, title: 'Eliminar cuenta permanentemente',
+        message: `Se borrarán todos los datos del usuario (perfil, documentos, historial) y se liberará la unidad asignada. Esta acción NO se puede deshacer.`,
+        userEmail: targetEmail, confirmText: 'Sí, eliminar definitivamente',
       },
     };
     const cfg = configs[action];
+    const route = ACTION_ROUTES[action];
     setModal({
       isOpen: true,
       config: cfg,
@@ -237,12 +267,26 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
         closeModal();
         setActionLoading(targetEmail);
         try {
-          const apiAction = action === 'approve' ? 'approve' : 'reject';
-          const method = action === 'approve' ? 'PUT' : 'DELETE';
-          const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`, { method });
-          if (res.ok) await fetchUsers();
-          else toast.error('Error al realizar la acción');
-        } catch (e) { console.error(e); }
+          const url = `/api/admin/users/${route.path}/${encodeURIComponent(targetEmail)}?admin_email=${encodeURIComponent(usuarioActual.email)}`;
+          const res = await fetch(url, { method: route.method });
+          if (res.ok) {
+            const successMsg = {
+              approve: 'Usuario aprobado',
+              reject_pending: 'Solicitud denegada',
+              deactivate: 'Usuario desactivado',
+              reactivate: 'Usuario reactivado',
+              permanent_delete: 'Cuenta eliminada permanentemente',
+            }[action];
+            toast.success(successMsg);
+            await fetchUsers();
+          } else {
+            const detail = await res.json().catch(() => ({}));
+            toast.error(detail.detail || 'Error al realizar la acción');
+          }
+        } catch (e) {
+          console.error(e);
+          toast.error('Error de conexión');
+        }
         finally { setActionLoading(null); }
       },
     });
@@ -556,7 +600,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                     { key: 'Todos', label: 'Todos', dot: null },
                     { key: 'Pendientes', label: 'Pendientes', dot: '#f59e0b' },
                     { key: 'Activos', label: 'Activos', dot: '#10b981' },
-                    { key: 'Rechazados', label: 'Rechazados', dot: '#ef4444' },
+                    { key: 'Inactivos', label: 'Inactivos', dot: '#94a3b8' },
                   ].map(({ key, label, dot }) => (
                     <button key={key}
                       className={`crm-tab-btn${activeTab === key ? ' active' : ''}`}
@@ -734,6 +778,30 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                                 onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.08)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
                                 <MinusCircle size={14} /> Desactivar
                               </button>
+                            )}
+                            {(u.estado === 'Inactivo' || u.estado === 'Rechazado') && u.email !== usuarioActual.email && (
+                              <>
+                                <button onClick={() => requestAction(u.email, 'reactivate', u.nombre)} style={{
+                                  padding: '6px 13px', borderRadius: '8px', border: '1px solid #10b98166',
+                                  background: 'rgba(16,185,129,0.1)', color: '#10b981', cursor: 'pointer',
+                                  fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                  display: 'flex', alignItems: 'center', gap: '6px'
+                                }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = '#10b981'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(16,185,129,0.4)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(16,185,129,0.1)'; e.currentTarget.style.color = '#10b981'; e.currentTarget.style.boxShadow = 'none'; }}>
+                                  <RotateCcw size={14} /> Reactivar
+                                </button>
+                                <button onClick={() => requestAction(u.email, 'permanent_delete', u.nombre)} style={{
+                                  padding: '6px 13px', borderRadius: '8px', border: '1px solid #ef444488',
+                                  background: 'rgba(239,68,68,0.12)', color: '#ef4444', cursor: 'pointer',
+                                  fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.18s', whiteSpace: 'nowrap',
+                                  display: 'flex', alignItems: 'center', gap: '6px'
+                                }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.boxShadow = 'none'; }}>
+                                  <Trash2 size={14} /> Eliminar
+                                </button>
+                              </>
                             )}
                             {u.email === usuarioActual.email && (
                               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>Tu cuenta</span>
