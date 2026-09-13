@@ -181,7 +181,7 @@ body, #root {
 
 
 .app-container {
-  max-width: 1400px;
+  max-width: 1720px;
   margin: 0 auto;
   padding: 30px;
   width: 100%;
@@ -189,6 +189,36 @@ body, #root {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* --- Dashboard responsive grids --- */
+.dashboard-kpi-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, 1fr);
+}
+.dashboard-middle-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 0.85fr 1.15fr 1fr;
+}
+.dashboard-bottom-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 1240px) {
+  .dashboard-middle-row { grid-template-columns: 1fr 1fr; }
+  .dashboard-middle-row > *:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .dashboard-kpi-row    { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-middle-row { grid-template-columns: 1fr; }
+  .dashboard-middle-row > *:first-child { grid-column: auto; }
+  .dashboard-bottom-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .dashboard-kpi-row { grid-template-columns: 1fr; }
 }
 
 /* --- Estilos de Vistas Perfil Nuevo --- */

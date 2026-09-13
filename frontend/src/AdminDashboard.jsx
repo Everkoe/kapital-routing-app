@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
+import './App.css';
 
 const getDocStatus = (dateStr) => {
   if (!dateStr || dateStr === 'N/A') return { status: 'missing', days: null };
@@ -185,7 +186,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       </div>
 
       {/* KPI ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+      <div className="dashboard-kpi-row">
 
         <div
           style={{ ...card, cursor: 'pointer', transition: 'border-color 0.2s' }}
@@ -251,8 +252,8 @@ export default function AdminDashboard({ onNavigate, usuario }) {
 
       </div>
 
-      {/* MIDDLE ROW — 3 columnas: Distribución (vertical) | Estado docs | Usuarios por rol */}
-      <div style={{ display: 'grid', gridTemplateColumns: '0.85fr 1.15fr 1fr', gap: '16px' }}>
+      {/* MIDDLE ROW — 3 columnas responsivas: Distribución (vertical) | Estado docs | Usuarios por rol */}
+      <div className="dashboard-middle-row">
 
         {/* Distribución por base — VERTICAL (3 tarjetas apiladas) */}
         <div style={card}>
@@ -374,7 +375,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       </div>
 
       {/* BOTTOM ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div className="dashboard-bottom-row">
 
         {/* Alertas del sistema */}
         <div style={card}>
