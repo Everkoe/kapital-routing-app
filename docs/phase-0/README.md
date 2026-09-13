@@ -4,6 +4,13 @@ Esta carpeta congela el comportamiento observable de Kapital antes de cambiar
 autenticación, persistencia o arquitectura. La fase 0 no modifica lógica de
 negocio ni diseño visual.
 
+## Alcance temporal
+
+Administración, Gerente de Operaciones, Cliente y Conductor permanecen dentro
+del alcance activo. El Programador de rutas y la evolución de su motor quedan
+congelados hasta que se defina el nuevo flujo; solo se conserva una prueba mínima
+de no regresión para no perder pasajeros ni superar la capacidad configurada.
+
 ## Verificación automática
 
 Desde `frontend/`, con el entorno virtual activo:

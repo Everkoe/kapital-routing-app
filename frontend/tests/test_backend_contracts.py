@@ -293,6 +293,166 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.historial_rutas[0]["rutas"], original_routes)
         persist.assert_awaited_once()
 
+    async def test_admin_user_list_never_returns_passwords(self):
+        backend.usuarios_db.update({
+            "admin@example.com": {
+                "identifier": "admin@example.com",
+                "password": "admin-secret",
+                "nombre": "Admin Baseline",
+                "rol": "Administración",
+                "estado": "Activo",
+            },
+            "driver-001": {
+                "identifier": "driver-001",
+                "password": "driver-secret",
+                "nombre": "Driver Baseline",
+                "rol": "Conductor",
+                "estado": "Activo",
+            },
+        })
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            response = await backend.get_all_users("admin@example.com")
+
+        self.assertEqual(len(response["usuarios"]), 2)
+        self.assertTrue(all("password" not in user for user in response["usuarios"]))
+
+    async def test_driver_onboarding_moves_profile_to_review(self):
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001",
+            "nombre": "Pending Driver",
+            "rol": "Conductor",
+            "estado": "Activo",
+        }
+        profile = {
+            "nombres": "Driver Baseline",
+            "numDoc": "driver-001",
+            "dniScaneado": "data:application/pdf;base64,baseline",
+        }
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            response = await backend.driver_onboarding(
+                backend.DriverProfilePayload(email="driver-001", perfilData=profile)
+            )
+
+        self.assertEqual(response["estado"], "Pendiente Revisión")
+        self.assertEqual(backend.usuarios_db["driver-001"]["perfil_conductor"], profile)
+        self.assertEqual(backend.usuarios_db["driver-001"]["nombre"], "Driver Baseline")
+        persist.assert_awaited_once()
+
+    async def test_rejected_document_observes_driver_and_notifies_them(self):
+        backend.usuarios_db.update({
+            "admin@example.com": {
+                "identifier": "admin@example.com",
+                "nombre": "Admin Baseline",
+                "rol": "Administración",
+                "estado": "Activo",
+            },
+            "driver-001": {
+                "identifier": "driver-001",
+                "nombre": "Driver Baseline",
+                "rol": "Conductor",
+                "estado": "Pendiente Revisión",
+                "perfil_conductor": {"revision_docs": {}},
+            },
+        })
+
+        with (
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend.ws_manager, "send", new=AsyncMock()) as send,
+        ):
+            response = await backend.review_driver_doc(
+                backend.DriverDocReviewPayload(
+                    admin_email="admin@example.com",
+                    conductor_email="driver-001",
+                    campo="dniScaneado",
+                    estado="rechazado",
+                    nota="Documento ilegible",
+                )
+            )
+
+        self.assertEqual(response["estado_conductor"], "Documentos Observados")
+        self.assertEqual(len(backend.notifications_db), 1)
+        self.assertEqual(backend.notifications_db[0]["para"], "driver-001")
+        send.assert_awaited_once()
+
+    async def test_mark_notification_read_preserves_notification(self):
+        backend.notifications_db.append({
+            "id": 101,
+            "para": "driver-001",
+            "mensaje": "Baseline",
+            "leido": False,
+        })
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            await backend.mark_notification_read(backend.MarkReadPayload(notif_id=101))
+
+        self.assertEqual(len(backend.notifications_db), 1)
+        self.assertTrue(backend.notifications_db[0]["leido"])
+        persist.assert_awaited_once()
+
+    async def test_fleet_response_is_enriched_from_driver_profile(self):
+        backend.conductores_db["K-001"] = {
+            "placa": "OLD-001",
+            "capacidad": 15,
+            "tipo": "Sprinter",
+            "chofer": "Driver Baseline",
+            "telefono": "900000000",
+        }
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001",
+            "nombre": "Driver Baseline",
+            "rol": "Conductor",
+            "unidad_id": "K-001",
+            "perfil_conductor": {
+                "placa": "NEW-001",
+                "direccion": "Baseline address",
+                "numDoc": "driver-001",
+                "fechaNacimiento": "1990-01-01",
+                "telefonoDirecto": "911111111",
+            },
+        }
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            response = await backend.get_flota_status()
+
+        vehicle = response["flota"][0]
+        self.assertEqual(vehicle["unidad_id"], "K-001")
+        self.assertEqual(vehicle["real_placa"], "NEW-001")
+        self.assertEqual(vehicle["celular"], "911111111")
+
+    async def test_driver_routes_are_filtered_by_assigned_unit(self):
+        backend.rutas_estado_actual = [
+            {"conductor": "K-001", "horario": "08:00", "agentes": []},
+            {"conductor": "K-002", "horario": "08:00", "agentes": []},
+        ]
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            routes = await backend.mis_rutas("K-001")
+
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0]["conductor"], "K-001")
+
+    async def test_manager_summary_uses_compact_persisted_shape(self):
+        backend.routes_summary = [{
+            "conductor": "K-001",
+            "micro_zona": "SURCO",
+            "horario": "08:00",
+            "count": 12,
+        }]
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            summary = await backend.get_routes_summary()
+
+        self.assertEqual(summary, backend.routes_summary)
+        self.assertNotIn("agentes", summary[0])
+
 
 if __name__ == "__main__":
     unittest.main()

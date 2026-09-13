@@ -3,6 +3,10 @@
 Esta matriz debe completarse en un despliegue Preview antes de promover cambios
 a producción. Usar cuentas y documentos de prueba, nunca datos personales reales.
 
+> Alcance actual: Administración, Gerente, Cliente y Conductor. Los casos `RTE`
+> se conservan documentados, pero quedan postergados y no bloquean el trabajo
+> previo a la redefinición del rol Programador de rutas.
+
 | ID | Rol | Escenario | Resultado esperado |
 |---|---|---|---|
 | AUTH-01 | Todos | Login válido | Abre el portal correspondiente |
@@ -31,6 +35,7 @@ a producción. Usar cuentas y documentos de prueba, nunca datos personales reale
 
 ## Criterio de aprobación
 
-- Todos los casos críticos `AUTH`, `DRV`, `RTE` y `OPS` deben aprobar.
+- Por ahora deben aprobar todos los casos críticos `AUTH`, `DRV`, `FLT`, `OPS`,
+  `MGR`, `CLI` y `DOC`. Los casos `RTE` están congelados.
 - No puede haber pérdida de usuarios, documentos, flota, rutas o notificaciones.
 - Cualquier diferencia visual debe estar documentada y aprobada antes del merge.
