@@ -1,28 +1,724 @@
 # api/index.py
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
+from fastapi import Request
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Annotated, Dict, Any, List, Optional
+from typing import Annotated, Dict, Any, List, Optional, Mapping
 
+import asyncio
 import httpx
 import json
 import random
 import os
 import io
+import threading
+import time
 from copy import copy as _copy_style
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote
 import base64
 import hashlib
 import hmac
 import secrets
+import uuid
 from dotenv import load_dotenv
 from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
 
 load_dotenv()
+
+
+
+STORAGE_OLD = "old"
+STORAGE_V2 = "v2"
+STORAGE_V2_COMPAT = "v2_compat"
+STORAGE_LAYOUT_LEGACY = "legacy_json"
+STORAGE_LAYOUT_NORMALIZED = "normalized"
+STORAGE_LAYOUT_COMPAT = "compat_json"
+V2_SCHEMA = "app"
+V2_NAMESPACE = uuid.UUID("8fef7f1f-83df-4d7c-b8d4-6f0fd2e9c6e4")
+
+# Keep this allow-list local to the adapter.  It prevents a request value from
+# becoming an arbitrary PostgREST resource and makes it explicit that binary
+# document payloads are not part of the normalized read path.
+V2_RESOURCES = frozenset({
+    "app_users",
+    "auth_credentials",
+    "auth_sessions",
+    "driver_profiles",
+    "fleet_units",
+    "routes",
+    "passengers",
+    "route_passengers",
+    "notifications",
+    "route_history",
+    "board_locks",
+    "route_summary",
+})
+
+V2_SELECTS = {
+    "app_users": (
+        "id,auth_user_id,login_identifier,login_identifier_sha256,role_code,"
+        "status_code,unit_id,company_id,display_name,email,government_id,phone,"
+        "needs_password_change,last_login_at,created_at,updated_at"
+    ),
+    "auth_credentials": (
+        "user_id,password_hash,password_scheme,needs_reset,last_changed_at,"
+        "created_at,updated_at"
+    ),
+    "auth_sessions": "id,user_id,token_hash,issued_at,expires_at,revoked_at,created_at",
+    "driver_profiles": (
+        "user_id,address,document_number,birth_date,direct_phone,vehicle_plate,"
+        "profile_status,change_requests,created_at,updated_at"
+    ),
+    "fleet_units": (
+        "unit_id,plate,vehicle_type,capacity,driver_name,soat_value,"
+        "inspection_value,atu_value,license_value,created_at,updated_at"
+    ),
+    "routes": "id,unit_id,zone,schedule,route_date,status_code,source_key_sha256,version,created_at,updated_at",
+    "passengers": (
+        "id,legacy_identifier,legacy_identifier_sha256,full_name,company_id,address,"
+        "latitude,longitude,status_code,created_at,updated_at"
+    ),
+    "route_passengers": (
+        "assignment_id,route_id,passenger_id,assignment_order,status_code,"
+        "created_at,updated_at"
+    ),
+    "notifications": (
+        "id,recipient_user_id,audience_code,notification_type,title,message,read_at,"
+        "source_notification_id,created_at,updated_at"
+    ),
+    "route_history": (
+        "id,route_id,operation_code,route_count,passenger_count,captured_at,"
+        "source_batch_id,created_at"
+    ),
+    "board_locks": "board_name,owner_user_id,lease_until,version,updated_at",
+    "route_summary": "unit_id,zone,schedule,passenger_count,route_count",
+}
+
+
+def _first_env(env: Mapping[str, str], *names: str, default: str = "") -> str:
+    """Return the first non-empty environment value without logging it."""
+    for name in names:
+        value = env.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return default
+
+
+def _env_bool(env: Mapping[str, str], *names: str, default: bool = False) -> bool:
+    value = _first_env(env, *names)
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_content_range(value: Optional[str]) -> Optional[tuple[Optional[int], Optional[int], Optional[int]]]:
+    """Parse a PostgREST Content-Range without trusting provider metadata."""
+    if not value:
+        return None
+    try:
+        range_part, total_part = value.strip().split("/", 1)
+        # Some HTTP implementations include the range unit (for example,
+        # ``items 0-999``), while PostgREST commonly returns ``0-999``.
+        range_part = range_part.rsplit(" ", 1)[-1]
+        total = None if total_part.strip() == "*" else int(total_part.strip())
+        if range_part == "*":
+            return None, None, total
+        start_text, end_text = range_part.split("-", 1)
+        start = int(start_text)
+        end = int(end_text)
+        if start < 0 or end < start or (total is not None and total < 0):
+            raise ValueError("invalid content range bounds")
+        return start, end, total
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid content range") from exc
+
+
+@dataclass(frozen=True)
+class StorageConfig:
+    """Selected storage target; credentials never appear in diagnostics."""
+
+    mode: str
+    layout: str
+    url: str
+    key: str
+    enabled: bool
+    read_only: bool
+    source: str
+    state_resource: str
+    remote_enabled: bool = True
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.enabled and self.url and self.key)
+
+    @property
+    def writes_allowed(self) -> bool:
+        return bool(self.configured and not self.read_only)
+
+
+def _build_storage_config(env: Optional[Mapping[str, str]] = None) -> StorageConfig:
+    """Build an explicit OLD/V2 target while preserving legacy env names.
+
+    OLD is the compatibility default. ``V2_COMPAT`` is the phase-1 bridge:
+    it uses the dedicated V2 credentials but keeps the legacy JSON contract
+    in ``public.app_state``. The normalized relational layout remains an
+    explicit phase-2 choice (``V2``/``NORMALIZED``); merely adding V2
+    credentials never changes the selected target.
+    """
+    values = env if env is not None else os.environ
+    requested_mode = _first_env(
+        values,
+        "KAPITAL_STORAGE_BACKEND",
+        "KAPITAL_STORAGE_MODE",
+        "STORAGE_BACKEND",
+        default=STORAGE_OLD,
+    ).lower()
+    if requested_mode in {
+        STORAGE_V2_COMPAT,
+        "v2-compat",
+        "compat",
+        "compatibility",
+    }:
+        mode = STORAGE_V2_COMPAT
+    elif requested_mode in {
+        STORAGE_V2,
+        "normalized",
+        "v2_normalized",
+        "v2-normalized",
+        "new",
+    }:
+        mode = STORAGE_V2
+    else:
+        mode = STORAGE_OLD
+    generic_read_only = _env_bool(values, "KAPITAL_STORAGE_READ_ONLY", default=False)
+
+    if mode in {STORAGE_V2, STORAGE_V2_COMPAT}:
+        url = _first_env(
+            values,
+            "KAPITAL_V2_SUPABASE_URL",
+            "KAPITAL_STORAGE_V2_SUPABASE_URL",
+            "KAPITAL_STORAGE_V2_URL",
+            "KAPITAL_SUPABASE_V2_URL",
+            "SUPABASE_V2_URL",
+        )
+        key = _first_env(
+            values,
+            "KAPITAL_V2_SUPABASE_KEY",
+            "KAPITAL_STORAGE_V2_SUPABASE_KEY",
+            "KAPITAL_STORAGE_V2_KEY",
+            "KAPITAL_SUPABASE_V2_KEY",
+            "SUPABASE_V2_KEY",
+        )
+        remote_enabled = _env_bool(
+            values,
+            "KAPITAL_V2_REMOTE_ENABLED",
+            "KAPITAL_STORAGE_V2_REMOTE_ENABLED",
+            default=False,
+        )
+        explicitly_enabled = _env_bool(
+            values,
+            "KAPITAL_V2_ENABLED",
+            "KAPITAL_STORAGE_V2_ENABLED",
+            default=False,
+        )
+        is_compat = mode == STORAGE_V2_COMPAT
+        return StorageConfig(
+            mode=mode,
+            layout=STORAGE_LAYOUT_COMPAT if is_compat else STORAGE_LAYOUT_NORMALIZED,
+            url=url.rstrip("/"),
+            key=key,
+            enabled=bool(explicitly_enabled and remote_enabled),
+            read_only=_env_bool(
+                values,
+                "KAPITAL_V2_READ_ONLY",
+                "KAPITAL_V2_STORAGE_READ_ONLY",
+                "KAPITAL_STORAGE_V2_READ_ONLY",
+                default=True,
+            ) or generic_read_only,
+            source="v2-compat" if is_compat else "v2-dedicated",
+            # V2_COMPAT intentionally targets the existing public JSON row.
+            # Do not inherit a normalized resource override in this mode.
+            state_resource=(
+                "app_state"
+                if is_compat
+                else _first_env(
+                    values,
+                    "KAPITAL_V2_STATE_RESOURCE",
+                    "KAPITAL_STORAGE_V2_STATE_RESOURCE",
+                    default="app_state_v2",
+                )
+            ),
+            remote_enabled=remote_enabled,
+        )
+
+    # Explicit OLD names win; SUPABASE_URL/SUPABASE_KEY remain compatible
+    # with the existing Vercel configuration and local .env files.
+    old_url = _first_env(
+        values,
+        "KAPITAL_OLD_SUPABASE_URL",
+        "KAPITAL_STORAGE_OLD_SUPABASE_URL",
+        "KAPITAL_STORAGE_OLD_URL",
+        "KAPITAL_SUPABASE_OLD_URL",
+        "SUPABASE_OLD_URL",
+        "SUPABASE_URL",
+    )
+    old_key = _first_env(
+        values,
+        "KAPITAL_OLD_SUPABASE_KEY",
+        "KAPITAL_STORAGE_OLD_SUPABASE_KEY",
+        "KAPITAL_STORAGE_OLD_KEY",
+        "KAPITAL_SUPABASE_OLD_KEY",
+        "SUPABASE_OLD_KEY",
+        "SUPABASE_KEY",
+    )
+    dedicated_old = bool(
+        _first_env(
+            values,
+            "KAPITAL_OLD_SUPABASE_URL",
+            "KAPITAL_STORAGE_OLD_SUPABASE_URL",
+            "KAPITAL_STORAGE_OLD_URL",
+            "KAPITAL_SUPABASE_OLD_URL",
+            "SUPABASE_OLD_URL",
+        )
+        or _first_env(
+            values,
+            "KAPITAL_OLD_SUPABASE_KEY",
+            "KAPITAL_STORAGE_OLD_SUPABASE_KEY",
+            "KAPITAL_STORAGE_OLD_KEY",
+            "KAPITAL_SUPABASE_OLD_KEY",
+            "SUPABASE_OLD_KEY",
+        )
+    )
+    return StorageConfig(
+        mode=STORAGE_OLD,
+        layout=STORAGE_LAYOUT_LEGACY,
+        url=old_url.rstrip("/"),
+        key=old_key,
+        enabled=True,
+        read_only=_env_bool(
+            values,
+            "KAPITAL_OLD_READ_ONLY",
+            "KAPITAL_OLD_STORAGE_READ_ONLY",
+            "KAPITAL_STORAGE_OLD_READ_ONLY",
+            default=False,
+        ) or generic_read_only,
+        source="old-dedicated" if dedicated_old else "legacy",
+        state_resource="app_state",
+        remote_enabled=True,
+    )
+
+
+class StorageAdapter:
+    """Storage boundary for legacy JSON and the opt-in normalized schema.
+
+    The normalized branch deliberately exposes only relational resources.  It
+    reconstructs the legacy in-memory contract for the existing endpoints, so
+    the OLD path remains unchanged and document binaries are never loaded as
+    part of a dashboard/auth refresh.
+    """
+
+    def __init__(self, config: StorageConfig):
+        self.config = config
+
+    def assert_ready(self, *, write: bool = False) -> None:
+        if self.config.mode in {STORAGE_V2, STORAGE_V2_COMPAT} and not self.config.remote_enabled:
+            raise RuntimeError("V2 storage remote is disabled")
+        if not self.config.enabled or not self.config.url or not self.config.key:
+            raise RuntimeError("storage target is not configured")
+        if write and self.config.read_only:
+            raise RuntimeError("selected storage target is read-only")
+
+    def state_url(self, select: Optional[str] = None) -> str:
+        """Build only the controlled app-state URL; query values are encoded."""
+        resource = self.config.state_resource
+        url = f"{self.config.url}/{resource}?id=eq.1"
+        if select:
+            url += f"&select={quote(select, safe='->')}"
+        return url
+
+    @property
+    def is_normalized(self) -> bool:
+        return self.config.mode == STORAGE_V2 and self.config.layout == STORAGE_LAYOUT_NORMALIZED
+
+    def resource_url(
+        self,
+        resource: str,
+        *,
+        select: Optional[str] = None,
+        filters: Optional[Mapping[str, str]] = None,
+        order: Optional[str] = None,
+        limit: Optional[int] = None,
+        on_conflict: Optional[str] = None,
+    ) -> str:
+        """Build a controlled PostgREST URL for one normalized resource."""
+        if resource not in V2_RESOURCES:
+            raise ValueError("unsupported normalized resource")
+        params: List[str] = []
+        if select:
+            params.append(f"select={quote(select, safe=',.*()')}")
+        if filters:
+            for key, value in filters.items():
+                params.append(f"{quote(str(key), safe='')}={quote(str(value), safe='.,()')}")
+        if order:
+            params.append(f"order={quote(order, safe='.,')}")
+        if limit is not None:
+            params.append(f"limit={int(limit)}")
+        if on_conflict:
+            params.append(f"on_conflict={quote(on_conflict, safe=',')}")
+        suffix = f"?{'&'.join(params)}" if params else ""
+        return f"{self.config.url}/{resource}{suffix}"
+
+    def normalized_headers(
+        self,
+        *,
+        write: bool = False,
+        content_type: str = "application/json",
+        prefer: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Return profile-aware Data API headers without exposing credentials."""
+        return _build_supabase_headers(
+            self.config.key,
+            content_type=content_type,
+            prefer=prefer,
+            content_profile=V2_SCHEMA if write else None,
+            accept_profile=V2_SCHEMA if not write else None,
+        )
+
+    async def fetch_rows(
+        self,
+        resource: str,
+        *,
+        select: Optional[str] = None,
+        filters: Optional[Mapping[str, str]] = None,
+        order: Optional[str] = None,
+        limit: Optional[int] = None,
+        operation: str,
+    ) -> List[Dict[str, Any]]:
+        """Read rows from a normalized resource through PostgREST.
+
+        A request with an explicit ``limit`` at or below the page size keeps
+        the existing single-read behavior (used by login and targeted
+        lookups).  Full collection reads use bounded ``Range`` requests and
+        the provider's ``Content-Range`` metadata until the complete
+        collection has been assembled.  Offsets are checked on every page so
+        an ignored or repeated range cannot silently duplicate rows.
+        """
+        if limit is not None:
+            try:
+                requested_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                _raise_database_unavailable(operation, error=exc)
+            if requested_limit < 0:
+                _raise_database_unavailable(
+                    operation,
+                    error=ValueError("invalid normalized limit"),
+                )
+        else:
+            requested_limit = None
+
+        paginate = requested_limit is None or requested_limit > NORMALIZED_PAGE_SIZE
+        if not paginate:
+            response = await _db_http_request(
+                "GET",
+                self.resource_url(
+                    resource,
+                    select=select or V2_SELECTS.get(resource),
+                    filters=filters,
+                    order=order,
+                    limit=requested_limit,
+                ),
+                operation=operation,
+                headers=self.normalized_headers(),
+                timeout=30.0,
+            )
+            if response.status_code not in {200, 206}:
+                _raise_database_unavailable(operation, status_code=response.status_code)
+            try:
+                rows = response.json()
+            except (TypeError, ValueError) as exc:
+                _raise_database_unavailable(operation, error=exc)
+            if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+                _raise_database_unavailable(operation, error=ValueError("invalid normalized rows"))
+            return rows
+
+        if requested_limit is not None and requested_limit > NORMALIZED_MAX_ROWS:
+            _raise_database_unavailable(
+                operation,
+                error=ValueError("normalized pagination limit exceeded"),
+            )
+
+        page_size = NORMALIZED_PAGE_SIZE
+        offset = 0
+        page_count = 0
+        collected: List[Dict[str, Any]] = []
+        expected_total: Optional[int] = None
+        seen_page_signatures: set[str] = set()
+
+        while True:
+            if page_count >= NORMALIZED_MAX_PAGES or offset >= NORMALIZED_MAX_ROWS:
+                _raise_database_unavailable(
+                    operation,
+                    error=ValueError("normalized pagination limit exceeded"),
+                )
+
+            if requested_limit is not None:
+                remaining = requested_limit - offset
+                if remaining <= 0:
+                    break
+                request_size = min(page_size, remaining)
+            else:
+                request_size = page_size
+
+            page_headers = self.normalized_headers(prefer="count=exact")
+            page_headers["Range-Unit"] = "items"
+            page_headers["Range"] = f"{offset}-{offset + request_size - 1}"
+            response = await _db_http_request(
+                "GET",
+                self.resource_url(
+                    resource,
+                    select=select or V2_SELECTS.get(resource),
+                    filters=filters,
+                    order=order,
+                    # The Range header is the page boundary.  Supplying a
+                    # query-string limit as well makes PostgREST apply the
+                    # limit before the offset and returns HTTP 416 for page
+                    # two (for example, Range 1000-1999 with limit=1000).
+                    limit=None,
+                ),
+                operation=operation,
+                headers=page_headers,
+                timeout=30.0,
+            )
+            if response.status_code not in {200, 206}:
+                _raise_database_unavailable(operation, status_code=response.status_code)
+            try:
+                page_rows = response.json()
+            except (TypeError, ValueError) as exc:
+                _raise_database_unavailable(operation, error=exc)
+            if not isinstance(page_rows, list) or not all(isinstance(row, dict) for row in page_rows):
+                _raise_database_unavailable(operation, error=ValueError("invalid normalized rows"))
+            if len(page_rows) > request_size:
+                _raise_database_unavailable(
+                    operation,
+                    error=ValueError("normalized page exceeds requested range"),
+                )
+
+            content_range_value = response.headers.get("content-range")
+            try:
+                content_range = _parse_content_range(content_range_value)
+            except ValueError as exc:
+                _raise_database_unavailable(operation, error=exc)
+
+            if content_range is not None:
+                range_start, range_end, range_total = content_range
+                if range_total is not None:
+                    if expected_total is None:
+                        expected_total = range_total
+                    elif expected_total != range_total:
+                        _raise_database_unavailable(
+                            operation,
+                            error=ValueError("inconsistent normalized total"),
+                        )
+                    if expected_total > NORMALIZED_MAX_ROWS:
+                        _raise_database_unavailable(
+                            operation,
+                            error=ValueError("normalized pagination limit exceeded"),
+                        )
+                if range_start is None or range_end is None:
+                    if page_rows or (range_total not in {None, 0}):
+                        _raise_database_unavailable(
+                            operation,
+                            error=ValueError("invalid normalized empty range"),
+                        )
+                else:
+                    if range_start != offset or range_end - range_start + 1 != len(page_rows):
+                        _raise_database_unavailable(
+                            operation,
+                            error=ValueError("normalized range does not match rows"),
+                        )
+                    if expected_total is not None and range_end >= expected_total:
+                        if range_end + 1 != expected_total:
+                            _raise_database_unavailable(
+                                operation,
+                                error=ValueError("normalized range exceeds total"),
+                            )
+
+            # A provider that ignores Range can otherwise return the same
+            # full page forever.  Keep the check only for repeated pages; a
+            # legitimate duplicate row inside different pages is preserved.
+            if page_rows and len(page_rows) == request_size:
+                page_signature = json.dumps(
+                    page_rows,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                if page_signature in seen_page_signatures:
+                    _raise_database_unavailable(
+                        operation,
+                        error=ValueError("normalized pagination repeated a page"),
+                    )
+                seen_page_signatures.add(page_signature)
+
+            collected.extend(page_rows)
+            page_count += 1
+            offset += len(page_rows)
+            if offset > NORMALIZED_MAX_ROWS:
+                _raise_database_unavailable(
+                    operation,
+                    error=ValueError("normalized pagination limit exceeded"),
+                )
+
+            if requested_limit is not None and offset >= requested_limit:
+                break
+            if expected_total is not None:
+                if offset == expected_total:
+                    break
+                if offset > expected_total or not page_rows:
+                    _raise_database_unavailable(
+                        operation,
+                        error=ValueError("normalized pagination ended early"),
+                    )
+            elif not page_rows or len(page_rows) < request_size:
+                break
+
+        return collected[:requested_limit] if requested_limit is not None else collected
+
+    async def upsert_rows(
+        self,
+        resource: str,
+        rows: List[Dict[str, Any]],
+        *,
+        conflict_key: str,
+        operation: str,
+    ) -> None:
+        """Upsert a bounded set of normalized rows without returning bodies."""
+        if not rows:
+            return
+        response = await _db_http_request(
+            "POST",
+            self.resource_url(resource, on_conflict=conflict_key),
+            operation=operation,
+            headers=self.normalized_headers(
+                write=True,
+                prefer="resolution=merge-duplicates,return=minimal",
+            ),
+            timeout=30.0,
+            json_payload=rows,
+        )
+        if response.status_code not in {200, 201, 204}:
+            _raise_database_unavailable(
+                operation,
+                status_code=response.status_code,
+                detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+            )
+
+    async def delete_ids(
+        self,
+        resource: str,
+        ids: List[str],
+        *,
+        id_column: str,
+        operation: str,
+    ) -> None:
+        """Delete only IDs observed in a prior complete normalized snapshot."""
+        if resource not in V2_RESOURCES or not ids:
+            return
+        for row_id in ids:
+            response = await _db_http_request(
+                "DELETE",
+                self.resource_url(
+                    resource,
+                    filters={id_column: f"eq.{row_id}"},
+                ),
+                operation=operation,
+                headers=self.normalized_headers(
+                    write=True,
+                    prefer="return=minimal",
+                ),
+                timeout=30.0,
+            )
+            if response.status_code not in {200, 204}:
+                _raise_database_unavailable(
+                    operation,
+                    status_code=response.status_code,
+                    detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+                )
+
+
+def _storage_status(config: Optional[StorageConfig] = None) -> Dict[str, Any]:
+    """Return safe configuration metadata without URL or credential values."""
+    selected = config or STORAGE_CONFIG
+    return {
+        "mode": selected.mode,
+        "layout": selected.layout,
+        "enabled": selected.enabled,
+        "configured": selected.configured,
+        "read_only": selected.read_only,
+        "source": selected.source,
+    }
+
+
+def _is_modern_supabase_key(key: str) -> bool:
+    """New opaque Supabase keys are API keys, not JWT bearer tokens."""
+    return isinstance(key, str) and key.startswith(("sb_secret_", "sb_publishable_"))
+
+
+def _build_supabase_headers(
+    key: str,
+    *,
+    content_type: str = "application/json",
+    prefer: Optional[str] = None,
+    accept_profile: Optional[str] = None,
+    content_profile: Optional[str] = None,
+) -> Dict[str, str]:
+    """Build safe Data API/Storage headers for modern and legacy keys."""
+    headers = {
+        "apikey": key,
+        "Content-Type": content_type,
+    }
+    if not _is_modern_supabase_key(key):
+        headers["Authorization"] = f"Bearer {key}"
+    if prefer:
+        headers["Prefer"] = prefer
+    if accept_profile:
+        headers["Accept-Profile"] = accept_profile
+    if content_profile:
+        headers["Content-Profile"] = content_profile
+    return headers
+
+
+def _activate_storage_config(config: StorageConfig) -> None:
+    """Apply a config atomically to the legacy globals used by this module."""
+    global STORAGE_CONFIG, STORAGE_ADAPTER, STORAGE_BACKEND
+    global SUPABASE_URL, SUPABASE_KEY, HEADERS
+    STORAGE_CONFIG = config
+    STORAGE_ADAPTER = StorageAdapter(config)
+    STORAGE_BACKEND = config.mode
+    SUPABASE_URL = config.url
+    SUPABASE_KEY = config.key
+    HEADERS = _build_supabase_headers(config.key)
+
+
+def _is_normalized_storage() -> bool:
+    """Return whether the selected target is the opt-in normalized V2 path."""
+    return STORAGE_CONFIG.mode == STORAGE_V2 and STORAGE_CONFIG.layout == STORAGE_LAYOUT_NORMALIZED
+
+
+def _is_compat_storage() -> bool:
+    """Return whether the phase-1 V2 bridge uses the legacy JSON contract."""
+    return STORAGE_CONFIG.mode == STORAGE_V2_COMPAT and STORAGE_CONFIG.layout == STORAGE_LAYOUT_COMPAT
+
+
+STORAGE_CONFIG = _build_storage_config()
+STORAGE_ADAPTER = StorageAdapter(STORAGE_CONFIG)
+STORAGE_BACKEND = STORAGE_CONFIG.mode
+_activate_storage_config(STORAGE_CONFIG)
 
 
 
@@ -37,23 +733,6 @@ Reglas del negocio que debes conocer:
 - La app tiene una función de "Arrastrar y Soltar" (Drag and Drop) para reasignar pasajeros entre unidades.
 - La app muestra gráficos de "Carga por Unidad" y "Eficiencia Global".
 Responde siempre de manera concisa, profesional, y directa (sin introducciones robóticas). Usa viñetas si es necesario."""
-
-# Transitional fallback: production keeps working while the same values are
-# configured in Vercel. Phase 1 will remove the fallbacks after deployment
-# configuration has been verified.
-SUPABASE_URL = os.environ.get(
-    "SUPABASE_URL",
-    "https://pkyezkdssyrbwxhldsay.supabase.co/rest/v1",
-).rstrip("/")
-SUPABASE_KEY = os.environ.get(
-    "SUPABASE_KEY",
-    "sb_publishable_EAqFBKHuDkoN7WqxeoGcMA_Iv0qEM0o",
-)
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json"
-}
 
 PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 310_000
@@ -158,7 +837,11 @@ def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
         if not isinstance(user, dict):
             continue
         for session in user.get("_auth_sessions", []):
-            if not isinstance(session, dict) or int(session.get("expires_at", 0)) <= now:
+            if (
+                not isinstance(session, dict)
+                or int(session.get("expires_at", 0)) <= now
+                or session.get("revoked_at")
+            ):
                 continue
             if hmac.compare_digest(session.get("token_hash", ""), token_hash):
                 return user
@@ -250,6 +933,1119 @@ ws_manager = WebSocketManager()
 
 db_loaded = False
 
+DATABASE_UNAVAILABLE_DETAIL = "La base de datos no está disponible temporalmente. Intenta nuevamente."
+DATABASE_WRITE_UNAVAILABLE_DETAIL = "No se pudo guardar la información. Intenta nuevamente."
+
+
+def _bounded_float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+    """Read a numeric tuning value without allowing unsafe extremes."""
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+# A warm Vercel instance can serve repeated dashboard polls from memory. The
+# cache is deliberately short and is invalidated after every successful write
+# so local mutations are never hidden behind the TTL.
+DB_CACHE_TTL_SECONDS = _bounded_float_env(
+    "KAPITAL_DB_CACHE_TTL_SECONDS",
+    45.0,
+    30.0,
+    60.0,
+)
+DB_RETRY_MAX_ATTEMPTS = 2
+DB_RETRY_BASE_SECONDS = _bounded_float_env(
+    "KAPITAL_DB_RETRY_BASE_SECONDS",
+    0.15,
+    0.05,
+    1.0,
+)
+DB_CIRCUIT_FAILURE_THRESHOLD = 3
+DB_CIRCUIT_COOLDOWN_SECONDS = _bounded_float_env(
+    "KAPITAL_DB_CIRCUIT_COOLDOWN_SECONDS",
+    15.0,
+    5.0,
+    60.0,
+)
+
+# PostgREST applies a provider-side row cap to collection reads.  Keep each
+# request below that cap and bound the total work so a malformed/misconfigured
+# endpoint cannot make a warm function loop forever or accumulate unbounded
+# state in memory.  The limits are deliberately module constants so tests can
+# exercise the failure boundary without changing deployment configuration.
+NORMALIZED_PAGE_SIZE = 1000
+NORMALIZED_MAX_PAGES = 100
+NORMALIZED_MAX_ROWS = NORMALIZED_PAGE_SIZE * NORMALIZED_MAX_PAGES
+
+_db_cache_loaded_at = 0.0
+_notifications_cache_loaded_at = 0.0
+_routes_summary_cache_loaded_at = 0.0
+# Compatibility-mode projections are kept separate from the full snapshot
+# cache.  A route-only read must not make a later user/admin read believe that
+# the complete legacy state is resident in memory.
+_routes_projection_loaded_at = 0.0
+_users_projection_loaded_at = 0.0
+_fleet_projection_loaded_at = 0.0
+_db_io_lock: Optional[asyncio.Lock] = None
+_db_io_lock_loop = None
+_db_circuit_failures = 0
+_db_circuit_open_until = 0.0
+_db_circuit_state_lock = threading.Lock()
+_normalized_snapshot_ids: Dict[str, set[str]] = {}
+_normalized_snapshot_ready = False
+
+
+def _cache_is_fresh(loaded_at: float) -> bool:
+    return bool(loaded_at and (time.monotonic() - loaded_at) < DB_CACHE_TTL_SECONDS)
+
+
+def _full_cache_is_fresh() -> bool:
+    return db_loaded and _cache_is_fresh(_db_cache_loaded_at)
+
+
+def _routes_projection_is_fresh() -> bool:
+    return _cache_is_fresh(_routes_projection_loaded_at)
+
+
+def _users_projection_is_fresh() -> bool:
+    return _cache_is_fresh(_users_projection_loaded_at)
+
+
+def _fleet_projection_is_fresh() -> bool:
+    return _cache_is_fresh(_fleet_projection_loaded_at)
+
+
+def _invalidate_db_cache() -> None:
+    """Invalidate all in-process projections without erasing known state."""
+    global db_loaded, _db_cache_loaded_at, _notifications_cache_loaded_at, _routes_summary_cache_loaded_at
+    global _routes_projection_loaded_at, _users_projection_loaded_at, _fleet_projection_loaded_at
+    global _normalized_snapshot_ready
+    db_loaded = False
+    _db_cache_loaded_at = 0.0
+    _notifications_cache_loaded_at = 0.0
+    _routes_summary_cache_loaded_at = 0.0
+    _routes_projection_loaded_at = 0.0
+    _users_projection_loaded_at = 0.0
+    _fleet_projection_loaded_at = 0.0
+    # A destructive reconciliation is only safe against a complete snapshot;
+    # writes invalidate that evidence until the next normalized reload.
+    _normalized_snapshot_ready = False
+
+
+def _reset_db_runtime_state() -> None:
+    """Reset cache/circuit state for tests and controlled local diagnostics."""
+    global _db_io_lock, _db_io_lock_loop, _db_circuit_failures, _db_circuit_open_until
+    global _normalized_snapshot_ids, _normalized_snapshot_ready
+    _invalidate_db_cache()
+    _db_io_lock = None
+    _db_io_lock_loop = None
+    with _db_circuit_state_lock:
+        _db_circuit_failures = 0
+        _db_circuit_open_until = 0.0
+    _normalized_snapshot_ids = {}
+    _normalized_snapshot_ready = False
+
+
+def _get_db_io_lock() -> asyncio.Lock:
+    """Return one lock per running event loop for single-flight database I/O."""
+    global _db_io_lock, _db_io_lock_loop
+    loop = asyncio.get_running_loop()
+    if _db_io_lock is None or _db_io_lock_loop is not loop:
+        _db_io_lock = asyncio.Lock()
+        _db_io_lock_loop = loop
+    return _db_io_lock
+
+
+def _circuit_is_open() -> bool:
+    global _db_circuit_failures, _db_circuit_open_until
+    now = time.monotonic()
+    with _db_circuit_state_lock:
+        if _db_circuit_open_until > now:
+            return True
+        if _db_circuit_open_until:
+            _db_circuit_failures = 0
+            _db_circuit_open_until = 0.0
+    return False
+
+
+def _record_db_failure() -> None:
+    global _db_circuit_failures, _db_circuit_open_until
+    now = time.monotonic()
+    with _db_circuit_state_lock:
+        _db_circuit_failures += 1
+        if _db_circuit_failures >= DB_CIRCUIT_FAILURE_THRESHOLD:
+            _db_circuit_open_until = now + DB_CIRCUIT_COOLDOWN_SECONDS
+
+
+def _record_db_success() -> None:
+    global _db_circuit_failures, _db_circuit_open_until
+    with _db_circuit_state_lock:
+        _db_circuit_failures = 0
+        _db_circuit_open_until = 0.0
+
+
+def _response_size_bytes(response) -> Optional[int]:
+    """Return a response size without logging or parsing response contents."""
+    try:
+        header_value = response.headers.get("content-length")
+        if header_value is not None:
+            return int(header_value)
+    except (AttributeError, TypeError, ValueError):
+        pass
+    try:
+        content = response.content
+        if isinstance(content, (bytes, bytearray)):
+            return len(content)
+    except Exception:
+        pass
+    return None
+
+
+def _log_db_metric(operation: str, status: Optional[int], started_at: float, response=None) -> None:
+    """Emit a sanitized database metric; never include URLs, bodies, or PII."""
+    payload = {
+        "component": "database",
+        "operation": operation,
+        "status": status,
+        "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        "response_bytes": _response_size_bytes(response) if response is not None else None,
+    }
+    print("[KapitalMetrics] " + json.dumps(payload, separators=(",", ":")))
+
+
+async def _db_http_request(
+    method: str,
+    url: str,
+    *,
+    operation: str,
+    headers: Dict[str, str],
+    timeout: float,
+    json_payload: Optional[Dict[str, Any]] = None,
+    failure_detail: str = DATABASE_UNAVAILABLE_DETAIL,
+) -> Any:
+    """Run a bounded provider request with retry/backoff and circuit breaking."""
+    method_name = method.lower()
+    write_request = method_name in {"post", "patch", "put", "delete"}
+    _ensure_storage_ready(operation, write=write_request, detail=failure_detail)
+    if _circuit_is_open():
+        _raise_database_unavailable(
+            operation,
+            error=RuntimeError("database circuit open"),
+            detail=failure_detail,
+        )
+
+    for attempt in range(DB_RETRY_MAX_ATTEMPTS):
+        started_at = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                request_kwargs = {"headers": headers}
+                if json_payload is not None:
+                    request_kwargs["json"] = json_payload
+                request_method = getattr(client, method_name)
+                response = await request_method(url, **request_kwargs)
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            _log_db_metric(operation, None, started_at)
+            if attempt + 1 < DB_RETRY_MAX_ATTEMPTS:
+                await asyncio.sleep(DB_RETRY_BASE_SECONDS * (2 ** attempt))
+                continue
+            _record_db_failure()
+            _raise_database_unavailable(operation, error=exc, detail=failure_detail)
+        except Exception as exc:
+            _log_db_metric(operation, None, started_at)
+            _record_db_failure()
+            _raise_database_unavailable(operation, error=exc, detail=failure_detail)
+
+        status = getattr(response, "status_code", None)
+        _log_db_metric(operation, status, started_at, response)
+        if isinstance(status, int) and 200 <= status < 300:
+            _record_db_success()
+            return response
+
+        # A quota response (402) is not useful to retry. Temporary provider
+        # failures and rate limits get one short exponential retry.
+        retryable_status = status in {429, 503, 504}
+        if retryable_status and attempt + 1 < DB_RETRY_MAX_ATTEMPTS:
+            await asyncio.sleep(DB_RETRY_BASE_SECONDS * (2 ** attempt))
+            continue
+
+        if status in {402, 429, 503, 504}:
+            _record_db_failure()
+        return response
+
+
+def _app_state_url(select: Optional[str] = None) -> str:
+    return STORAGE_ADAPTER.state_url(select=select)
+
+
+def _raise_database_unavailable(
+    operation: str,
+    *,
+    status_code: Optional[int] = None,
+    error: Optional[BaseException] = None,
+    detail: str = DATABASE_UNAVAILABLE_DETAIL,
+):
+    """Raise a sanitized 503 without echoing Supabase response bodies."""
+    _invalidate_db_cache()
+    context = f"[Supabase] {operation} failed"
+    if status_code is not None:
+        context += f" status={status_code}"
+    if error is not None:
+        context += f" error={type(error).__name__}"
+    print(context)
+    raise HTTPException(status_code=503, detail=detail)
+
+
+def _ensure_storage_ready(
+    operation: str,
+    *,
+    write: bool = False,
+    detail: str = DATABASE_UNAVAILABLE_DETAIL,
+) -> None:
+    """Fail closed before any request when the selected target is unsafe."""
+    try:
+        STORAGE_ADAPTER.assert_ready(write=write)
+    except Exception as exc:
+        _raise_database_unavailable(operation, error=exc, detail=detail)
+
+
+def _state_row_or_raise(response, operation: str = "load") -> Dict[str, Any]:
+    """Validate a successful singleton response without exposing its body."""
+    if response.status_code != 200:
+        _raise_database_unavailable(operation, status_code=response.status_code)
+    try:
+        rows = response.json()
+    except (TypeError, ValueError) as exc:
+        _raise_database_unavailable(operation, error=exc)
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        _raise_database_unavailable(operation, error=ValueError("invalid app_state shape"))
+    data = rows[0]
+    if (
+        not isinstance(data.get("usuarios"), dict)
+        or ("rutas" in data and not isinstance(data.get("rutas"), list))
+    ):
+        _raise_database_unavailable(operation, error=ValueError("invalid app_state data"))
+    reserved_shapes = {
+        "__routes_summary__": list,
+        "__historial_rutas__": list,
+        "__lock__": dict,
+        "__flota__": dict,
+        "__notifications__": list,
+    }
+    for key, expected_type in reserved_shapes.items():
+        if key in data["usuarios"] and not isinstance(data["usuarios"][key], expected_type):
+            _raise_database_unavailable(operation, error=ValueError(f"invalid {key} type"))
+    legacy_shapes = {
+        "routes_summary": list,
+        "historial": list,
+        "lock": dict,
+        "flota": dict,
+        "notifications": list,
+    }
+    for key, expected_type in legacy_shapes.items():
+        if key in data and not isinstance(data[key], expected_type):
+            _raise_database_unavailable(operation, error=ValueError(f"invalid legacy {key} type"))
+    return data
+
+
+def _v2_epoch(value: Any) -> int:
+    """Convert a Postgres timestamp into the legacy session epoch shape."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not value:
+        return 0
+    try:
+        text = str(value).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _v2_timestamp(value: Any) -> Optional[str]:
+    """Return a Postgres-compatible timestamp or None for malformed input."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.isoformat()
+
+
+def _v2_date(value: Any) -> Optional[str]:
+    """Normalize common legacy date strings before writing Postgres dates."""
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], pattern).date().isoformat()
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _v2_integer(value: Any, *, minimum: Optional[int] = None) -> Optional[int]:
+    """Coerce legacy numeric fields without sending invalid values to Postgres."""
+    if value in (None, ""):
+        return None
+    try:
+        number = int(float(str(value).strip()))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if minimum is not None and number < minimum:
+        return None
+    return number
+
+
+def _v2_coordinate(value: Any, *, minimum: float, maximum: float) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or number < minimum or number > maximum:
+        return None
+    return number
+
+
+def _v2_legacy_status(value: Any) -> str:
+    text = str(value or "Activo").strip()
+    return {"active": "Activo", "inactive": "Inactivo", "pending": "Pendiente"}.get(
+        text.lower(),
+    ) or text
+
+
+def _v2_decode_users(
+    user_rows: List[Dict[str, Any]],
+    credential_rows: List[Dict[str, Any]],
+    profile_rows: List[Dict[str, Any]],
+    session_rows: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    credentials = {str(row.get("user_id")): row for row in credential_rows if row.get("user_id")}
+    profiles = {str(row.get("user_id")): row for row in profile_rows if row.get("user_id")}
+    sessions_by_user: Dict[str, List[Dict[str, Any]]] = {}
+    for row in session_rows:
+        user_id = str(row.get("user_id")) if row.get("user_id") else ""
+        if not user_id:
+            continue
+        sessions_by_user.setdefault(user_id, []).append({
+            "token_hash": row.get("token_hash"),
+            "created_at": _v2_epoch(row.get("issued_at") or row.get("created_at")),
+            "expires_at": _v2_epoch(row.get("expires_at")),
+            "revoked_at": row.get("revoked_at"),
+            "_normalized_id": str(row.get("id")) if row.get("id") else None,
+        })
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for row in user_rows:
+        user_id = str(row.get("id")) if row.get("id") else ""
+        identifier = str(
+            row.get("login_identifier")
+            or row.get("email")
+            or row.get("government_id")
+            or user_id
+        ).strip()
+        if not user_id or not identifier:
+            continue
+        credential = credentials.get(user_id, {})
+        user: Dict[str, Any] = {
+            "identifier": identifier,
+            "email": row.get("email"),
+            "dni": row.get("government_id"),
+            "password": credential.get("password_hash"),
+            "nombre": row.get("display_name") or identifier,
+            "rol": row.get("role_code") or "Usuario",
+            "unidad_id": row.get("unit_id"),
+            "empresa_id": row.get("company_id"),
+            "estado": _v2_legacy_status(row.get("status_code")),
+            "needs_password_change": bool(
+                row.get("needs_password_change") or credential.get("needs_reset")
+            ),
+            "last_login": row.get("last_login_at"),
+            "_normalized_id": user_id,
+            "_auth_sessions": sessions_by_user.get(user_id, []),
+        }
+        profile = profiles.get(user_id)
+        if profile is not None:
+            changes = profile.get("change_requests")
+            user["perfil_conductor"] = {
+                "direccion": profile.get("address"),
+                "numDoc": profile.get("document_number"),
+                "fechaNacimiento": profile.get("birth_date"),
+                "telefonoDirecto": profile.get("direct_phone"),
+                "placa": profile.get("vehicle_plate"),
+                "estado": profile.get("profile_status"),
+                "solicitudes_cambio": changes if isinstance(changes, dict) else {},
+            }
+        result[identifier] = user
+    return result
+
+
+def _v2_decode_fleet(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    result: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        unit_id = str(row.get("unit_id") or "").strip()
+        if not unit_id:
+            continue
+        result[unit_id] = {
+            "placa": row.get("plate"),
+            "capacidad": row.get("capacity"),
+            "tipo": row.get("vehicle_type"),
+            "chofer": row.get("driver_name"),
+            "soat": row.get("soat_value"),
+            "revision": row.get("inspection_value"),
+            "atu": row.get("atu_value"),
+            "licencia": row.get("license_value"),
+            "_normalized_id": unit_id,
+        }
+    return result
+
+
+def _v2_decode_notifications(
+    rows: List[Dict[str, Any]],
+    users: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    identifier_by_id = {
+        str(user.get("_normalized_id")): user.get("identifier")
+        for user in users.values()
+        if user.get("_normalized_id")
+    }
+    result: List[Dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        source_id = row.get("source_notification_id")
+        try:
+            legacy_id: Any = int(source_id) if source_id not in (None, "") else index
+        except (TypeError, ValueError):
+            legacy_id = index
+        recipient = identifier_by_id.get(str(row.get("recipient_user_id")))
+        result.append({
+            "id": legacy_id,
+            "title": row.get("title"),
+            "message": row.get("message"),
+            "type": row.get("notification_type") or "info",
+            "timestamp": row.get("created_at") or row.get("updated_at"),
+            "para": recipient or row.get("audience_code"),
+            "leido": row.get("read_at") is not None,
+            "_normalized_id": str(row.get("id")) if row.get("id") else None,
+        })
+    return result
+
+
+def _v2_decode_routes(
+    route_rows: List[Dict[str, Any]],
+    passenger_rows: List[Dict[str, Any]],
+    assignment_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    passengers = {str(row.get("id")): row for row in passenger_rows if row.get("id")}
+    assignments: Dict[str, List[Dict[str, Any]]] = {}
+    for row in assignment_rows:
+        route_id = str(row.get("route_id")) if row.get("route_id") else ""
+        if route_id:
+            assignments.setdefault(route_id, []).append(row)
+    routes: List[Dict[str, Any]] = []
+    for row in route_rows:
+        route_id = str(row.get("id")) if row.get("id") else ""
+        if not route_id:
+            continue
+        agents: List[Dict[str, Any]] = []
+        sorted_assignments = sorted(
+            assignments.get(route_id, []),
+            key=lambda item: item.get("assignment_order")
+            if item.get("assignment_order") is not None
+            else 0,
+        )
+        for assignment in sorted_assignments:
+            passenger = passengers.get(str(assignment.get("passenger_id")), {})
+            legacy_id = passenger.get("legacy_identifier") or passenger.get("id")
+            if legacy_id is None:
+                continue
+            agents.append({
+                "id": legacy_id,
+                "nombre": passenger.get("full_name"),
+                "empresa": passenger.get("company_id"),
+                "direccion": passenger.get("address"),
+                "lat": passenger.get("latitude"),
+                "lng": passenger.get("longitude"),
+                "estado": assignment.get("status_code") or passenger.get("status_code"),
+                "_normalized_id": str(passenger.get("id")) if passenger.get("id") else None,
+            })
+        routes.append({
+            "conductor": row.get("unit_id") or "SIN ASIGNAR",
+            "micro_zona": row.get("zone") or "unknown",
+            "horario": row.get("schedule") or "unknown",
+            "fecha": row.get("route_date"),
+            "estado": row.get("status_code"),
+            "agentes": agents,
+            "_normalized_id": route_id,
+        })
+    return routes
+
+
+def _v2_decode_snapshot(rows_by_resource: Mapping[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    users = _v2_decode_users(
+        rows_by_resource.get("app_users", []),
+        rows_by_resource.get("auth_credentials", []),
+        rows_by_resource.get("driver_profiles", []),
+        rows_by_resource.get("auth_sessions", []),
+    )
+    routes = _v2_decode_routes(
+        rows_by_resource.get("routes", []),
+        rows_by_resource.get("passengers", []),
+        rows_by_resource.get("route_passengers", []),
+    )
+    summary = _build_routes_summary(routes)
+    return {
+        "usuarios": users,
+        "rutas": routes,
+        "routes_summary": summary,
+        "historial_rutas": [
+            {
+                "id": row.get("id"),
+                "operation": row.get("operation_code"),
+                "route_count": row.get("route_count"),
+                "passenger_count": row.get("passenger_count"),
+                "captured_at": row.get("captured_at"),
+            }
+            for row in rows_by_resource.get("route_history", [])
+        ],
+        "board_lock": {
+            str(row.get("board_name")): {
+                "owner_user_id": row.get("owner_user_id"),
+                "lease_until": row.get("lease_until"),
+                "version": row.get("version"),
+                "updated_at": row.get("updated_at"),
+            }
+            for row in rows_by_resource.get("board_locks", [])
+            if row.get("board_name")
+        },
+        "notifications": _v2_decode_notifications(
+            rows_by_resource.get("notifications", []),
+            users,
+        ),
+        "flota": _v2_decode_fleet(rows_by_resource.get("fleet_units", [])),
+    }
+
+
+async def _load_normalized_login_user(identifier: str) -> Optional[Dict[str, Any]]:
+    """Load only the user/auth rows needed for a V2 login.
+
+    Login must not download fleet, route, passenger, notification, history, or
+    document data.  The full normalized snapshot remains available for legacy
+    endpoints, but the auth path can resolve a single user and its credential,
+    profile, and session rows first.
+    """
+    cleaned = str(identifier or "").strip()
+    if not cleaned:
+        return None
+    lookup_candidates = (
+        (
+            "login_identifier_sha256",
+            hashlib.sha256(cleaned.lower().encode("utf-8")).hexdigest(),
+        ),
+        ("login_identifier", cleaned),
+        ("email", cleaned),
+        ("government_id", cleaned),
+    )
+    user_rows: List[Dict[str, Any]] = []
+    for column, value in lookup_candidates:
+        user_rows = await STORAGE_ADAPTER.fetch_rows(
+            "app_users",
+            filters={column: f"eq.{value}"},
+            limit=1,
+            operation="load_login_user",
+        )
+        if user_rows:
+            break
+    if not user_rows:
+        return None
+    user_id = str(user_rows[0].get("id") or "")
+    if not user_id:
+        return None
+    credential_rows = await STORAGE_ADAPTER.fetch_rows(
+        "auth_credentials",
+        filters={"user_id": f"eq.{user_id}"},
+        limit=1,
+        operation="load_login_credentials",
+    )
+    profile_rows = await STORAGE_ADAPTER.fetch_rows(
+        "driver_profiles",
+        filters={"user_id": f"eq.{user_id}"},
+        limit=1,
+        operation="load_login_profile",
+    )
+    session_rows = await STORAGE_ADAPTER.fetch_rows(
+        "auth_sessions",
+        filters={"user_id": f"eq.{user_id}"},
+        order="expires_at.desc",
+        limit=5,
+        operation="load_login_sessions",
+    )
+    decoded = _v2_decode_users(user_rows, credential_rows, profile_rows, session_rows)
+    user = next(iter(decoded.values()), None)
+    if user is not None:
+        usuarios_db[user["identifier"]] = user
+    return user
+
+
+async def _fetch_normalized_snapshot() -> Dict[str, List[Dict[str, Any]]]:
+    """Load normalized relational data without fetching document binaries."""
+    resources = (
+        "app_users",
+        "auth_credentials",
+        "auth_sessions",
+        "driver_profiles",
+        "fleet_units",
+        "routes",
+        "passengers",
+        "route_passengers",
+        "notifications",
+        "route_history",
+        "board_locks",
+    )
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for resource in resources:
+        result[resource] = await STORAGE_ADAPTER.fetch_rows(
+            resource,
+            operation=f"load_{resource}",
+        )
+    return result
+
+
+def _normalized_snapshot_keys(rows_by_resource: Mapping[str, List[Dict[str, Any]]]) -> Dict[str, set[str]]:
+    key_by_resource = {
+        "app_users": "id",
+        "auth_credentials": "user_id",
+        "auth_sessions": "id",
+        "driver_profiles": "user_id",
+        "fleet_units": "unit_id",
+        "routes": "id",
+        "passengers": "id",
+        "route_passengers": "assignment_id",
+        "notifications": "id",
+        "route_history": "id",
+        "board_locks": "board_name",
+    }
+    return {
+        resource: {
+            str(row[key])
+            for row in rows_by_resource.get(resource, [])
+            if row.get(key) not in (None, "")
+        }
+        for resource, key in key_by_resource.items()
+    }
+
+
+async def _load_normalized_state_locked() -> None:
+    """Load V2 resources once and atomically rebuild the legacy globals."""
+    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
+    global historial_rutas, board_lock, routes_summary, notifications_db
+    global _normalized_snapshot_ids, _normalized_snapshot_ready
+    rows_by_resource = await _fetch_normalized_snapshot()
+    decoded = _v2_decode_snapshot(rows_by_resource)
+    usuarios_db = decoded["usuarios"]
+    rutas_estado_actual = decoded["rutas"]
+    routes_summary = decoded["routes_summary"]
+    historial_rutas = decoded["historial_rutas"]
+    board_lock = decoded["board_lock"]
+    notifications_db = decoded["notifications"]
+    conductores_db = decoded["flota"]
+    _normalized_snapshot_ids = _normalized_snapshot_keys(rows_by_resource)
+    _normalized_snapshot_ready = True
+    db_loaded = True
+    loaded_at = time.monotonic()
+    global _db_cache_loaded_at, _notifications_cache_loaded_at, _routes_summary_cache_loaded_at
+    global _routes_projection_loaded_at, _users_projection_loaded_at, _fleet_projection_loaded_at
+    _db_cache_loaded_at = loaded_at
+    _notifications_cache_loaded_at = loaded_at
+    _routes_summary_cache_loaded_at = loaded_at
+    _routes_projection_loaded_at = loaded_at
+    _users_projection_loaded_at = loaded_at
+    _fleet_projection_loaded_at = loaded_at
+
+
+async def _persist_app_state(payload: Dict[str, Any], operation: str) -> None:
+    """Persist state and fail closed without echoing Supabase response bodies."""
+    if _is_normalized_storage():
+        await _persist_normalized_state(operation)
+        return
+    headers = _build_supabase_headers(
+        STORAGE_CONFIG.key,
+        prefer="return=minimal",
+    )
+    async with _get_db_io_lock():
+        response = await _db_http_request(
+            "PATCH",
+            _app_state_url(),
+            operation=operation,
+            headers=headers,
+            timeout=30.0,
+            json_payload=payload,
+            failure_detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+        )
+    if response.status_code not in (200, 204):
+        _raise_database_unavailable(
+            operation,
+            status_code=response.status_code,
+            detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+        )
+    # Force the next read to confirm the remote snapshot. This is important
+    # when another warm Vercel instance may have written between requests.
+    _invalidate_db_cache()
+
+
+def _v2_hash_is_supported(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith(
+        ("pbkdf2_sha256$", "bcrypt$", "$2a$", "$2b$", "$2y$", "$argon2")
+    )
+
+
+def _v2_password_scheme(value: Any) -> str:
+    if isinstance(value, str) and value.startswith("pbkdf2_sha256$"):
+        return "pbkdf2_sha256"
+    if isinstance(value, str) and value.startswith(("bcrypt$", "$2a$", "$2b$", "$2y$")):
+        return "bcrypt"
+    if isinstance(value, str) and value.startswith("$argon2"):
+        return "argon2"
+    return "unknown"
+
+
+def _v2_user_payloads() -> Dict[str, List[Dict[str, Any]]]:
+    users: List[Dict[str, Any]] = []
+    profiles: List[Dict[str, Any]] = []
+    credentials: List[Dict[str, Any]] = []
+    sessions: List[Dict[str, Any]] = []
+    for key, user in usuarios_db.items():
+        if not isinstance(user, dict) or str(key).startswith("__"):
+            continue
+        identifier = str(user.get("identifier") or key).strip()
+        if not identifier:
+            continue
+        user_id = str(user.get("_normalized_id") or uuid.uuid4())
+        user["_normalized_id"] = user_id
+        password_value = user.get("password")
+        password_hash = password_value if _v2_hash_is_supported(password_value) else None
+        if password_value not in (None, "") and password_hash is None:
+            # V2 never writes plaintext. OLD retains its compatibility setting.
+            password_hash = hash_password(str(password_value))
+            user["password"] = password_hash
+        last_login_at = _v2_timestamp(user.get("last_login"))
+        unit_id = user.get("unidad_id")
+        if unit_id in (None, ""):
+            unit_id = None
+        elif str(unit_id) not in conductores_db:
+            unit_id = None
+        users.append({
+            "id": user_id,
+            "login_identifier": identifier,
+            "login_identifier_sha256": hashlib.sha256(identifier.lower().encode("utf-8")).hexdigest(),
+            "role_code": str(user.get("rol") or "Usuario"),
+            "status_code": str(user.get("estado") or "Activo"),
+            "unit_id": unit_id,
+            "company_id": user.get("empresa_id"),
+            "display_name": user.get("nombre") or identifier,
+            "email": user.get("email"),
+            "government_id": user.get("dni"),
+            "phone": user.get("telefono") or user.get("celular"),
+            "needs_password_change": bool(user.get("needs_password_change", False)),
+            **({"last_login_at": last_login_at} if last_login_at else {}),
+        })
+        credentials.append({
+            "user_id": user_id,
+            "password_hash": password_hash,
+            "password_scheme": _v2_password_scheme(password_hash),
+            # The current backend verifies PBKDF2 and legacy plaintext only;
+            # leave other accepted database schemes marked for reset.
+            "needs_reset": bool(
+                user.get("needs_password_change", False)
+                or not password_hash
+                or not (isinstance(password_hash, str) and password_hash.startswith("pbkdf2_sha256$"))
+            ),
+        })
+        profile = user.get("perfil_conductor")
+        if isinstance(profile, dict):
+            profiles.append({
+                "user_id": user_id,
+                "address": profile.get("direccion"),
+                "document_number": profile.get("numDoc"),
+                "birth_date": _v2_date(profile.get("fechaNacimiento")),
+                "direct_phone": profile.get("telefonoDirecto") or profile.get("telefono"),
+                "vehicle_plate": profile.get("placa") or profile.get("vehiculoPlaca"),
+                "profile_status": profile.get("estado"),
+                "change_requests": profile.get("solicitudes_cambio") or {},
+            })
+        for session in user.get("_auth_sessions", []):
+            if not isinstance(session, dict):
+                continue
+            token_hash = session.get("token_hash")
+            issued_at = _v2_timestamp(session.get("issued_at") or session.get("created_at"))
+            expires_at = _v2_timestamp(session.get("expires_at"))
+            if not token_hash or not issued_at or not expires_at:
+                continue
+            sessions.append({
+                "id": str(session.get("_normalized_id") or uuid.uuid4()),
+                "user_id": user_id,
+                "token_hash": token_hash,
+                "issued_at": issued_at,
+                "expires_at": expires_at,
+                **({
+                    "revoked_at": revoked_at,
+                } if (revoked_at := _v2_timestamp(session.get("revoked_at"))) else {}),
+            })
+    return {
+        "app_users": users,
+        "driver_profiles": profiles,
+        "auth_credentials": credentials,
+        "auth_sessions": sessions,
+    }
+
+
+def _v2_route_payloads() -> Dict[str, List[Dict[str, Any]]]:
+    routes: List[Dict[str, Any]] = []
+    passengers: Dict[str, Dict[str, Any]] = {}
+    assignments: List[Dict[str, Any]] = []
+    for route_index, route in enumerate(rutas_estado_actual, start=1):
+        if not isinstance(route, dict):
+            continue
+        conductor = str(route.get("conductor") or "SIN ASIGNAR")
+        zone = str(route.get("micro_zona") or "unknown")
+        schedule = str(route.get("horario") or "unknown")
+        route_key = f"{route_index}|{conductor}|{zone}|{schedule}"
+        route_id = str(route.get("_normalized_id") or uuid.uuid5(V2_NAMESPACE, f"route:{route_key}"))
+        routes.append({
+            "id": route_id,
+            "unit_id": conductor if conductor in conductores_db else None,
+            "zone": zone,
+            "schedule": schedule,
+            "status_code": route.get("estado") or "active",
+            "source_key_sha256": hashlib.sha256(route_key.encode("utf-8")).hexdigest(),
+            **({"route_date": _v2_date(route.get("fecha"))} if _v2_date(route.get("fecha")) else {}),
+        })
+        for assignment_index, agent in enumerate(route.get("agentes", [])):
+            if not isinstance(agent, dict):
+                continue
+            legacy_id = str(agent.get("id") or f"missing:{route_index}:{assignment_index}")
+            passenger_id = str(
+                agent.get("_normalized_id")
+                or uuid.uuid5(V2_NAMESPACE, f"passenger:{legacy_id}")
+            )
+            passengers.setdefault(passenger_id, {
+                "id": passenger_id,
+                "legacy_identifier": legacy_id,
+                "legacy_identifier_sha256": hashlib.sha256(legacy_id.encode("utf-8")).hexdigest(),
+                "full_name": agent.get("nombre"),
+                "company_id": agent.get("empresa"),
+                "address": agent.get("direccion"),
+                "latitude": _v2_coordinate(agent.get("lat"), minimum=-90, maximum=90),
+                "longitude": _v2_coordinate(agent.get("lng"), minimum=-180, maximum=180),
+                "status_code": agent.get("estado"),
+            })
+            assignments.append({
+                "assignment_id": str(
+                    agent.get("_assignment_id")
+                    or uuid.uuid5(V2_NAMESPACE, f"assignment:{route_id}:{assignment_index}")
+                ),
+                "route_id": route_id,
+                "passenger_id": passenger_id,
+                "assignment_order": _v2_integer(assignment_index, minimum=0),
+                "status_code": agent.get("estado"),
+            })
+    return {"routes": routes, "passengers": list(passengers.values()), "route_passengers": assignments}
+
+
+def _v2_notification_payloads() -> List[Dict[str, Any]]:
+    user_ids = {
+        str(user.get("identifier")): str(user.get("_normalized_id"))
+        for user in usuarios_db.values()
+        if isinstance(user, dict) and user.get("_normalized_id")
+    }
+    rows: List[Dict[str, Any]] = []
+    for index, notification in enumerate(notifications_db, start=1):
+        if not isinstance(notification, dict):
+            continue
+        recipient_raw = notification.get("para") or notification.get("recipient")
+        recipient_id = user_ids.get(str(recipient_raw)) if recipient_raw else None
+        audience = notification.get("audience_code") or (str(recipient_raw) if not recipient_id else None) or "admin"
+        row: Dict[str, Any] = {
+            "id": str(notification.get("_normalized_id") or uuid.uuid5(V2_NAMESPACE, f"notification:{notification.get('id', index)}")),
+            "recipient_user_id": recipient_id,
+            "audience_code": audience if not recipient_id else None,
+            "notification_type": notification.get("type") or notification.get("tipo") or "info",
+            "title": notification.get("title"),
+            "message": notification.get("message"),
+            "source_notification_id": str(notification.get("id")) if notification.get("id") is not None else None,
+        }
+        timestamp = _v2_timestamp(notification.get("timestamp") or notification.get("created_at"))
+        if timestamp:
+            row["created_at"] = timestamp
+            if notification.get("leido"):
+                row["read_at"] = timestamp
+        rows.append(row)
+    return rows
+
+
+def _v2_history_payloads() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for index, item in enumerate(historial_rutas, start=1):
+        if not isinstance(item, dict):
+            continue
+        captured_at = _v2_timestamp(item.get("captured_at"))
+        rows.append({
+            "id": str(item.get("_normalized_id") or uuid.uuid5(V2_NAMESPACE, f"history:{index}:{item.get('id', '')}")),
+            "operation_code": str(item.get("operation") or item.get("operacion") or "snapshot"),
+            "route_count": _v2_integer(item.get("route_count"), minimum=0),
+            "passenger_count": _v2_integer(item.get("passenger_count"), minimum=0),
+            **({"captured_at": captured_at} if captured_at else {}),
+        })
+    return rows
+
+
+def _v2_lock_payloads() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    user_ids = {
+        str(user.get("identifier")): str(user.get("_normalized_id"))
+        for user in usuarios_db.values()
+        if isinstance(user, dict) and user.get("_normalized_id")
+    }
+    for board_name, value in board_lock.items():
+        if board_name == "routes_summary":
+            continue
+        payload = value if isinstance(value, dict) else {}
+        if not str(board_name).strip():
+            continue
+        owner = payload.get("owner_user_id")
+        owner_user_id = None
+        if owner:
+            owner_user_id = user_ids.get(str(owner))
+            # A decoded normalized snapshot already stores the UUID.  Keep it
+            # stable across a read-modify-write cycle instead of dropping the
+            # ownership foreign key when no legacy identifier is available.
+            if owner_user_id is None:
+                owner_text = str(owner)
+                if any(owner_text == normalized_id for normalized_id in user_ids.values()):
+                    owner_user_id = owner_text
+        rows.append({
+            "board_name": str(board_name),
+            "owner_user_id": owner_user_id,
+            "lease_until": _v2_timestamp(payload.get("lease_until")),
+            "version": _v2_integer(payload.get("version") or 1, minimum=1) or 1,
+        })
+    return rows
+
+
+async def _persist_normalized_state(operation: str) -> None:
+    """Persist normalized tables in bounded, non-document batches."""
+    payloads: Dict[str, List[Dict[str, Any]]] = {}
+    payloads.update(_v2_user_payloads())
+    payloads.update(_v2_route_payloads())
+    payloads["fleet_units"] = [
+        {
+            "unit_id": str(unit_id),
+            "plate": data.get("placa"),
+            "vehicle_type": data.get("tipo"),
+            "capacity": _v2_integer(data.get("capacidad"), minimum=0),
+            "driver_name": data.get("chofer"),
+            "soat_value": data.get("soat"),
+            "inspection_value": data.get("revision"),
+            "atu_value": data.get("atu"),
+            "license_value": data.get("licencia"),
+        }
+        for unit_id, data in conductores_db.items()
+        if isinstance(data, dict) and str(unit_id).strip()
+    ]
+    payloads["notifications"] = _v2_notification_payloads()
+    payloads["route_history"] = _v2_history_payloads()
+    payloads["board_locks"] = _v2_lock_payloads()
+
+    upsert_plan = (
+        ("fleet_units", "unit_id"),
+        ("app_users", "id"),
+        ("driver_profiles", "user_id"),
+        ("auth_credentials", "user_id"),
+        ("auth_sessions", "id"),
+        ("passengers", "id"),
+        ("routes", "id"),
+        ("route_passengers", "assignment_id"),
+        ("notifications", "id"),
+        ("route_history", "id"),
+        ("board_locks", "board_name"),
+    )
+    # Keep user/auth mutations small.  The legacy persist_users_only() path
+    # intentionally carries notifications and locks because those values were
+    # co-located in app_state; it must not re-upload routes/passengers/fleet on
+    # every login or profile change.  Full route operations still reconcile the
+    # complete normalized graph.
+    if operation.startswith("persist_users"):
+        resources_to_write = {
+            "app_users",
+            "driver_profiles",
+            "auth_credentials",
+            "auth_sessions",
+            "notifications",
+            "board_locks",
+        }
+    else:
+        resources_to_write = {resource for resource, _ in upsert_plan}
+    for resource, conflict_key in upsert_plan:
+        if resource not in resources_to_write:
+            continue
+        await STORAGE_ADAPTER.upsert_rows(
+            resource,
+            payloads.get(resource, []),
+            conflict_key=conflict_key,
+            operation=f"{operation}:{resource}",
+        )
+
+    # Deletes are only reconciled after a complete snapshot was loaded. This
+    # prevents an empty/partial cache from becoming a destructive remote write.
+    if _normalized_snapshot_ready:
+        delete_plan = (
+            ("auth_sessions", "id"),
+            ("auth_credentials", "user_id"),
+            ("driver_profiles", "user_id"),
+            ("notifications", "id"),
+            ("route_passengers", "assignment_id"),
+            ("routes", "id"),
+            ("passengers", "id"),
+            ("route_history", "id"),
+            ("board_locks", "board_name"),
+            ("fleet_units", "unit_id"),
+            ("app_users", "id"),
+        )
+        current_keys = _normalized_snapshot_keys(payloads)
+        for resource, id_column in delete_plan:
+            if resource not in resources_to_write:
+                continue
+            removed = sorted(_normalized_snapshot_ids.get(resource, set()) - current_keys.get(resource, set()))
+            if not removed:
+                continue
+            if len(removed) > 500:
+                _raise_database_unavailable(
+                    f"{operation}:{resource}",
+                    error=ValueError("normalized delete set is unexpectedly large"),
+                    detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+                )
+            await STORAGE_ADAPTER.delete_ids(
+                resource,
+                removed,
+                id_column=id_column,
+                operation=f"{operation}:{resource}_delete",
+            )
+    _invalidate_db_cache()
+
+
 def _build_routes_summary(routes: list) -> list:
     """Build a compact route summary (no agent details) for GerentePortal."""
     return [
@@ -262,92 +2058,506 @@ def _build_routes_summary(routes: list) -> list:
         for r in routes
     ]
 
-async def ensure_db_loaded():
-    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, board_lock, routes_summary
-    if db_loaded:
+_MISSING = object()
+
+
+def _default_fleet() -> Dict[str, Dict[str, Any]]:
+    """Return the compatibility fleet used only by an empty legacy snapshot."""
+    return {
+        "KAP-001": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Juan Pérez", "soat": "2027-01-15", "revision": "2027-02-10", "atu": "2027-03-20", "licencia": "2028-05-10"},
+        "KAP-002": {"capacidad": 15, "tipo": "Sprinter", "chofer": "Carlos Gómez", "soat": "2026-08-05", "revision": "2026-11-20", "atu": "2026-12-01", "licencia": "2027-04-15"},
+        "KAP-003": {"capacidad": 10, "tipo": "Van", "chofer": "Luis Ramírez", "soat": "2027-05-10", "revision": "2026-09-15", "atu": "2026-10-30", "licencia": "2029-01-20"},
+        "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"},
+    }
+
+
+def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[str, Any]:
+    """Decode a validated app_state row without mutating the HTTP response."""
+    raw_users = data.get("usuarios", {})
+    usuarios = dict(raw_users)
+    has_canonical_flota = "__flota__" in usuarios
+    has_legacy_flota = "flota" in data
+    decoded = {
+        "usuarios": usuarios,
+        "rutas": list(data.get("rutas", [])),
+        "routes_summary": usuarios.pop("__routes_summary__", data.get("routes_summary", [])),
+        "historial_rutas": usuarios.pop("__historial_rutas__", data.get("historial", [])),
+        "board_lock": usuarios.pop("__lock__", data.get("lock", {})),
+        "notifications": usuarios.pop("__notifications__", data.get("notifications", [])),
+        "flota": usuarios.pop("__flota__", data.get("flota", _MISSING)),
+        "has_canonical_flota": has_canonical_flota,
+        "has_legacy_flota": has_legacy_flota,
+    }
+    if include_defaults and not has_canonical_flota and not has_legacy_flota:
+        if decoded["flota"] is _MISSING or not decoded["flota"]:
+            decoded["flota"] = _default_fleet()
+    if "TELEPERFORMANCE" not in usuarios:
+        usuarios["TELEPERFORMANCE"] = {
+            "identifier": "TELEPERFORMANCE",
+            "password": "1234",
+            "nombre": "Cliente Teleperformance",
+            "rol": "Cliente",
+            "empresa_id": "TELEPERFORMANCE",
+            "estado": "Activo",
+        }
+    return decoded
+
+
+async def _load_full_state_locked(*, include_defaults: bool) -> None:
+    """Load and atomically apply the full state; caller owns the I/O lock."""
+    if _is_normalized_storage():
+        await _load_normalized_state_locked()
+        return
+    global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
+    global historial_rutas, board_lock, routes_summary, notifications_db
+    response = await _db_http_request(
+        "GET",
+        _app_state_url(),
+        operation="load",
+        headers=HEADERS,
+        timeout=30.0,
+    )
+    data = _state_row_or_raise(response)
+    decoded = _decode_full_state(data, include_defaults=include_defaults)
+    # Apply the snapshot only after every shape has been validated. A failed
+    # provider response therefore leaves the last known in-memory state intact.
+    usuarios_db = decoded["usuarios"]
+    rutas_estado_actual = decoded["rutas"]
+    routes_summary = decoded["routes_summary"]
+    historial_rutas = decoded["historial_rutas"]
+    board_lock = decoded["board_lock"]
+    notifications_db = decoded["notifications"]
+    if decoded["flota"] is not _MISSING:
+        conductores_db = decoded["flota"]
+    db_loaded = True
+    loaded_at = time.monotonic()
+    global _db_cache_loaded_at, _notifications_cache_loaded_at, _routes_summary_cache_loaded_at
+    global _routes_projection_loaded_at, _users_projection_loaded_at, _fleet_projection_loaded_at
+    _db_cache_loaded_at = loaded_at
+    _notifications_cache_loaded_at = loaded_at
+    _routes_summary_cache_loaded_at = loaded_at
+    _routes_projection_loaded_at = loaded_at
+    _users_projection_loaded_at = loaded_at
+    _fleet_projection_loaded_at = loaded_at
+
+
+async def _load_full_state(*, include_defaults: bool, force: bool = False) -> None:
+    if not force and _full_cache_is_fresh():
         return
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
-            if res.status_code == 200 and len(res.json()) > 0:
-                data = res.json()[0]
-                usuarios_db = data.get("usuarios", {})
-                routes_summary = usuarios_db.pop("__routes_summary__", [])
-                rutas_estado_actual = data.get("rutas", [])
-                historial_rutas = data.get("historial", [])
-                board_lock = data.get("lock", {}) or {}
-                flota = data.get("flota", {})
-                if not flota:
-                    flota = {
-                        "KAP-001": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Juan Pérez", "soat": "2027-01-15", "revision": "2027-02-10", "atu": "2027-03-20", "licencia": "2028-05-10"},
-                        "KAP-002": {"capacidad": 15, "tipo": "Sprinter", "chofer": "Carlos Gómez", "soat": "2026-08-05", "revision": "2026-11-20", "atu": "2026-12-01", "licencia": "2027-04-15"},
-                        "KAP-003": {"capacidad": 10, "tipo": "Van", "chofer": "Luis Ramírez", "soat": "2027-05-10", "revision": "2026-09-15", "atu": "2026-10-30", "licencia": "2029-01-20"},
-                        "KAP-004": {"capacidad": 12, "tipo": "Sprinter", "chofer": "Miguel Torres", "soat": "2026-10-01", "revision": "2027-01-05", "atu": "2026-06-15", "licencia": "2028-11-10"}
-                    }
-                conductores_db = flota
-                if "TELEPERFORMANCE" not in usuarios_db:
-                    usuarios_db["TELEPERFORMANCE"] = {
-                        "identifier": "TELEPERFORMANCE",
-                        "password": "1234",
-                        "nombre": "Cliente Teleperformance",
-                        "rol": "Cliente",
-                        "empresa_id": "TELEPERFORMANCE",
-                        "estado": "Activo"
-                    }
-
-                db_loaded = True
-    except Exception as e:
-        print(f"Error loading from Supabase: {e}")
+        async with _get_db_io_lock():
+            # A concurrent request may have filled the cache while this one
+            # waited. Re-check even for force loads to retain single-flight.
+            if _full_cache_is_fresh():
+                return
+            await _load_full_state_locked(include_defaults=include_defaults)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load", error=exc)
 
 
-async def reload_db():
-    global rutas_estado_actual, usuarios_db, conductores_db, historial_rutas, db_loaded, board_lock, routes_summary, notifications_db
+async def ensure_db_loaded():
+    """Load the canonical state once, retaining legacy fleet compatibility."""
+    await _load_full_state(include_defaults=True)
+
+
+async def reload_db(force: bool = False):
+    """Refresh the full snapshot with a bounded TTL and single-flight lock."""
+    await _load_full_state(include_defaults=False, force=force)
+
+
+def _projection_rows_or_raise(response, operation: str) -> List[Dict[str, Any]]:
+    if response.status_code != 200:
+        _raise_database_unavailable(operation, status_code=response.status_code)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1", headers=HEADERS)
-            if res.status_code == 200 and len(res.json()) > 0:
-                data = res.json()[0]
-                usuarios_db = data.get("usuarios", {})
-                routes_summary = usuarios_db.pop("__routes_summary__", [])
-                historial_rutas = usuarios_db.pop("__historial_rutas__", [])
-                board_lock = usuarios_db.pop("__lock__", {})
-                flota_db = usuarios_db.pop("__flota__", None)
-                if flota_db is not None:
-                    conductores_db = flota_db
-                rutas_estado_actual = data.get("rutas", [])
-                
-                # Cargar notificaciones
-                notifications_db = usuarios_db.pop("__notifications__", [])
-                
-                if "TELEPERFORMANCE" not in usuarios_db:
-                    usuarios_db["TELEPERFORMANCE"] = {
-                        "identifier": "TELEPERFORMANCE",
-                        "password": "1234",
-                        "nombre": "Cliente Teleperformance",
-                        "rol": "Cliente",
-                        "empresa_id": "TELEPERFORMANCE",
-                        "estado": "Activo"
-                    }
-                
-                db_loaded = True
-    except Exception as e:
-        print(f"Error loading from Supabase in reload: {e}")
+        rows = response.json()
+    except (TypeError, ValueError) as exc:
+        _raise_database_unavailable(operation, error=exc)
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        _raise_database_unavailable(operation, error=ValueError("invalid app_state projection shape"))
+    return rows
+
+
+def _projection_value(row: Dict[str, Any], key: str):
+    """Accept PostgREST JSON-path and compatibility response shapes."""
+    candidates = (
+        f"usuarios->{key}",
+        f"usuarios->>{key}",
+        f"usuarios__{key}",
+        key,
+    )
+    for candidate in candidates:
+        if candidate in row:
+            return row[candidate]
+    raw_users = row.get("usuarios", _MISSING)
+    if isinstance(raw_users, dict):
+        if key in raw_users:
+            return raw_users[key]
+        if f"__{key.strip('_')}__" in raw_users:
+            return raw_users[f"__{key.strip('_')}__"]
+    elif raw_users is not _MISSING:
+        # A JSON-path projection may return the selected value under the
+        # usuarios alias rather than preserving the original object.
+        return raw_users
+    if len(row) == 1:
+        only_value = next(iter(row.values()))
+        if isinstance(only_value, dict):
+            if key in only_value:
+                return only_value[key]
+            if f"__{key.strip('_')}__" in only_value:
+                return only_value[f"__{key.strip('_')}__"]
+    return _MISSING
+
+
+async def _fetch_projection_value(key: str, operation: str):
+    """Fetch a reserved JSON value, falling back to the users object."""
+    response = await _db_http_request(
+        "GET",
+        _app_state_url(select=f"usuarios->{key}"),
+        operation=operation,
+        headers=HEADERS,
+        timeout=10.0,
+    )
+    # Older PostgREST versions may reject a JSON-path select. In that case,
+    # retry with the compatible users-object projection before using the full
+    # snapshot fallback. Other provider errors retain the normal 503 path.
+    if response.status_code in {400, 406}:
+        value = _MISSING
+    else:
+        value = _projection_value(_projection_rows_or_raise(response, operation)[0], key)
+    if value is not _MISSING:
+        return value
+    response = await _db_http_request(
+        "GET",
+        _app_state_url(select="usuarios"),
+        operation=operation,
+        headers=HEADERS,
+        timeout=10.0,
+    )
+    return _projection_value(_projection_rows_or_raise(response, operation)[0], key)
+
+
+async def _fetch_top_level_projection_value(key: str, operation: str):
+    """Fetch one top-level legacy column without downloading app_state.
+
+    The compatibility row keeps routes in a separate JSONB column.  PostgREST
+    can return that column alone (``select=rutas``), which is materially
+    smaller than the full ``usuarios+rutas`` snapshot.  A projection rejected
+    by an older Data API is returned as ``_MISSING`` so callers can fall back
+    to the validated full-state loader instead of silently serving partial
+    data.
+    """
+    response = await _db_http_request(
+        "GET",
+        _app_state_url(select=key),
+        operation=operation,
+        headers=HEADERS,
+        timeout=10.0,
+    )
+    if response.status_code in {400, 406}:
+        return _MISSING
+    return _projection_value(_projection_rows_or_raise(response, operation)[0], key)
+
+
+def _compat_users_from_projection(value: Any, operation: str) -> Dict[str, Dict[str, Any]]:
+    """Decode only the user object from a legacy compatibility projection."""
+    if not isinstance(value, dict):
+        _raise_database_unavailable(operation, error=ValueError("invalid usuarios projection"))
+    # A normal ``select=usuarios`` response is a mapping keyed by login
+    # identifier.  Accept a single user object too: this keeps the decoder
+    # compatible with older PostgREST JSON-path responses and fixtures.
+    if any(field in value for field in ("identifier", "email", "dni", "password")):
+        identifier = str(value.get("identifier") or value.get("email") or value.get("dni") or "").strip()
+        users = {identifier: value} if identifier else {}
+    else:
+        users = {
+            str(identifier): user
+            for identifier, user in value.items()
+            if not str(identifier).startswith("__") and isinstance(user, dict)
+        }
+    if "TELEPERFORMANCE" not in users:
+        users["TELEPERFORMANCE"] = {
+            "identifier": "TELEPERFORMANCE",
+            "password": "1234",
+            "nombre": "Cliente Teleperformance",
+            "rol": "Cliente",
+            "empresa_id": "TELEPERFORMANCE",
+            "estado": "Activo",
+        }
+    return users
+
+
+def _compat_find_user(users: Mapping[str, Dict[str, Any]], identifier: str) -> Optional[Dict[str, Any]]:
+    """Resolve an identifier from a partial users projection."""
+    cleaned = str(identifier or "").strip()
+    if not cleaned:
+        return None
+    user = users.get(cleaned)
+    if isinstance(user, dict):
+        return user
+    cleaned_lower = cleaned.lower()
+    for key, candidate in users.items():
+        if not isinstance(candidate, dict):
+            continue
+        if str(key).strip().lower() == cleaned_lower:
+            return candidate
+        for alias in (
+            candidate.get("identifier"),
+            candidate.get("email"),
+            candidate.get("dni"),
+            candidate.get("login_identifier"),
+        ):
+            if alias and str(alias).strip().lower() == cleaned_lower:
+                return candidate
+        profile = candidate.get("perfil_conductor", {})
+        if isinstance(profile, dict) and str(profile.get("numDoc") or "") == cleaned:
+            return candidate
+    return None
+
+
+async def _fetch_compat_users_object(operation: str):
+    """Fetch the users JSONB column only, with no route payload."""
+    response = await _db_http_request(
+        "GET",
+        _app_state_url(select="usuarios"),
+        operation=operation,
+        headers=HEADERS,
+        timeout=10.0,
+    )
+    if response.status_code in {400, 406}:
+        return _MISSING
+    rows = _projection_rows_or_raise(response, operation)
+    value = rows[0].get("usuarios", _MISSING)
+    return value if isinstance(value, dict) else _MISSING
+
+
+async def _load_compat_users_locked() -> None:
+    """Load users without routes/fleet when V2_COMPAT serves a read endpoint."""
+    global usuarios_db, _users_projection_loaded_at
+    value = await _fetch_compat_users_object("load_users_projection")
+    if value is _MISSING:
+        # A provider that cannot expose JSONB projections is still safe: use
+        # the existing shape-validated full loader as a compatibility fallback.
+        await _load_full_state_locked(include_defaults=False)
+        return
+    usuarios_db = _compat_users_from_projection(value, "load_users_projection")
+    # A single-user compatibility fixture/JSON-path response is useful for a
+    # targeted lookup but must not be treated as a complete users cache.
+    complete_projection = not any(
+        field in value for field in ("identifier", "email", "dni", "password")
+    )
+    _users_projection_loaded_at = time.monotonic() if complete_projection else 0.0
+
+
+async def _load_compat_users(*, force: bool = False) -> None:
+    if not _is_compat_storage():
+        await reload_db(force=force)
+        return
+    if not force and (_full_cache_is_fresh() or _users_projection_is_fresh()):
+        return
+    try:
+        async with _get_db_io_lock():
+            if not force and (_full_cache_is_fresh() or _users_projection_is_fresh()):
+                return
+            await _load_compat_users_locked()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_users_projection", error=exc)
+
+
+async def _load_compat_user(identifier: str) -> Optional[Dict[str, Any]]:
+    """Load a user from the users-only compatibility projection.
+
+    PostgREST JSON-path projections are not reliable for legacy object keys
+    such as email addresses (the parser can reject ``@``, dots, or other
+    identifier characters).  Requesting the users JSONB column is still
+    smaller than the complete app_state row and gives one canonical lookup
+    shape for login and profile reads.
+    """
+    if not _is_compat_storage():
+        await reload_db()
+        return get_user_by_identifier(identifier)
+    if _full_cache_is_fresh() or _users_projection_is_fresh():
+        return get_user_by_identifier(identifier)
+    try:
+        await _load_compat_users()
+        return get_user_by_identifier(identifier)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_user_projection", error=exc)
+
+
+async def _load_compat_routes_locked() -> None:
+    """Load only ``rutas`` for route/listing endpoints."""
+    global rutas_estado_actual, _routes_projection_loaded_at
+    value = await _fetch_top_level_projection_value("rutas", "load_routes_projection")
+    if value is _MISSING:
+        await _load_full_state_locked(include_defaults=False)
+        return
+    if not isinstance(value, list):
+        await _load_full_state_locked(include_defaults=False)
+        return
+    rutas_estado_actual = value
+    _routes_projection_loaded_at = time.monotonic()
+
+
+async def _load_compat_routes(*, force: bool = False) -> None:
+    if not _is_compat_storage():
+        await reload_db(force=force)
+        return
+    if not force and (_full_cache_is_fresh() or _routes_projection_is_fresh()):
+        return
+    try:
+        async with _get_db_io_lock():
+            if not force and (_full_cache_is_fresh() or _routes_projection_is_fresh()):
+                return
+            await _load_compat_routes_locked()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_routes_projection", error=exc)
+
+
+async def _load_compat_fleet_locked() -> None:
+    """Load only the reserved fleet object for the fleet dashboard."""
+    global conductores_db, _fleet_projection_loaded_at
+    value = await _fetch_projection_value("__flota__", "load_fleet_projection")
+    if value is _MISSING:
+        await _load_full_state_locked(include_defaults=False)
+        return
+    if not isinstance(value, dict):
+        await _load_full_state_locked(include_defaults=False)
+        return
+    conductores_db = value
+    _fleet_projection_loaded_at = time.monotonic()
+
+
+async def _load_compat_fleet(*, force: bool = False) -> None:
+    if not _is_compat_storage():
+        await reload_db(force=force)
+        return
+    if not force and (_full_cache_is_fresh() or _fleet_projection_is_fresh()):
+        return
+    try:
+        async with _get_db_io_lock():
+            if not force and (_full_cache_is_fresh() or _fleet_projection_is_fresh()):
+                return
+            await _load_compat_fleet_locked()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_fleet_projection", error=exc)
+
 
 async def reload_notifications():
-    """Lightweight: only fetches the notifications list from Supabase.
-    Much faster than reload_db() for polling endpoints."""
-    global notifications_db
+    """Refresh only notifications, using a JSON projection when available."""
+    global notifications_db, _notifications_cache_loaded_at
+    if _full_cache_is_fresh() or _cache_is_fresh(_notifications_cache_loaded_at):
+        return
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.get(f"{SUPABASE_URL}/app_state?id=eq.1&select=usuarios", headers=HEADERS)
-            if res.status_code == 200 and len(res.json()) > 0:
-                raw = res.json()[0].get("usuarios", {})
-                notifications_db = raw.get("__notifications__", [])
-    except Exception as e:
-        print(f"[reload_notifications] Error: {e}")
+        async with _get_db_io_lock():
+            if _full_cache_is_fresh() or _cache_is_fresh(_notifications_cache_loaded_at):
+                return
+            if _is_normalized_storage():
+                rows = await STORAGE_ADAPTER.fetch_rows(
+                    "notifications",
+                    operation="load_notifications",
+                )
+                # A notifications-only poll can happen before the full
+                # snapshot (and therefore before usuarios_db) is loaded.  Resolve
+                # only the referenced user IDs so the legacy `para` contract
+                # still returns an email/identifier without loading the users,
+                # routes, fleet, or document tables wholesale.
+                recipient_ids = sorted({
+                    str(row.get("recipient_user_id"))
+                    for row in rows
+                    if row.get("recipient_user_id")
+                })
+                notification_users = usuarios_db
+                known_recipient_ids = {
+                    str(user.get("_normalized_id"))
+                    for user in usuarios_db.values()
+                    if isinstance(user, dict) and user.get("_normalized_id")
+                }
+                missing_recipient_ids = [
+                    value for value in recipient_ids if value not in known_recipient_ids
+                ]
+                if missing_recipient_ids:
+                    user_rows = await STORAGE_ADAPTER.fetch_rows(
+                        "app_users",
+                        select="id,login_identifier,email,government_id",
+                        filters={"id": f"in.({','.join(missing_recipient_ids)})"},
+                        operation="load_notification_recipients",
+                    )
+                    notification_users = {
+                        **usuarios_db,
+                        **_v2_decode_users(user_rows, [], [], []),
+                    }
+                notifications_db = _v2_decode_notifications(rows, notification_users)
+                _notifications_cache_loaded_at = time.monotonic()
+                return
+            value = await _fetch_projection_value("__notifications__", "load_notifications")
+            if value is _MISSING:
+                await _load_full_state_locked(include_defaults=False)
+                value = notifications_db
+            if not isinstance(value, list):
+                _raise_database_unavailable("load_notifications", error=ValueError("invalid notifications shape"))
+            notifications_db = value
+            _notifications_cache_loaded_at = time.monotonic()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_notifications", error=exc)
+
+
+async def reload_routes_summary():
+    """Refresh only the compact routes summary without passenger payloads."""
+    global routes_summary, _routes_summary_cache_loaded_at
+    if _full_cache_is_fresh() or _cache_is_fresh(_routes_summary_cache_loaded_at):
+        return
+    try:
+        async with _get_db_io_lock():
+            if _full_cache_is_fresh() or _cache_is_fresh(_routes_summary_cache_loaded_at):
+                return
+            if _is_normalized_storage():
+                rows = await STORAGE_ADAPTER.fetch_rows(
+                    "route_summary",
+                    operation="load_routes_summary",
+                )
+                routes_summary = [
+                    {
+                        "conductor": row.get("unit_id") or "SIN ASIGNAR",
+                        "micro_zona": row.get("zone") or "",
+                        "horario": row.get("schedule") or "",
+                        "count": int(row.get("passenger_count") or 0),
+                    }
+                    for row in rows
+                ]
+                _routes_summary_cache_loaded_at = time.monotonic()
+                return
+            value = await _fetch_projection_value("__routes_summary__", "load_routes_summary")
+            if value is _MISSING:
+                await _load_full_state_locked(include_defaults=False)
+                value = routes_summary
+            if not isinstance(value, list):
+                _raise_database_unavailable("load_routes_summary", error=ValueError("invalid routes summary shape"))
+            routes_summary = value
+            _routes_summary_cache_loaded_at = time.monotonic()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_database_unavailable("load_routes_summary", error=exc)
 
 async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
     """Sube una imagen Base64 al bucket 'evidencias' de Supabase Storage."""
+    _ensure_storage_ready(
+        "storage_upload",
+        write=True,
+        detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+    )
     try:
         if "," in base64_str:
             _, base64_str = base64_str.split(",", 1)
@@ -356,11 +2566,10 @@ async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
         # SUPABASE_URL es "https://[...].supabase.co/rest/v1"
         storage_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/evidencias/{filename}"
         
-        hdrs = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "image/jpeg"
-        }
+        hdrs = _build_supabase_headers(
+            STORAGE_CONFIG.key,
+            content_type="image/jpeg",
+        )
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(storage_url, headers=hdrs, content=file_data)
@@ -368,82 +2577,100 @@ async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
                 public_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/public/evidencias/{filename}"
                 return public_url
             else:
-                print(f"Supabase Storage Upload Failed! Status: {res.status_code}, Body: {res.text}")
+                print(f"[Supabase] storage upload failed status={res.status_code}")
                 return None
     except Exception as e:
-        print(f"Error en upload_evidence_to_supabase: {e}")
+        print(f"[Supabase] storage upload failed error={type(e).__name__}")
         return ""
 
 async def persist():
-    try:
-        payload = {
-            "id": 1,
-            "usuarios": {
-                **usuarios_db,
-                "__routes_summary__": routes_summary,
-                "__historial_rutas__": historial_rutas,
-                "__lock__": board_lock,
-                "__flota__": conductores_db,
-                "__notifications__": notifications_db
-            },
-            "rutas": rutas_estado_actual,
-        }
-        hdrs = {**HEADERS, "Prefer": "return=minimal"}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
-            if res.status_code not in [200, 204]:
-                print(f"Supabase persist FAILED: {res.status_code} - {res.text[:200]}")
-    except Exception as e:
-        print(f"Error saving to Supabase: {e}")
+    payload = {
+        "id": 1,
+        "usuarios": {
+            **usuarios_db,
+            "__routes_summary__": routes_summary,
+            "__historial_rutas__": historial_rutas,
+            "__lock__": board_lock,
+            "__flota__": conductores_db,
+            "__notifications__": notifications_db
+        },
+        "rutas": rutas_estado_actual,
+    }
+    await _persist_app_state(payload, "persist")
+
+
+async def _ensure_compat_users_for_write() -> None:
+    """Merge a single-user projection into a complete users snapshot.
+
+    Login/profile reads may intentionally load only the users JSONB column.
+    Before a legacy ``usuarios`` PATCH, hydrate the complete app_state row so
+    a partial read can never overwrite the route board or reserved metadata
+    (``__flota__``, ``__notifications__``, locks, history, and summaries).
+    """
+    if not _is_compat_storage() or _full_cache_is_fresh():
+        return
+    pending_users = {
+        key: value
+        for key, value in usuarios_db.items()
+        if not str(key).startswith("__") and isinstance(value, dict)
+    }
+    # This is deliberately a full, shape-validated read.  The write payload
+    # carries the reserved compatibility keys, so a users-only projection
+    # would otherwise replace them with empty in-memory defaults.
+    await _load_full_state(include_defaults=False, force=True)
+    for key, value in pending_users.items():
+        existing = usuarios_db.get(key)
+        if isinstance(existing, dict):
+            existing.update(value)
+        else:
+            usuarios_db[key] = value
+
 
 async def persist_users_only():
     """Lightweight persist — only saves the usuarios dict. Use for user management actions."""
-    try:
-        payload = {
-            "id": 1,
-            "usuarios": {
-                **usuarios_db,
-                "__routes_summary__": routes_summary,
-                "__historial_rutas__": historial_rutas,
-                "__lock__": board_lock,
-                "__flota__": conductores_db,
-                "__notifications__": notifications_db
-            }
-        }
-        hdrs = {**HEADERS, "Prefer": "return=minimal"}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
-            if res.status_code not in [200, 204]:
-                print(f"Supabase persist_users FAILED: {res.status_code} - {res.text[:200]}")
-    except Exception as e:
-        print(f"Error saving users to Supabase: {e}")
+    await _ensure_compat_users_for_write()
+    payload = {
+        "id": 1,
+        "usuarios": {
+            **usuarios_db,
+            "__routes_summary__": routes_summary,
+            "__historial_rutas__": historial_rutas,
+            "__lock__": board_lock,
+            "__flota__": conductores_db,
+            "__notifications__": notifications_db
+        },
+    }
+    await _persist_app_state(payload, "persist_users")
 
 async def persist_routes_summary(summary: list):
     """Persist ONLY the compact routes summary inside the lock column.
     Very small payload (~30KB) — always succeeds even with 2000+ agents."""
     global board_lock, routes_summary
+    next_lock = {**board_lock, "routes_summary": summary}
+    payload = {
+        "id": 1,
+        "usuarios": {
+            **usuarios_db,
+            "__routes_summary__": summary,
+            "__historial_rutas__": historial_rutas,
+            "__lock__": next_lock,
+            "__flota__": conductores_db,
+            "__notifications__": notifications_db
+        },
+    }
+    if _is_normalized_storage():
+        previous_summary, previous_lock = routes_summary, board_lock
+        routes_summary, board_lock = summary, next_lock
+        try:
+            await _persist_app_state(payload, "persist_routes_summary")
+        except Exception:
+            routes_summary, board_lock = previous_summary, previous_lock
+            raise
+    else:
+        await _persist_app_state(payload, "persist_routes_summary")
     routes_summary = summary
-    board_lock["routes_summary"] = summary
-    try:
-        payload = {
-            "id": 1, 
-            "usuarios": {
-                **usuarios_db,
-                "__routes_summary__": routes_summary,
-                "__historial_rutas__": historial_rutas,
-                "__lock__": board_lock,
-                "__flota__": conductores_db
-            }
-        }
-        hdrs = {**HEADERS, "Prefer": "return=minimal"}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
-            if res.status_code not in [200, 204]:
-                print(f"Supabase persist_routes_summary FAILED: {res.status_code} - {res.text[:200]}")
-            else:
-                print(f"Routes summary saved: {len(summary)} routes")
-    except Exception as e:
-        print(f"Error saving routes summary: {e}")
+    board_lock = next_lock
+    print(f"Routes summary saved: {len(summary)} routes")
 
 # --- Metadata y Configuración de la App ---
 description = "Backend para Kapital Routing, con autenticación y lógica de negocio avanzada."
@@ -456,6 +2683,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _metric_endpoint(request: Request) -> str:
+    """Return a route template or coarse path without user-controlled IDs."""
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path[:100]
+    path = request.url.path
+    parts = [part for part in path.split("/") if part]
+    if parts and parts[0] == "api":
+        # The router is not always attached when middleware handles an error;
+        # retain only a stable prefix and discard possible identifiers.
+        return "/" + "/".join(parts[:2])
+    return "/<unmatched>"
+
+
+@app.middleware("http")
+async def request_metrics_middleware(request: Request, call_next):
+    """Emit local request metrics without query strings, bodies, or PII."""
+    started_at = time.perf_counter()
+    response = None
+    status = 500
+    try:
+        response = await call_next(request)
+        status = getattr(response, "status_code", 500)
+        return response
+    finally:
+        payload = {
+            "component": "http",
+            "method": request.method,
+            "endpoint": _metric_endpoint(request),
+            "status": status,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            "response_bytes": _response_size_bytes(response) if response is not None else None,
+        }
+        print("[KapitalMetrics] " + json.dumps(payload, separators=(",", ":")))
 
 # --- Ruta de Prueba ---
 @app.get("/api")
@@ -665,6 +2929,14 @@ def get_user_by_identifier(identifier: str):
     for k, v in usuarios_db.items():
         if k.lower() == identifier_clean.lower():
             return v
+        for alias in (
+            v.get("identifier"),
+            v.get("email"),
+            v.get("dni"),
+            v.get("login_identifier"),
+        ):
+            if alias and str(alias).strip().lower() == identifier_clean.lower():
+                return v
         perfil = v.get("perfil_conductor", {})
         if perfil and perfil.get("numDoc") == identifier_clean:
             return v
@@ -672,8 +2944,15 @@ def get_user_by_identifier(identifier: str):
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin, response: Response):
-    await reload_db()
-    user_in_db = get_user_by_identifier(usuario.identifier)
+    if _is_normalized_storage() and not _full_cache_is_fresh():
+        user_in_db = await _load_normalized_login_user(usuario.identifier)
+    elif _is_compat_storage() and not _full_cache_is_fresh():
+        # A login needs one user plus its password/session fields, not routes,
+        # fleet, notifications, or the complete app_state JSONB row.
+        user_in_db = await _load_compat_user(usuario.identifier)
+    else:
+        await reload_db()
+        user_in_db = get_user_by_identifier(usuario.identifier)
                 
     stored_password = user_in_db.get("password") if user_in_db else None
     if not user_in_db or not verify_password(usuario.password, stored_password):
@@ -740,8 +3019,11 @@ async def change_password(req: ChangePasswordRequest):
 
 @app.get("/api/user/profile")
 async def get_profile(email: str, session_token: SessionCookie = None):
-    await reload_db()
-    user = get_user_by_identifier(email)
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        user = await _load_compat_user(email)
+    else:
+        await reload_db()
+        user = get_user_by_identifier(email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     require_request_actor(session_token, expected_user=user)
@@ -806,7 +3088,11 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
 async def get_all_users(email: str, session_token: SessionCookie = None):
-    await reload_db()
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        # The admin table needs all users, but not the route/passenger board.
+        await _load_compat_users()
+    else:
+        await reload_db()
     req_user = get_user_by_identifier(email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
@@ -1282,7 +3568,14 @@ async def resolve_data_update(payload: ResolveDataRequestPayload):
 
 @app.get("/api/flota")
 async def get_flota_status():
-    await reload_db()
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        # Fleet is already materialized under the reserved compatibility key;
+        # avoid downloading the users and routes JSONB columns just to render
+        # the fleet list.  Profile enrichment is retained when a full users
+        # cache is already warm (for example after opening Administración).
+        await _load_compat_fleet()
+    else:
+        await reload_db()
     # Índice inverso: unidad_id (padrón K-027) -> usuario con perfil_conductor.
     # Permite enriquecer cada unidad con datos personales (direccion, DNI, fecha
     # de nacimiento, celular) necesarios para la exportación al formato oficial
@@ -1547,15 +3840,23 @@ def native_kmeans(points, k, max_iters=10):
 
 @app.get("/api/routes")
 async def get_routes():
-    await reload_db()
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        await _load_compat_routes()
+    else:
+        await reload_db()
     return rutas_estado_actual
 
 @app.get("/api/routes/summary")
 async def get_routes_summary():
     """Returns compact route summary for GerentePortal (no agent details, just counts)."""
-    await reload_db()
+    await reload_routes_summary()
     if routes_summary:
         return routes_summary
+    # A valid projection can be empty while the previous in-memory full
+    # snapshot still contains routes. Do not expose that stale board as a
+    # summary; only a full snapshot may use the route-derived fallback.
+    if not _full_cache_is_fresh() and _cache_is_fresh(_routes_summary_cache_loaded_at):
+        return []
     # Fallback: build summary from full routes if available
     if rutas_estado_actual:
         return _build_routes_summary(rutas_estado_actual)
@@ -1566,19 +3867,31 @@ async def publish_routes_summary(rutas: list = Body(...)):
     await ensure_db_loaded()
     summary = _build_routes_summary(rutas)
     
-    # Inline the persist logic to catch the exact error and return it
-    global usuarios_db
-    usuarios_to_save = dict(usuarios_db)
-    usuarios_to_save["__routes_summary__"] = summary
-    payload = {"usuarios": usuarios_to_save}
-    try:
-        async with httpx.AsyncClient() as client:
-            hdrs = dict(HEADERS)
-            res = await client.patch(f"{SUPABASE_URL}/app_state?id=eq.1", headers=hdrs, json=payload)
-            if res.status_code not in (200, 204):
-                return {"message": f"Error Supabase: {res.text}", "total_routes": 0}
-    except Exception as e:
-        return {"message": f"Exception: {str(e)}", "total_routes": 0}
+    global usuarios_db, routes_summary, board_lock
+    next_lock = {**(board_lock or {}), "routes_summary": summary}
+    payload = {
+        "id": 1,
+        "usuarios": {
+            **usuarios_db,
+            "__routes_summary__": summary,
+            "__historial_rutas__": historial_rutas,
+            "__lock__": next_lock,
+            "__flota__": conductores_db,
+            "__notifications__": notifications_db,
+        },
+    }
+    if _is_normalized_storage():
+        previous_summary, previous_lock = routes_summary, board_lock
+        routes_summary, board_lock = summary, next_lock
+        try:
+            await _persist_app_state(payload, "publish_routes_summary")
+        except Exception:
+            routes_summary, board_lock = previous_summary, previous_lock
+            raise
+    else:
+        await _persist_app_state(payload, "publish_routes_summary")
+    routes_summary = summary
+    board_lock = next_lock
 
     return {"message": f"Publicado: {len(summary)} rutas al panel del Gerente.", "total_routes": len(summary)}
 
@@ -1740,6 +4053,8 @@ async def assign_routes_from_excel(
         
         await persist()
         return rutas_estado_actual
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1780,7 +4095,10 @@ class EstadoPasajeroUpdate(BaseModel):
 
 @app.get("/api/mis-rutas/{conductor_id}")
 async def mis_rutas(conductor_id: str):
-    await reload_db()
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        await _load_compat_routes()
+    else:
+        await reload_db()
     mis_rutas_asignadas = [r for r in rutas_estado_actual if r["conductor"] == conductor_id]
     return mis_rutas_asignadas
 
@@ -1809,7 +4127,10 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
 
 @app.get("/api/cliente/rutas/{empresa_id}")
 async def get_rutas_cliente(empresa_id: str):
-    await reload_db()
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        await _load_compat_routes()
+    else:
+        await reload_db()
     global rutas_estado_actual
     try:
         rutas_filtradas = []

@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock, Download } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import toast from 'react-hot-toast';
+
+const REQUEST_TIMEOUT_MS = 12000;
+const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
 
 const DOC_LABELS = {
   comprobanteDomicilio: 'Comprobante de Domicilio',
@@ -15,12 +18,13 @@ const DOC_LABELS = {
   revisionTecnica: 'Revisión Técnica'
 };
 
-const DocumentResubmission = ({ usuario, onComplete }) => {
+const DocumentResubmission = ({ usuario, onComplete, notifications: notificationsProp }) => {
   const [notifications, setNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newFiles, setNewFiles] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
+  const markedNotificationIdsRef = useRef(new Set());
   const revisions = usuario?.perfil_conductor?.revision_docs || {};
   const rejectedDocs = Object.keys(revisions).filter(key => revisions[key].estado?.toLowerCase() === 'rechazado');
   const missingDocs = Object.keys(DOC_LABELS).filter(key => {
@@ -32,37 +36,80 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   });
   const hasRejectedOrMissing = rejectedDocs.length > 0 || missingDocs.length > 0;
 
-  useEffect(() => {
-    fetchData();
-  }, [usuario.identifier, usuario.email]);
+  const userKey = usuario?.identifier || usuario?.email;
+  const hasExternalNotifications = Array.isArray(notificationsProp);
+  const displayedNotifications = hasExternalNotifications ? notificationsProp : notifications;
+  const notificationsLoading = hasExternalNotifications || !userKey ? false : isLoading;
 
-  const fetchData = async () => {
-    setIsLoading(true);
-    try {
-      const userKey = usuario.identifier || usuario.email;
-      // Fetch notifications
-      const notifsRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`);
-      if (notifsRes.ok) {
-        const notifs = await notifsRes.json();
-        setNotifications(notifs);
-        
-        // Mark as read
-        notifs.filter(n => !n.leido).forEach(async (n) => {
-          await fetch('/api/conductor/notifications/mark-read', {
+  useEffect(() => {
+    let disposed = false;
+    let controller = null;
+    let timeoutId = null;
+
+    if (hasExternalNotifications) {
+      // DriverPortal already owns the notification read request. Keep the
+      // existing UX of marking messages read without fetching the same large
+      // profile JSON a second time.
+      const unread = notificationsProp.filter(notification => !notification.leido);
+      unread.forEach(notification => {
+        const notificationId = String(notification.id ?? '');
+        if (!notificationId || markedNotificationIdsRef.current.has(notificationId)) return;
+        markedNotificationIdsRef.current.add(notificationId);
+        fetch('/api/conductor/notifications/mark-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notif_id: notification.id }),
+        }).catch(() => {});
+      });
+
+      return () => { disposed = true; };
+    }
+
+    if (!userKey) {
+      return () => { disposed = true; };
+    }
+
+    const fetchData = async () => {
+      setIsLoading(true);
+      controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        // Fetch notifications only when this component is not receiving the
+        // already-fetched list from DriverPortal.
+        const notifsRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
+          signal: controller.signal,
+        });
+        if (notifsRes.ok) {
+          const notifs = await notifsRes.json();
+          if (!disposed) setNotifications(Array.isArray(notifs) ? notifs : []);
+
+          // Mark as read while reusing the same abort signal and handling
+          // failures silently so one unavailable notification cannot break UX.
+          const unread = Array.isArray(notifs) ? notifs.filter(notification => !notification.leido) : [];
+          await Promise.allSettled(unread.map(notification => fetch('/api/conductor/notifications/mark-read', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notif_id: n.id })
-          });
-        });
+            body: JSON.stringify({ notif_id: notification.id }),
+            signal: controller.signal,
+          })));
+        }
+      } catch (error) {
+        if (!disposed && error?.name !== 'AbortError') {
+          console.warn('No se pudieron cargar las notificaciones:', error);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (!disposed) setIsLoading(false);
       }
+    };
 
-      // The rejectedDocs is now computed directly from props above
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    fetchData();
+    return () => {
+      disposed = true;
+      controller?.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [hasExternalNotifications, notificationsProp, userKey]);
 
   const handleFileChange = (docKey, file) => {
     if (!file) {
@@ -74,6 +121,11 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
       return;
     }
 
+    if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+      toast.error(`El archivo supera el límite de ${(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0)} MB.`);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target.result;
@@ -82,6 +134,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
         [docKey]: { name: file.name, size: file.size, type: file.type, base64 }
       }));
     };
+    reader.onerror = () => toast.error('No se pudo leer el documento. Intenta nuevamente.');
     reader.readAsDataURL(file);
   };
 
@@ -90,6 +143,12 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
     const missing = [...rejectedDocs, ...missingDocs].filter(key => !newFiles[key]);
     if (missing.length > 0) {
       toast.error('Por favor sube todos los documentos solicitados.');
+      return;
+    }
+
+    const oversizedFile = Object.values(newFiles).find(file => file?.size > MAX_DOCUMENT_SIZE_BYTES);
+    if (oversizedFile) {
+      toast.error(`El archivo ${oversizedFile.name || 'seleccionado'} supera el límite de ${(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0)} MB.`);
       return;
     }
 
@@ -122,7 +181,7 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
   const hasRejected = rejectedDocs.length > 0;
   // We don't change hasRejected here to avoid breaking the logic that displays the "Último mensaje de Administración" if there are actually rejected ones.
 
-  if (isLoading) {
+  if (notificationsLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}>
         <Loader size={32} style={{ animation: 'spin 1s linear infinite' }} />
@@ -210,11 +269,11 @@ const DocumentResubmission = ({ usuario, onComplete }) => {
           </>
         )}
 
-        {notifications.length > 0 && hasRejected && (
+        {displayedNotifications.length > 0 && hasRejected && (
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #ff6b6b', marginBottom: '30px' }}>
             <h4 style={{ margin: '0 0 8px 0', color: 'var(--text-primary)' }}>Último mensaje de Administración:</h4>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
-              "{notifications[0].mensaje}"
+              "{displayedNotifications[0].mensaje}"
             </p>
           </div>
         )}

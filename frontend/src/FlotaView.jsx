@@ -3,8 +3,39 @@ import { toast } from 'react-hot-toast';
 import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
+import FileUploadZone from './components/FileUploadZone';
 
 import './App.css';
+
+const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
+const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
+const DEFAULT_DOCUMENT_ACCEPT = FileUploadZone.DEFAULT_DOCUMENT_ACCEPT;
+const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
+const DOCUMENT_ACCEPT_ATTRIBUTE = Object.keys(DEFAULT_DOCUMENT_ACCEPT).join(',');
+
+const announceAdminWebSocketState = (connected) => {
+  if (typeof window === 'undefined') return;
+  window.__kapitalAdminWebSocketConnected = connected;
+  window.dispatchEvent(new CustomEvent(ADMIN_WS_STATE_EVENT, { detail: { connected } }));
+};
+
+const validateDocumentFile = (file) => {
+  if (!file) return 'Selecciona un archivo.';
+  if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+    return `El archivo supera el límite de ${(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0)} MB.`;
+  }
+  const acceptedTypes = Object.keys(DEFAULT_DOCUMENT_ACCEPT);
+  const extension = `.${file.name?.split('.').pop()?.toLowerCase() || ''}`;
+  const hasAcceptedType = acceptedTypes.some(type => {
+    if (type.endsWith('/*')) return file.type?.startsWith(type.slice(0, -1));
+    return file.type === type;
+  });
+  const hasAcceptedExtension = Object.values(DEFAULT_DOCUMENT_ACCEPT).flat().includes(extension);
+  if (!hasAcceptedType && !hasAcceptedExtension) {
+    return 'Formato no permitido. Usa PNG, JPG, WebP o PDF.';
+  }
+  return '';
+};
 
 
 // Traduce el shortcut recibido desde el dashboard al valor exacto usado en BASE_OPTIONS.
@@ -81,15 +112,40 @@ const FlotaView = ({ usuario, initialBase }) => {
   const wsAdminRef = useRef(null);
   const wsAdminReconnectRef = useRef(null);
   const wsAdminAttemptsRef = useRef(0);
+  const wsAdminHeartbeatRef = useRef(null);
+  const wsAdminIntentionalCloseRef = useRef(false);
+  const connectAdminWSRef = useRef(null);
 
   const usuarioRef = useRef(usuario);
   useEffect(() => {
     usuarioRef.current = usuario;
   }, [usuario]);
 
+  const closeAdminWS = useCallback(() => {
+    wsAdminIntentionalCloseRef.current = true;
+    if (wsAdminReconnectRef.current) {
+      clearTimeout(wsAdminReconnectRef.current);
+      wsAdminReconnectRef.current = null;
+    }
+    if (wsAdminHeartbeatRef.current) {
+      clearInterval(wsAdminHeartbeatRef.current);
+      wsAdminHeartbeatRef.current = null;
+    }
+    const currentSocket = wsAdminRef.current;
+    wsAdminRef.current = null;
+    if (currentSocket) {
+      currentSocket.onclose = null;
+      currentSocket.close();
+    }
+    announceAdminWebSocketState(false);
+  }, []);
+
   const connectAdminWS = useCallback(() => {
     const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
-    if (!userKey) return;
+    if (!userKey || document.hidden || !ADMIN_WS_ROLES.has(usuarioRef.current?.rol) || typeof WebSocket === 'undefined') return;
+    if (wsAdminRef.current?.readyState === WebSocket.OPEN || wsAdminRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    wsAdminIntentionalCloseRef.current = false;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/${encodeURIComponent(userKey)}`;
     const ws = new WebSocket(wsUrl);
@@ -97,10 +153,11 @@ const FlotaView = ({ usuario, initialBase }) => {
 
     ws.onopen = () => {
       wsAdminAttemptsRef.current = 0;
-      const hb = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      if (wsAdminHeartbeatRef.current) clearInterval(wsAdminHeartbeatRef.current);
+      wsAdminHeartbeatRef.current = setInterval(() => {
+        if (!document.hidden && ws.readyState === WebSocket.OPEN) ws.send('ping');
       }, 30000);
-      ws._heartbeat = hb;
+      announceAdminWebSocketState(true);
     };
 
     ws.onmessage = (event) => {
@@ -115,25 +172,56 @@ const FlotaView = ({ usuario, initialBase }) => {
     };
 
     ws.onclose = () => {
-      if (ws._heartbeat) clearInterval(ws._heartbeat);
+      if (ws !== wsAdminRef.current) return;
+      wsAdminRef.current = null;
+      if (wsAdminHeartbeatRef.current) {
+        clearInterval(wsAdminHeartbeatRef.current);
+        wsAdminHeartbeatRef.current = null;
+      }
+      announceAdminWebSocketState(false);
+      if (wsAdminIntentionalCloseRef.current || document.hidden) return;
       const delay = Math.min(1000 * 2 ** wsAdminAttemptsRef.current, 30000);
       wsAdminAttemptsRef.current += 1;
-      wsAdminReconnectRef.current = setTimeout(connectAdminWS, delay);
+      wsAdminReconnectRef.current = setTimeout(() => {
+        wsAdminReconnectRef.current = null;
+        connectAdminWSRef.current?.();
+      }, delay);
     };
 
     ws.onerror = () => ws.close();
   }, []);
 
+  const canReceiveAdminNotifications = ADMIN_WS_ROLES.has(usuario?.rol);
   useEffect(() => {
-    connectAdminWS();
+    connectAdminWSRef.current = connectAdminWS;
     return () => {
-      if (wsAdminReconnectRef.current) clearTimeout(wsAdminReconnectRef.current);
-      if (wsAdminRef.current) {
-        wsAdminRef.current.onclose = null;
-        wsAdminRef.current.close();
-      }
+      if (connectAdminWSRef.current === connectAdminWS) connectAdminWSRef.current = null;
     };
   }, [connectAdminWS]);
+
+  useEffect(() => {
+    if (!canReceiveAdminNotifications) {
+      closeAdminWS();
+      return undefined;
+    }
+
+    const syncAdminWebSocket = () => {
+      if (document.hidden) {
+        closeAdminWS();
+      } else {
+        connectAdminWS();
+      }
+    };
+
+    syncAdminWebSocket();
+    document.addEventListener('visibilitychange', syncAdminWebSocket);
+    window.addEventListener('focus', syncAdminWebSocket);
+    return () => {
+      document.removeEventListener('visibilitychange', syncAdminWebSocket);
+      window.removeEventListener('focus', syncAdminWebSocket);
+      closeAdminWS();
+    };
+  }, [canReceiveAdminNotifications, connectAdminWS, closeAdminWS]);
 
   // Sync localRevisionDocs when conductorInfo loads
   useEffect(() => {
@@ -169,12 +257,17 @@ const FlotaView = ({ usuario, initialBase }) => {
 
   const handleAdminUploadDoc = async (campo, file) => {
     if (!file || !conductorInfo || !usuario) return;
+    const validationError = validateDocumentFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
       const fileObj = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve({ name: file.name, size: file.size, type: file.type, base64: e.target.result });
-        reader.onerror = (err) => reject(new Error('Error al leer el archivo'));
+        reader.onerror = () => reject(new Error('Error al leer el archivo'));
         reader.readAsDataURL(file);
       });
 
@@ -404,10 +497,17 @@ const FlotaView = ({ usuario, initialBase }) => {
   const handleFileUpload = (e, field) => {
     const file = e.target.files[0];
     if (!file) return;
+    const validationError = validateDocumentFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (event) => {
       setFormData(prev => ({ ...prev, [field]: event.target.result }));
     };
+    reader.onerror = () => toast.error('No se pudo leer el documento. Intenta nuevamente.');
     reader.readAsDataURL(file);
   };
 
@@ -1007,7 +1107,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                                 </button>
                                 <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px' }} title="Reemplazar archivo">
                                   <Upload size={13} /> 
-                                  <input type="file" style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
+                                  <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
                                 </label>
                                 <button
                                   className="btn-approve-doc"
@@ -1030,7 +1130,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                                 <p className="review-doc-missing" style={{ margin: 0 }}>El conductor aún no ha subido este documento.</p>
                                 <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                                   <Upload size={13} /> Subir
-                                  <input type="file" style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
+                                  <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
                                 </label>
                               </div>
                             )}
@@ -1125,7 +1225,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
                       📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
@@ -1138,7 +1238,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
                       📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
@@ -1151,7 +1251,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
                       📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
@@ -1164,7 +1264,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
-                      <input type="file" accept="image/*" onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
+                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
                       📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}

@@ -7,6 +7,21 @@ import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import './App.css';
 
+const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
+const ADMIN_NOTIFICATION_ROLES = new Set([
+  'Administración',
+  'Administrador',
+  'Gerente de Operaciones',
+  'Admin',
+  'Programador de rutas',
+]);
+const ADMIN_POLL_INTERVAL_MS = 90_000;
+const ADMIN_POLL_BACKOFF_BASE_MS = 60_000;
+const ADMIN_POLL_BACKOFF_MAX_MS = 10 * 60_000;
+const ADMIN_REQUEST_TIMEOUT_MS = 12_000;
+const ADMIN_POLL_ACTIVITY_COOLDOWN_MS = 15_000;
+const RETRYABLE_ADMIN_STATUS_CODES = new Set([402, 408, 429, 500, 502, 503, 504]);
+
 export { GlobalLoader };
 
 const LiveMap = React.lazy(() => import('./LiveMap'));
@@ -814,10 +829,28 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
 
 
 // --- Componente Raíz ---
+const clearStoredUser = () => {
+  try {
+    localStorage.removeItem('kapital_user');
+  } catch {
+    // Storage can be unavailable in private browsing; the in-memory session
+    // remains unauthenticated in that case.
+  }
+};
+const SESSION_VALIDATION_TIMEOUT_MS = 10000;
+
 function App() {
 
 
   const [usuarioActual, setUsuarioActual] = useState(null);
+  const profileRefreshRef = React.useRef(0);
+  const [isRestoringSession, setIsRestoringSession] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('kapital_user'));
+    } catch {
+      return false;
+    }
+  });
   const [pendingPasswordChangeUser, setPendingPasswordChangeUser] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
@@ -885,26 +918,87 @@ function App() {
   };
 
   useEffect(() => {
-    const userFromStorage = localStorage.getItem('kapital_user');
-    if (userFromStorage) {
-      const parsedUser = JSON.parse(userFromStorage);
-      setUsuarioActual(parsedUser);
-      
-      // Fetch fresh profile from backend to ensure we're not stuck with stale state
-      const userKey = parsedUser.identifier || parsedUser.email;
-      if (userKey) {
-        fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`)
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (data) {
-              const freshUser = { ...parsedUser, ...data };
-              localStorage.setItem('kapital_user', JSON.stringify(freshUser));
-              setUsuarioActual(freshUser);
-            }
-          })
-          .catch(err => console.warn('Error fetching fresh profile on load:', err));
+    let cancelled = false;
+    let timeoutId;
+    const controller = new AbortController();
+
+    const restoreSession = async () => {
+      let parsedUser;
+
+      try {
+        const userFromStorage = localStorage.getItem('kapital_user');
+        if (!userFromStorage) {
+          if (!cancelled) setIsRestoringSession(false);
+          return;
+        }
+        parsedUser = JSON.parse(userFromStorage);
+      } catch (err) {
+        clearStoredUser();
+        if (!cancelled) {
+          setUsuarioActual(null);
+          setIsRestoringSession(false);
+        }
+        console.warn('No se pudo leer la sesión almacenada:', err);
+        return;
       }
-    }
+
+      const userKey = parsedUser?.identifier || parsedUser?.email;
+      if (!userKey) {
+        clearStoredUser();
+        if (!cancelled) {
+          setUsuarioActual(null);
+          setIsRestoringSession(false);
+        }
+        return;
+      }
+
+      try {
+        // Never promote localStorage data to an authenticated identity without
+        // validating the server-side session first.
+        timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
+        const response = await fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const text = await response.text();
+        let data = {};
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {};
+        }
+
+        if (!response.ok) {
+          const detail = data.detail || data.message || text || `HTTP ${response.status}`;
+          throw new Error(`No se pudo validar la sesión: ${detail}`);
+        }
+        if (!data || typeof data !== 'object' || !(data.identifier || data.email)) {
+          throw new Error('El perfil validado no contiene una identidad utilizable.');
+        }
+
+        if (cancelled) return;
+        const freshUser = { ...parsedUser, ...data };
+        localStorage.setItem('kapital_user', JSON.stringify(freshUser));
+        setUsuarioActual(freshUser);
+      } catch (err) {
+        if (cancelled) return;
+        // A cached user is not a valid session. Remove it so a failed backend
+        // validation cannot leave the app in a stale authenticated state.
+        clearStoredUser();
+        setUsuarioActual(null);
+        console.warn('Error validando la sesión almacenada:', err);
+      } finally {
+        clearTimeout(timeoutId);
+        if (!cancelled) setIsRestoringSession(false);
+      }
+    };
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   const handleLogin = (userData) => {
@@ -916,24 +1010,52 @@ function App() {
 
       // Immediately fetch fresh profile so perfil_conductor is loaded before
       // renderVista evaluates it — prevents the "Documentos Faltantes" flash on login
+      const refreshRequestId = ++profileRefreshRef.current;
       const userKey = userData.identifier || userData.email;
       if (userKey) {
-        fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`)
-          .then(r => r.ok ? r.json() : null)
+        const invalidateSession = () => {
+          if (refreshRequestId !== profileRefreshRef.current) return;
+          clearStoredUser();
+          setUsuarioActual(null);
+        };
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
+
+        fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+          .then(async response => {
+            if (!response.ok) {
+              throw new Error(`No se pudo actualizar el perfil (${response.status}).`);
+            }
+            const data = await response.json();
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+              throw new Error('La respuesta del perfil no es válida.');
+            }
+            return data;
+          })
           .then(data => {
-            if (data) {
+            if (data && refreshRequestId === profileRefreshRef.current) {
               const freshUser = { ...userData, ...data };
               localStorage.setItem('kapital_user', JSON.stringify(freshUser));
               setUsuarioActual(freshUser);
             }
           })
-          .catch(err => console.warn('Error fetching fresh profile on login:', err));
+          .catch(err => {
+            invalidateSession();
+            if (err?.name !== 'AbortError') {
+              console.warn('Error fetching fresh profile on login:', err);
+            }
+          })
+          .finally(() => clearTimeout(timeoutId));
       }
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('kapital_user');
+    profileRefreshRef.current += 1;
+    clearStoredUser();
     setUsuarioActual(null);
   };
 
@@ -947,54 +1069,163 @@ function App() {
     });
   };
 
-  const isFetchingRef = React.useRef(false);
-  const initializedRef = React.useRef(false);
-  // Use localStorage to persist lastNotifId across page reloads
-  const [lastNotifId, setLastNotifId] = useState(() => {
-    try { return parseInt(localStorage.getItem('kapital_admin_last_notif_id') || '0'); } catch { return 0; }
-  });
+  const lastNotifIdRef = React.useRef(null);
+  const adminPollTimerRef = React.useRef(null);
+  const adminPollAbortRef = React.useRef(null);
+  const [adminRealtimeConnected, setAdminRealtimeConnected] = useState(() => (
+    typeof window !== 'undefined' && window.__kapitalAdminWebSocketConnected === true
+  ));
+
+  // FlotaView owns the admin WebSocket. The event lets this global fallback
+  // stop immediately when real-time delivery is available.
+  useEffect(() => {
+    const syncAdminRealtimeState = (event) => {
+      const connected = event?.detail?.connected ?? window.__kapitalAdminWebSocketConnected === true;
+      setAdminRealtimeConnected(Boolean(connected));
+    };
+    window.addEventListener(ADMIN_WS_STATE_EVENT, syncAdminRealtimeState);
+    syncAdminRealtimeState();
+    return () => window.removeEventListener(ADMIN_WS_STATE_EVENT, syncAdminRealtimeState);
+  }, []);
 
   useEffect(() => {
-    if (!usuarioActual || !['Administración', 'Administrador', 'Gerente de Operaciones', 'Admin', 'Programador de rutas'].includes(usuarioActual.rol)) return;
-    
-    const checkNotifications = async (suppressToasts) => {
-      if (isFetchingRef.current) return;
-      isFetchingRef.current = true;
+    const canReceiveNotifications = ADMIN_NOTIFICATION_ROLES.has(usuarioActual?.rol);
+    if (!canReceiveNotifications || adminRealtimeConnected) return undefined;
+
+    if (lastNotifIdRef.current === null) {
       try {
-        const res = await fetch(`/api/notifications?last_id=${lastNotifId}`);
-        if (res.ok) {
-          const newNotifs = await res.json();
-          if (newNotifs.length > 0) {
-            const maxId = Math.max(...newNotifs.map(n => parseInt(n.id) || 0));
-            setLastNotifId(maxId);
-            localStorage.setItem('kapital_admin_last_notif_id', String(maxId));
-            
+        const storedId = Number.parseInt(localStorage.getItem('kapital_admin_last_notif_id') || '0', 10);
+        lastNotifIdRef.current = Number.isFinite(storedId) ? storedId : 0;
+      } catch {
+        lastNotifIdRef.current = 0;
+      }
+    }
+
+    let disposed = false;
+    let timerId = null;
+    let inFlight = false;
+    let backoffMs = 0;
+    let lastRunAt = 0;
+
+    const clearTimer = () => {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      adminPollTimerRef.current = null;
+    };
+
+    let checkNotifications;
+    const schedule = (delay) => {
+      if (disposed || document.hidden || adminRealtimeConnected || window.__kapitalAdminWebSocketConnected === true) return;
+      clearTimer();
+      timerId = setTimeout(() => {
+        timerId = null;
+        adminPollTimerRef.current = null;
+        checkNotifications(false, false);
+      }, Math.max(0, delay));
+      adminPollTimerRef.current = timerId;
+    };
+
+    checkNotifications = async (suppressToasts = false, force = false) => {
+      if (disposed || document.hidden || adminRealtimeConnected || window.__kapitalAdminWebSocketConnected === true || inFlight) return;
+      if (!force && Date.now() - lastRunAt < ADMIN_POLL_ACTIVITY_COOLDOWN_MS) {
+        schedule(ADMIN_POLL_INTERVAL_MS);
+        return;
+      }
+
+      lastRunAt = Date.now();
+      inFlight = true;
+      const controller = new AbortController();
+      adminPollAbortRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), ADMIN_REQUEST_TIMEOUT_MS);
+      let nextDelay = ADMIN_POLL_INTERVAL_MS;
+
+      try {
+        const res = await fetch(`/api/notifications?last_id=${lastNotifIdRef.current || 0}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          if (RETRYABLE_ADMIN_STATUS_CODES.has(res.status)) {
+            backoffMs = backoffMs > 0
+              ? Math.min(backoffMs * 2, ADMIN_POLL_BACKOFF_MAX_MS)
+              : ADMIN_POLL_BACKOFF_BASE_MS;
+            nextDelay = backoffMs;
+          }
+          return;
+        }
+
+        const payload = await res.json();
+        const newNotifs = Array.isArray(payload) ? payload : [];
+        if (newNotifs.length > 0) {
+          const maxId = Math.max(...newNotifs.map(notification => Number.parseInt(notification.id, 10) || 0));
+          if (maxId > (lastNotifIdRef.current || 0)) {
+            lastNotifIdRef.current = maxId;
+            try {
+              localStorage.setItem('kapital_admin_last_notif_id', String(maxId));
+            } catch {
+              // Local persistence is optional; the in-memory cursor still works.
+            }
+
             if (!suppressToasts) {
-              newNotifs.forEach(n => {
-                const msg = n.message || n.mensaje || n.titulo || 'Nueva notificación';
-                if (n.type === 'success') toast.success(msg, { id: `notif-${n.id}` });
-                else if (n.type === 'error') toast.error(msg, { id: `notif-${n.id}`, duration: 8000 });
-                else toast(msg, { id: `notif-${n.id}`, icon: '🔔' });
+              newNotifs.forEach(notification => {
+                const msg = notification.message || notification.mensaje || notification.titulo || 'Nueva notificación';
+                if (notification.type === 'success') toast.success(msg, { id: `notif-${notification.id}` });
+                else if (notification.type === 'error') toast.error(msg, { id: `notif-${notification.id}`, duration: 8000 });
+                else toast(msg, { id: `notif-${notification.id}`, icon: '🔔' });
               });
             }
           }
         }
-      } catch (e) { } finally {
-        isFetchingRef.current = false;
-        initializedRef.current = true;
+        backoffMs = 0;
+      } catch (error) {
+        if (error?.name !== 'AbortError' || !disposed) {
+          backoffMs = backoffMs > 0
+            ? Math.min(backoffMs * 2, ADMIN_POLL_BACKOFF_MAX_MS)
+            : ADMIN_POLL_BACKOFF_BASE_MS;
+          nextDelay = backoffMs;
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (adminPollAbortRef.current === controller) adminPollAbortRef.current = null;
+        inFlight = false;
+        if (!disposed && !document.hidden && !adminRealtimeConnected && window.__kapitalAdminWebSocketConnected !== true) {
+          schedule(nextDelay);
+        }
       }
     };
 
-    if (!initializedRef.current) {
-      checkNotifications(true);
-    }
-    
-    const interval = setInterval(() => {
-      checkNotifications(false);
-    }, 10000);
-    
-    return () => clearInterval(interval);
-  }, [usuarioActual, lastNotifId]);
+    const wakePolling = () => {
+      if (disposed || document.hidden || adminRealtimeConnected || window.__kapitalAdminWebSocketConnected === true) return;
+      if (Date.now() - lastRunAt < ADMIN_POLL_ACTIVITY_COOLDOWN_MS) {
+        schedule(ADMIN_POLL_INTERVAL_MS);
+        return;
+      }
+      clearTimer();
+      checkNotifications(false, true);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimer();
+        adminPollAbortRef.current?.abort();
+      } else {
+        wakePolling();
+      }
+    };
+
+    checkNotifications(true, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', wakePolling);
+
+    return () => {
+      disposed = true;
+      clearTimer();
+      adminPollAbortRef.current?.abort();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', wakePolling);
+    };
+  }, [adminRealtimeConnected, usuarioActual?.rol]);
 
 
   const renderVista = () => {
@@ -1050,6 +1281,10 @@ function App() {
     }
   };
 
+
+  if (isRestoringSession) {
+    return <GlobalLoader text="Validando sesión..." />;
+  }
 
   if (!usuarioActual) {
     if (pendingPasswordChangeUser) {

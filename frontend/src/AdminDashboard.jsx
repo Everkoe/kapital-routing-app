@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
@@ -36,36 +36,98 @@ const ROLE_DISPLAY = {
 const fmtTime = (date) =>
   `Hoy ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 
+const DASHBOARD_LOAD_TIMEOUT_MS = 12000;
+
+const fetchJson = async (url, fallbackMessage, signal) => {
+  const response = await fetch(url, { cache: 'no-store', signal });
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    const detail = payload.detail || payload.message || text || `HTTP ${response.status}`;
+    throw new Error(`${fallbackMessage}: ${detail}`);
+  }
+
+  return payload;
+};
+
 export default function AdminDashboard({ onNavigate, usuario }) {
   const [flota, setFlota] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
   const [loadTime] = useState(() => new Date());
+  const usuarioKey = usuario?.identifier || usuario?.email || '';
 
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_LOAD_TIMEOUT_MS);
+
     const fetchData = async () => {
+      if (!usuarioKey) {
+        setFlota([]);
+        setUsers([]);
+        setLoadError('No se pudo validar la identidad de la sesión actual.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setLoadError('');
+      setFlota([]);
+      setUsers([]);
+
       try {
-        const flotaRes = await fetch('/api/flota');
-        if (flotaRes.ok) {
-          const data = await flotaRes.json();
-          setFlota(data.flota || (Array.isArray(data) ? data : []));
+        const [flotaData, usersData] = await Promise.all([
+          fetchJson('/api/flota', 'No se pudo cargar la flota', controller.signal),
+          fetchJson(`/api/admin/users?email=${encodeURIComponent(usuarioKey)}`, 'No se pudo cargar los usuarios', controller.signal),
+        ]);
+
+        const nextFlota = flotaData?.flota || (Array.isArray(flotaData) ? flotaData : null);
+        const nextUsers = usersData?.usuarios;
+
+        if (!Array.isArray(nextFlota)) {
+          throw new Error('No se pudo cargar la flota: respuesta inválida del servicio.');
         }
-        if (usuario?.email) {
-          const usersRes = await fetch(`/api/admin/users?email=${encodeURIComponent(usuario.email)}`);
-          if (usersRes.ok) {
-            const text = await usersRes.text();
-            const data = text ? JSON.parse(text) : {};
-            setUsers(data.usuarios || []);
-          }
+        if (!Array.isArray(nextUsers)) {
+          throw new Error('No se pudo cargar los usuarios: respuesta inválida del servicio.');
+        }
+
+        if (!cancelled) {
+          setFlota(nextFlota);
+          setUsers(nextUsers);
+          setLoadError('');
         }
       } catch (err) {
-        console.error('Error cargando dashboard:', err);
+        if (!cancelled) {
+          const message = err?.name === 'AbortError'
+            ? 'El servicio de datos tardó demasiado en responder.'
+            : err instanceof Error ? err.message : 'Error desconocido al cargar los datos.';
+          setFlota([]);
+          setUsers([]);
+          setLoadError(message);
+          console.error('Error cargando dashboard:', err);
+        }
       } finally {
-        setLoading(false);
+        clearTimeout(timeoutId);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchData();
-  }, [usuario]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [usuarioKey, retryCount]);
 
   // --- Derived values ---
   const totalUsers = users.length;
@@ -166,6 +228,53 @@ export default function AdminDashboard({ onNavigate, usuario }) {
 
   if (loading) {
     return <GlobalLoader text="Cargando datos del sistema..." />;
+  }
+
+  if (loadError) {
+    return (
+      <div
+        role="alert"
+        aria-live="polite"
+        style={{
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          padding: '48px 24px',
+          minHeight: '280px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          gap: '12px',
+        }}
+      >
+        <AlertCircle size={42} color="var(--kapital-accent-red)" />
+        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Datos del sistema no disponibles</h2>
+        <p style={{ margin: 0, maxWidth: '620px', color: 'var(--text-secondary)' }}>
+          No se pudo validar la información de flota y usuarios. Los indicadores no se mostrarán hasta recuperar el servicio.
+        </p>
+        <p style={{ margin: 0, maxWidth: '620px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+          {loadError}
+        </p>
+        <button
+          type="button"
+          onClick={() => setRetryCount(current => current + 1)}
+          style={{
+            marginTop: '8px',
+            border: '1px solid var(--primary-color)',
+            borderRadius: '8px',
+            padding: '10px 18px',
+            background: 'transparent',
+            color: 'var(--primary-color)',
+            cursor: 'pointer',
+            fontWeight: 600,
+          }}
+        >
+          Reintentar carga
+        </button>
+      </div>
+    );
   }
 
   return (

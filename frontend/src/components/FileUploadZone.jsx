@@ -2,18 +2,78 @@ import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
 import { UploadCloud, File, X, CheckCircle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
-const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [] }, maxFiles = 1 }) => {
-  const onDrop = useCallback(acceptedFiles => {
-    if (acceptedFiles.length > 0) {
-      onFileSelect(acceptedFiles[0]);
+const MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024;
+
+const DEFAULT_DOCUMENT_ACCEPT = {
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/webp': ['.webp'],
+  'application/pdf': ['.pdf'],
+};
+
+const describeAcceptedTypes = (accept) => {
+  const accepted = Object.keys(accept || {});
+  if (accepted.includes('application/pdf')) return 'PNG, JPG, WebP o PDF';
+  if (accepted.some(type => type.startsWith('image/'))) return 'PNG, JPG o WebP';
+  return 'Archivos permitidos';
+};
+
+const describeRejection = (rejection, maxSize) => {
+  const codes = new Set((rejection?.errors || []).map(error => error.code));
+  if (codes.has('file-too-large')) {
+    return `El archivo supera el límite de ${(maxSize / (1024 * 1024)).toFixed(0)} MB.`;
+  }
+  if (codes.has('file-invalid-type')) {
+    return 'Formato no permitido. Usa PNG, JPG, WebP o PDF.';
+  }
+  return 'No se pudo aceptar el archivo. Revisa el formato y el tamaño.';
+};
+
+const FileUploadZone = ({
+  label,
+  onFileSelect,
+  file,
+  accept = DEFAULT_DOCUMENT_ACCEPT,
+  maxFiles = 1,
+  maxSize = MAX_DOCUMENT_SIZE_BYTES,
+  onValidationError,
+}) => {
+  const reportValidationError = useCallback((message) => {
+    if (onValidationError) {
+      onValidationError(message);
+      return;
     }
-  }, [onFileSelect]);
+    toast.error(message);
+  }, [onValidationError]);
+
+  const onDrop = useCallback((acceptedFiles, fileRejections) => {
+    if (fileRejections?.length > 0) {
+      reportValidationError(describeRejection(fileRejections[0], maxSize));
+      return;
+    }
+
+    const selectedFile = acceptedFiles?.[0];
+    if (!selectedFile) return;
+
+    // Keep this guard in addition to react-dropzone's maxSize option so a
+    // programmatic drop or a browser with an incomplete File object cannot
+    // bypass the real payload limit.
+    if (selectedFile.size > maxSize) {
+      reportValidationError(`El archivo supera el límite de ${(maxSize / (1024 * 1024)).toFixed(0)} MB.`);
+      return;
+    }
+
+    onFileSelect(selectedFile);
+  }, [maxSize, onFileSelect, reportValidationError]);
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     onDrop,
     accept,
-    maxFiles
+    maxFiles,
+    maxSize,
+    multiple: maxFiles > 1,
   });
 
   const removeFile = (e) => {
@@ -42,7 +102,9 @@ const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [] },
             ) : (
               <p>Arrastra tu archivo aquí o <span>haz clic para explorar</span></p>
             )}
-            <span className="upload-hint">PNG, JPG o WebP, máx 5MB</span>
+            <span className="upload-hint">
+              {describeAcceptedTypes(accept)}, máx {(maxSize / (1024 * 1024)).toFixed(0)} MB
+            </span>
           </motion.div>
         </div>
       ) : (
@@ -72,5 +134,8 @@ const FileUploadZone = ({ label, onFileSelect, file, accept = { 'image/*': [] },
     </div>
   );
 };
+
+FileUploadZone.MAX_DOCUMENT_SIZE_BYTES = MAX_DOCUMENT_SIZE_BYTES;
+FileUploadZone.DEFAULT_DOCUMENT_ACCEPT = DEFAULT_DOCUMENT_ACCEPT;
 
 export default FileUploadZone;

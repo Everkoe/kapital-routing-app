@@ -8,6 +8,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import './App.css';
 
+const DRIVER_POLL_INTERVAL_MS = 90_000;
+const DRIVER_POLL_BACKOFF_BASE_MS = 60_000;
+const DRIVER_POLL_BACKOFF_MAX_MS = 10 * 60_000;
+const DRIVER_REQUEST_TIMEOUT_MS = 12_000;
+const DRIVER_POLL_ACTIVITY_COOLDOWN_MS = 15_000;
+const RETRYABLE_POLL_STATUS_CODES = new Set([402, 408, 429, 500, 502, 503, 504]);
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = DRIVER_REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme }) => {
   const [rutas, setRutas] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,20 +59,48 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
-  const pollingIntervalRef = useRef(null);
+  const wsHeartbeatRef = useRef(null);
+  const wsIntentionalCloseRef = useRef(false);
+  const connectWebSocketRef = useRef(null);
   const lastKnownNotifCountRef = useRef(-1); // -1 = not initialized yet
   const wsConnectedRef = useRef(false);
+  const pollTimerRef = useRef(null);
+  const pollAbortRef = useRef(null);
+  const [webSocketConnected, setWebSocketConnected] = useState(false);
 
   const usuarioRef = useRef(usuario);
   useEffect(() => {
     usuarioRef.current = usuario;
   }, [usuario]);
 
+  const closeWebSocket = useCallback(() => {
+    wsIntentionalCloseRef.current = true;
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (wsHeartbeatRef.current) {
+      clearInterval(wsHeartbeatRef.current);
+      wsHeartbeatRef.current = null;
+    }
+    const currentSocket = wsRef.current;
+    wsRef.current = null;
+    wsConnectedRef.current = false;
+    if (currentSocket) {
+      currentSocket.onclose = null;
+      currentSocket.onerror = null;
+      currentSocket.close();
+    }
+    setWebSocketConnected(false);
+  }, []);
+
   const connectWebSocket = useCallback(() => {
     const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
-    if (!userKey) return;
+    if (!userKey || typeof window === 'undefined' || typeof WebSocket === 'undefined' || document.hidden) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     // Usar ws:// o wss:// según el protocolo de la página
+    wsIntentionalCloseRef.current = false;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/${encodeURIComponent(userKey)}`;
     
@@ -63,13 +108,19 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (ws !== wsRef.current || wsIntentionalCloseRef.current || document.hidden) {
+        ws.close();
+        return;
+      }
       console.log('[WS] Conectado al servidor en tiempo real');
       reconnectAttemptsRef.current = 0;
       // Heartbeat ping cada 30s para mantener la conexión viva
-      const heartbeat = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      if (wsHeartbeatRef.current) clearInterval(wsHeartbeatRef.current);
+      wsHeartbeatRef.current = setInterval(() => {
+        if (!document.hidden && ws.readyState === WebSocket.OPEN) ws.send('ping');
       }, 30000);
-      ws._heartbeat = heartbeat;
+      wsConnectedRef.current = true;
+      setWebSocketConnected(true);
     };
 
     ws.onmessage = (event) => {
@@ -103,7 +154,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
           // Recargar perfil para obtener el estado actualizado
           const userKeyProfile = usuarioRef.current?.identifier || usuarioRef.current?.email;
           if (userKeyProfile) {
-            fetch(`/api/user/profile?email=${encodeURIComponent(userKeyProfile)}`)
+            fetchWithTimeout(`/api/user/profile?email=${encodeURIComponent(userKeyProfile)}`)
               .then(r => r.ok ? r.json() : null)
               .then(data => {
                 if (data) {
@@ -137,13 +188,24 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       }
     };
 
-    ws.onclose = (event) => {
-      if (ws._heartbeat) clearInterval(ws._heartbeat);
+    ws.onclose = () => {
+      if (ws !== wsRef.current) return;
+      wsRef.current = null;
+      if (wsHeartbeatRef.current) {
+        clearInterval(wsHeartbeatRef.current);
+        wsHeartbeatRef.current = null;
+      }
+      wsConnectedRef.current = false;
+      setWebSocketConnected(false);
       console.log('[WS] Conexión cerrada, reintentando...');
+      if (wsIntentionalCloseRef.current || document.hidden) return;
       // Reconexión con backoff exponencial (máx 30s)
       const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000);
       reconnectAttemptsRef.current += 1;
-      reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        connectWebSocketRef.current?.();
+      }, delay);
     };
 
     ws.onerror = (err) => {
@@ -152,67 +214,159 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     };
   }, [setUsuarioActual]);
 
-  // --- Polling de respaldo para Vercel (donde los WebSockets no persisten) ---
-  const startPolling = useCallback(() => {
-    if (pollingIntervalRef.current) return; // ya hay un polling activo
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
+    return () => {
+      if (connectWebSocketRef.current === connectWebSocket) connectWebSocketRef.current = null;
+    };
+  }, [connectWebSocket]);
+
+  useEffect(() => {
+    const syncWebSocket = () => {
+      if (document.hidden) {
+        closeWebSocket();
+      } else {
+        connectWebSocket();
+      }
+    };
+
+    syncWebSocket();
+    document.addEventListener('visibilitychange', syncWebSocket);
+    window.addEventListener('focus', syncWebSocket);
+    return () => {
+      document.removeEventListener('visibilitychange', syncWebSocket);
+      window.removeEventListener('focus', syncWebSocket);
+      closeWebSocket();
+    };
+  }, [closeWebSocket, connectWebSocket]);
+
+  // --- Polling de respaldo para Vercel (solo cuando WebSocket no está conectado) ---
+  useEffect(() => {
     const userKey = usuario?.identifier || usuario?.email;
-    if (!userKey) return;
+    if (!userKey) return undefined;
 
-    const poll = async () => {
+    let disposed = false;
+    let timerId = null;
+    let inFlight = false;
+    let backoffMs = 0;
+    let lastRunAt = 0;
+    lastKnownNotifCountRef.current = -1;
+
+    const clearTimer = () => {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      pollTimerRef.current = null;
+    };
+
+    const schedule = (delay) => {
+      if (disposed || document.hidden || webSocketConnected || wsConnectedRef.current) return;
+      clearTimer();
+      timerId = setTimeout(() => {
+        timerId = null;
+        pollTimerRef.current = null;
+        runPoll();
+      }, Math.max(0, delay));
+      pollTimerRef.current = timerId;
+    };
+
+    const runPoll = async (force = false) => {
+      if (disposed || document.hidden || webSocketConnected || wsConnectedRef.current || inFlight) return;
+      if (!force && Date.now() - lastRunAt < DRIVER_POLL_ACTIVITY_COOLDOWN_MS) {
+        schedule(DRIVER_POLL_INTERVAL_MS);
+        return;
+      }
+
+      lastRunAt = Date.now();
+      inFlight = true;
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), DRIVER_REQUEST_TIMEOUT_MS);
+      let nextDelay = DRIVER_POLL_INTERVAL_MS;
+
       try {
-        const res = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`);
-        if (!res.ok) return;
-        const allNotifs = await res.json();
-        const unread = allNotifs.filter(n => !n.leido);
-
-        if (lastKnownNotifCountRef.current === -1) {
-          // Primera carga: solo guardar el estado, no mostrar toasts
-          lastKnownNotifCountRef.current = allNotifs.length;
-          if (unread.length > 0) {
-            setNotificaciones(unread);
+        const res = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          if (RETRYABLE_POLL_STATUS_CODES.has(res.status)) {
+            backoffMs = backoffMs > 0
+              ? Math.min(backoffMs * 2, DRIVER_POLL_BACKOFF_MAX_MS)
+              : DRIVER_POLL_BACKOFF_BASE_MS;
+            nextDelay = backoffMs;
           }
           return;
         }
 
-        // Hay más notificaciones que antes → mostrar las nuevas
-        if (allNotifs.length > lastKnownNotifCountRef.current) {
+        const payload = await res.json();
+        const allNotifs = Array.isArray(payload) ? payload : [];
+        const unread = allNotifs.filter(notification => !notification.leido);
+
+        if (lastKnownNotifCountRef.current === -1) {
+          lastKnownNotifCountRef.current = allNotifs.length;
+          if (unread.length > 0) setNotificaciones(unread);
+        } else if (allNotifs.length > lastKnownNotifCountRef.current) {
           const newOnes = allNotifs.slice(0, allNotifs.length - lastKnownNotifCountRef.current);
-          newOnes.forEach(n => {
-            toast(n.mensaje || n.titulo || 'Nueva notificación del administrador', { icon: '🔔', duration: 6000 });
+          newOnes.forEach(notification => {
+            toast(notification.mensaje || notification.titulo || 'Nueva notificación del administrador', { icon: '🔔', duration: 6000 });
           });
           lastKnownNotifCountRef.current = allNotifs.length;
           setNotificaciones(unread);
+        } else if (allNotifs.length < lastKnownNotifCountRef.current) {
+          // The server may have marked messages as read or compacted history.
+          lastKnownNotifCountRef.current = allNotifs.length;
+          setNotificaciones(unread);
         }
-      } catch (e) {
-        // silently ignore
+        backoffMs = 0;
+      } catch (error) {
+        if (error?.name !== 'AbortError' || !disposed) {
+          backoffMs = backoffMs > 0
+            ? Math.min(backoffMs * 2, DRIVER_POLL_BACKOFF_MAX_MS)
+            : DRIVER_POLL_BACKOFF_BASE_MS;
+          nextDelay = backoffMs;
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (pollAbortRef.current === controller) pollAbortRef.current = null;
+        inFlight = false;
+        if (!disposed && !document.hidden && !webSocketConnected && !wsConnectedRef.current) {
+          schedule(nextDelay);
+        }
       }
     };
 
-    poll(); // run immediately
-    pollingIntervalRef.current = setInterval(poll, 15000); // check every 15 seconds
-  }, [usuario]);
+    const wakePolling = () => {
+      if (disposed || document.hidden || webSocketConnected || wsConnectedRef.current) return;
+      if (Date.now() - lastRunAt < DRIVER_POLL_ACTIVITY_COOLDOWN_MS) {
+        schedule(DRIVER_POLL_INTERVAL_MS);
+        return;
+      }
+      clearTimer();
+      runPoll(true);
+    };
 
-  const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-  }, []);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimer();
+        pollAbortRef.current?.abort();
+      } else {
+        wakePolling();
+      }
+    };
 
-  useEffect(() => {
-    connectWebSocket();
-    // Start polling immediately as a fallback (Vercel doesn't support persistent WebSockets)
-    startPolling();
+    schedule(0);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', wakePolling);
+
     return () => {
-      // Cleanup: cerrar WS y cancelar reconexión pendiente
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null; // Evitar reconexión al desmontar
-        wsRef.current.close();
-      }
-      stopPolling();
+      disposed = true;
+      clearTimer();
+      pollAbortRef.current?.abort();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', wakePolling);
     };
-  }, [connectWebSocket, startPolling, stopPolling]);
+  }, [usuario?.identifier, usuario?.email, webSocketConnected]);
 
   const markNotificationRead = async (id) => {
     try {
@@ -221,7 +375,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: usuario.email || usuario.identifier, notif_id: id })
       });
-      setNotificaciones(notificaciones.filter(n => n.id !== id));
+      setNotificaciones(prev => prev.filter(n => n.id !== id));
     } catch(e) {}
   };
 
@@ -378,7 +532,15 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   if (needsDocumentAction) {
     return (
       <main style={{ padding: '20px', minHeight: '100vh', background: 'var(--bg)' }}>
-        <DocumentResubmission usuario={usuario} onComplete={handleResubmissionComplete} />
+        <DocumentResubmission
+          usuario={usuario}
+          // With a live WebSocket, let the resubmission view perform only its
+          // one-time notification hydration; recurring fallback polling stays
+          // disabled. When the socket is unavailable, DriverPortal owns the
+          // shared fallback result and passes it down.
+          notifications={webSocketConnected ? undefined : notificaciones}
+          onComplete={handleResubmissionComplete}
+        />
       </main>
     );
   }
