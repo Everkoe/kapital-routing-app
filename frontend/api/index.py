@@ -806,6 +806,66 @@ def password_for_storage(password: str) -> str:
     return hash_password(password) if PASSWORD_HASH_WRITE_ENABLED else password
 
 
+_SESSION_SNAPSHOT_FIELDS = ("rol", "estado", "email", "unidad_id", "empresa_id")
+
+
+def _session_auth_snapshot(user: Dict[str, Any]) -> Dict[str, Any]:
+    """Campos que la autorización necesita, sin datos sensibles ni credenciales."""
+    return {field: user.get(field) for field in _SESSION_SNAPSHOT_FIELDS}
+
+
+def _prune_session_index(now: int) -> None:
+    for token_hash in [
+        key for key, entry in session_index.items()
+        if not isinstance(entry, dict) or int(entry.get("expires_at", 0)) <= now
+    ]:
+        session_index.pop(token_hash, None)
+
+
+def refresh_session_index_for(user: Dict[str, Any]) -> None:
+    """Re-sincroniza la instantánea tras cambiar rol o estado de un usuario.
+
+    Sin esto, desactivar una cuenta no surtiría efecto en los endpoints que
+    autorizan solo con el índice hasta que caduque la sesión.
+    """
+    identifier = user.get("identifier")
+    if not identifier:
+        return
+    snapshot = _session_auth_snapshot(user)
+    for entry in session_index.values():
+        if isinstance(entry, dict) and entry.get("identifier") == identifier:
+            entry.update(snapshot)
+
+
+def revoke_session_in_index(token_hash: str, now: int) -> None:
+    entry = session_index.get(token_hash)
+    if isinstance(entry, dict):
+        entry["revoked_at"] = now
+
+
+def session_actor_from_index(raw_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Actor de autorización resuelto solo con el índice.
+
+    Devuelve el usuario real si ya está cargado; si no, la instantánea, que
+    basta para comprobar estado, rol y propiedad del recurso.
+    """
+    if not raw_token:
+        return None
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    entry = session_index.get(token_hash)
+    if not isinstance(entry, dict) or entry.get("revoked_at"):
+        return None
+    if int(entry.get("expires_at", 0)) <= int(datetime.now(timezone.utc).timestamp()):
+        return None
+    identifier = entry.get("identifier")
+    if not identifier:
+        return None
+    loaded = usuarios_db.get(identifier)
+    if isinstance(loaded, dict):
+        return loaded
+    return {"identifier": identifier, **{f: entry.get(f) for f in _SESSION_SNAPSHOT_FIELDS}}
+
+
 def issue_session(user: Dict[str, Any]) -> str:
     """Create an opaque session while storing only its SHA-256 digest."""
     now = int(datetime.now(timezone.utc).timestamp())
@@ -824,6 +884,15 @@ def issue_session(user: Dict[str, Any]) -> str:
         "expires_at": expires_at,
     })
     user["_auth_sessions"] = valid_sessions
+    # Escritura doble: `_auth_sessions` se conserva para que un rollback a una
+    # versión anterior siga reconociendo la sesión.
+    _prune_session_index(now)
+    session_index[token_hash] = {
+        "identifier": user.get("identifier"),
+        "created_at": now,
+        "expires_at": expires_at,
+        **_session_auth_snapshot(user),
+    }
     return raw_token
 
 
@@ -833,6 +902,16 @@ def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
         return None
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     now = int(datetime.now(timezone.utc).timestamp())
+    entry = session_index.get(token_hash)
+    if (
+        isinstance(entry, dict)
+        and not entry.get("revoked_at")
+        and int(entry.get("expires_at", 0)) > now
+    ):
+        indexed = usuarios_db.get(entry.get("identifier"))
+        if isinstance(indexed, dict):
+            return indexed
+    # Respaldo legado: sesiones emitidas antes de que existiera el índice.
     for user in usuarios_db.values():
         if not isinstance(user, dict):
             continue
@@ -931,6 +1010,10 @@ historial_rutas: List[Dict[str, Any]] = []
 board_lock: Dict[str, Any] = {}
 routes_summary: List[Dict[str, Any]] = []  # Compact summary for GerentePortal
 notifications_db: List[Dict[str, Any]] = [] # Real-time events
+# Índice de sesiones: sha256(token) -> instantánea de autorización. Vive como
+# pseudo-clave `usuarios.__sessions__`, igual que `__flota__`. Existe para que
+# validar una sesión no cueste los ~3,42 MB del objeto usuarios completo.
+session_index: Dict[str, Dict[str, Any]] = {}
 
 # --- WebSocket Manager ---
 class WebSocketManager:
@@ -1692,6 +1775,7 @@ async def _load_normalized_state_locked() -> None:
     """Load V2 resources once and atomically rebuild the legacy globals."""
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
     global historial_rutas, board_lock, routes_summary, notifications_db
+    global session_index
     global _normalized_snapshot_ids, _normalized_snapshot_ready
     rows_by_resource = await _fetch_normalized_snapshot()
     decoded = _v2_decode_snapshot(rows_by_resource)
@@ -1701,6 +1785,7 @@ async def _load_normalized_state_locked() -> None:
     historial_rutas = decoded["historial_rutas"]
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
+    session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     conductores_db = decoded["flota"]
     _normalized_snapshot_ids = _normalized_snapshot_keys(rows_by_resource)
     _normalized_snapshot_ready = True
@@ -2127,6 +2212,7 @@ def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[
         "board_lock": usuarios.pop("__lock__", data.get("lock", {})),
         "notifications": usuarios.pop("__notifications__", data.get("notifications", [])),
         "flota": usuarios.pop("__flota__", data.get("flota", _MISSING)),
+        "sessions": usuarios.pop("__sessions__", {}) or {},
         "has_canonical_flota": has_canonical_flota,
         "has_legacy_flota": has_legacy_flota,
     }
@@ -2152,6 +2238,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
         return
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
     global historial_rutas, board_lock, routes_summary, notifications_db
+    global session_index
     response = await _db_http_request(
         "GET",
         _app_state_url(),
@@ -2169,6 +2256,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     historial_rutas = decoded["historial_rutas"]
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
+    session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     if decoded["flota"] is not _MISSING:
         conductores_db = decoded["flota"]
     db_loaded = True
@@ -2432,6 +2520,66 @@ async def _load_compat_user(identifier: str) -> Optional[Dict[str, Any]]:
         _raise_database_unavailable("load_user_projection", error=exc)
 
 
+_sessions_projection_loaded_at: Optional[float] = None
+
+
+def _sessions_projection_is_fresh() -> bool:
+    return _cache_is_fresh(_sessions_projection_loaded_at)
+
+
+async def _load_compat_sessions() -> None:
+    """Carga solo `usuarios.__sessions__`: decenas de KB en vez de ~3,42 MB."""
+    global session_index, _sessions_projection_loaded_at
+    if _full_cache_is_fresh() or _users_projection_is_fresh() or _sessions_projection_is_fresh():
+        return
+    async with _get_db_io_lock():
+        if _full_cache_is_fresh() or _users_projection_is_fresh() or _sessions_projection_is_fresh():
+            return
+        value = await _fetch_projection_value("__sessions__", "load_sessions_projection")
+        # Un índice ausente no justifica descargar el estado completo: significa
+        # que aún no hay sesiones indexadas, y la ruta cara lo resolverá.
+        session_index = value if isinstance(value, dict) else {}
+        _sessions_projection_loaded_at = time.monotonic()
+
+
+async def require_session_owner(
+    session_token: Optional[str],
+    *,
+    actor_fields: tuple,
+    requested: Any,
+    resource: str,
+) -> Optional[Dict[str, Any]]:
+    """Autoriza al dueño del recurso o a un administrador, por la vía barata.
+
+    Con la exigencia desactivada no hace ninguna lectura, para no alterar el
+    coste de egress caracterizado en las pruebas de la fase 0.
+    """
+    if not AUTH_ENFORCED:
+        return None
+    # 1. Índice ya en memoria: una instancia caliente no hace ninguna lectura.
+    actor = session_actor_from_index(session_token)
+    if actor is None and _is_compat_storage():
+        # 2. Traer solo el índice (decenas de KB).
+        await _load_compat_sessions()
+        actor = session_actor_from_index(session_token)
+    if actor is None:
+        # 3. Sesión anterior al índice: se paga la vía cara una vez; el próximo
+        #    login la indexa.
+        await _load_compat_users()
+        actor = get_user_by_session(session_token)
+    if actor is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    blocked = account_block_reason(actor)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
+    if actor.get("rol") in _ADMIN_ROLES:
+        return actor
+    wanted = _owner_key(requested)
+    if wanted and any(_owner_key(actor.get(field)) == wanted for field in actor_fields):
+        return actor
+    raise HTTPException(status_code=403, detail=f"No tienes acceso a {resource}.")
+
+
 async def _load_compat_routes_locked() -> None:
     """Load only ``rutas`` for route/listing endpoints."""
     global rutas_estado_actual, _routes_projection_loaded_at
@@ -2634,7 +2782,8 @@ async def persist():
             "__historial_rutas__": historial_rutas,
             "__lock__": board_lock,
             "__flota__": conductores_db,
-            "__notifications__": notifications_db
+            "__notifications__": notifications_db,
+            "__sessions__": session_index,
         },
         "rutas": rutas_estado_actual,
     }
@@ -2679,7 +2828,8 @@ async def persist_users_only():
             "__historial_rutas__": historial_rutas,
             "__lock__": board_lock,
             "__flota__": conductores_db,
-            "__notifications__": notifications_db
+            "__notifications__": notifications_db,
+            "__sessions__": session_index,
         },
     }
     await _persist_app_state(payload, "persist_users")
@@ -2697,7 +2847,8 @@ async def persist_routes_summary(summary: list):
             "__historial_rutas__": historial_rutas,
             "__lock__": next_lock,
             "__flota__": conductores_db,
-            "__notifications__": notifications_db
+            "__notifications__": notifications_db,
+            "__sessions__": session_index,
         },
     }
     if _is_normalized_storage():
@@ -3084,6 +3235,8 @@ async def logout_user(response: Response, session_token: SessionCookie = None):
                     session["revoked_at"] = now
                     revoked = True
             if revoked:
+                revoke_session_in_index(token_hash, now)
+            if revoked:
                 # Solo se persiste si de verdad hubo algo que revocar.
                 await persist_users_only()
     # Se sobreescribe con los mismos atributos del login para que el navegador
@@ -3227,8 +3380,10 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
         if target in usuarios_db:
             if payload.action == "approve":
                 usuarios_db[target]["estado"] = "Activo"
+                refresh_session_index_for(usuarios_db[target])
             elif payload.action in ["reject", "deactivate"]:
                 usuarios_db[target]["estado"] = "Rechazado"
+                refresh_session_index_for(usuarios_db[target])
             elif payload.action == "delete":
                 del usuarios_db[target]
                 
@@ -3252,6 +3407,7 @@ async def approve_user(
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     usuarios_db[target_email]["estado"] = "Activo"
+    refresh_session_index_for(usuarios_db[target_email])
 
     # Si es conductor y el admin proporcionó un Padrón (unidad_id)
     if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
@@ -3359,6 +3515,9 @@ async def deactivate_user(target_email: str, admin_email: str, session_token: Se
         raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta.")
 
     user["estado"] = "Inactivo"
+    # Sin esto, la instantánea del índice seguiría diciendo "Activo" hasta que
+    # la sesión caducara: una desactivación que no desactiva.
+    refresh_session_index_for(user)
     await persist_users_only()
     return {"message": f"Usuario {target_email} desactivado.", "estado": "Inactivo"}
 
@@ -3376,6 +3535,7 @@ async def reactivate_user(target_email: str, admin_email: str, session_token: Se
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
     user["estado"] = "Activo"
+    refresh_session_index_for(user)
     await persist_users_only()
     return {"message": f"Usuario {target_email} reactivado.", "estado": "Activo"}
 
@@ -3469,6 +3629,7 @@ async def review_driver_doc(payload: DriverDocReviewPayload):
         conductor["estado"] = "Documentos Observados"
     elif len(revisiones) > 0 and all(v["estado"] == "aprobado" for v in revisiones.values()):
         conductor["estado"] = "Activo"
+        refresh_session_index_for(conductor)
 
     await persist_users_only()
     return {
@@ -3546,7 +3707,11 @@ class MarkReadPayload(BaseModel):
     notif_id: int
 
 @app.get("/api/conductor/notifications")
-async def get_conductor_notifications(email: str):
+async def get_conductor_notifications(email: str, session_token: SessionCookie = None):
+    await require_session_owner(
+        session_token, actor_fields=("identifier", "email"), requested=email,
+        resource="esas notificaciones",
+    )
     await reload_notifications()  # Lightweight: only loads notifications from Supabase
     user_notifs = [n for n in notifications_db if n.get("para") == email]
     user_notifs.sort(key=lambda x: x.get("fecha", ""), reverse=True)
@@ -4029,6 +4194,7 @@ async def publish_routes_summary(rutas: list = Body(...)):
             "__lock__": next_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+            "__sessions__": session_index,
         },
     }
     if _is_normalized_storage():
@@ -4245,7 +4411,11 @@ class EstadoPasajeroUpdate(BaseModel):
     evidencia_foto: Optional[str] = None
 
 @app.get("/api/mis-rutas/{conductor_id}")
-async def mis_rutas(conductor_id: str):
+async def mis_rutas(conductor_id: str, session_token: SessionCookie = None):
+    await require_session_owner(
+        session_token, actor_fields=("unidad_id",), requested=conductor_id,
+        resource="las rutas de esa unidad",
+    )
     if _is_compat_storage() and not _full_cache_is_fresh():
         await _load_compat_routes()
     else:
@@ -4277,7 +4447,11 @@ async def actualizar_pasajero(data: EstadoPasajeroUpdate):
     raise HTTPException(status_code=404, detail="Ruta o agente no encontrado")
 
 @app.get("/api/cliente/rutas/{empresa_id}")
-async def get_rutas_cliente(empresa_id: str):
+async def get_rutas_cliente(empresa_id: str, session_token: SessionCookie = None):
+    await require_session_owner(
+        session_token, actor_fields=("empresa_id",), requested=empresa_id,
+        resource="las rutas de esa empresa",
+    )
     if _is_compat_storage() and not _full_cache_is_fresh():
         await _load_compat_routes()
     else:
@@ -4378,6 +4552,7 @@ async def _persist_and_verify_fleet(
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+            "__sessions__": session_index,
         },
     }, "persist_fleet")
     await _load_compat_fleet(force=True)
