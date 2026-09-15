@@ -5,6 +5,7 @@ import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
 import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
+import { apiFetch, apiRequest } from './utils/apiClient';
 
 import './App.css';
 
@@ -462,13 +463,9 @@ const FlotaView = ({ usuario, initialBase }) => {
   const handleDelete = async (unitId) => {
     if (!unitId || !window.confirm(`¿Estás seguro de eliminar la unidad ${unitId}?`)) return;
     try {
-      const res = await fetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
-      if (!res.ok) {
-        // Surface the backend reason (expired session, insufficient role) instead
-        // of a generic failure the admin cannot act on.
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Error al eliminar');
-      }
+      // apiFetch propaga el `detail` del backend (sesión expirada, rol sin
+      // permiso) en vez de un fallo genérico que el admin no puede accionar.
+      await apiFetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
       await fetchFlota();
       toast.success('Unidad eliminada.');
     } catch (err) {
@@ -528,11 +525,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     const filename = option?.filename || 'BASE FLOTA 2026.xlsx';
     const toastId = toast.loading(`Generando ${filename}...`);
     try {
-      const res = await fetch(`/api/flota/export?base=${encodeURIComponent(baseKey)}`);
-      if (!res.ok) {
-        const detail = await res.text().catch(() => res.statusText);
-        throw new Error(detail || `HTTP ${res.status}`);
-      }
+      const res = await apiRequest(`/api/flota/export?base=${encodeURIComponent(baseKey)}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -567,15 +560,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     try {
       const method = isEditing ? 'PUT' : 'POST';
       const url = isEditing ? `/api/flota/${encodeURIComponent(editingUnitId)}` : '/api/flota';
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isEditing ? editPayload : formData)
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || 'Error al guardar');
-      }
+      await apiFetch(url, { method, json: isEditing ? editPayload : formData });
       setShowModal(false);
       await fetchFlota();
       toast.success(isEditing ? 'Unidad actualizada.' : 'Unidad registrada.');

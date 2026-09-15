@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, CheckSquare, X, Eye, FileText, Download, Truck, Shield, Search, User, Trash2, RotateCcw } from 'lucide-react';
 import { GlobalLoader } from './GlobalLoader';
 import DocumentVerification from './DocumentVerification';
+import { apiFetch } from '../utils/apiClient';
 
 const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
   if (!isOpen) return null;
@@ -203,12 +204,8 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch(`/api/admin/users?email=${encodeURIComponent(usuarioActual.email)}`);
-      if (res.ok) {
-        const text = await res.text();
-        const data = text ? JSON.parse(text) : {};
-        setUsers(data.usuarios || []);
-      }
+      const data = await apiFetch(`/api/admin/users?email=${encodeURIComponent(usuarioActual.email)}`);
+      setUsers(data?.usuarios || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -316,15 +313,12 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       const apiAction = action === 'approve' ? 'approve' : 'reject';
       const method = action === 'approve' ? 'PUT' : 'DELETE';
       const unidadIdParam = padron ? `&unidad_id=${encodeURIComponent(padron.trim())}` : '';
-      const res = await fetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}${unidadIdParam}`, { method });
-      if (res.ok) {
-        toast.success(action === 'approve' ? 'Conductor aprobado' : 'Conductor rechazado');
-        await fetchUsers();
-      }
-      else toast.error('Error al realizar la acción');
+      await apiFetch(`/api/admin/users/${apiAction}/${encodeURIComponent(email)}?admin_email=${encodeURIComponent(usuarioActual.email)}${unidadIdParam}`, { method });
+      toast.success(action === 'approve' ? 'Conductor aprobado' : 'Conductor rechazado');
+      await fetchUsers();
     } catch (e) {
       console.error(e);
-      toast.error('Error de conexión');
+      toast.error(e?.message || 'Error de conexión');
     }
     finally { setActionLoading(null); }
   };

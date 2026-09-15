@@ -6,6 +6,7 @@ import ZenModeView from './components/ZenModeView';
 import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { apiFetch } from './utils/apiClient';
 import './App.css';
 
 const DRIVER_POLL_INTERVAL_MS = 90_000;
@@ -401,13 +402,10 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     const nuevoId = prompt("Ingresa el nuevo ID de tu Unidad (Ej. KAP-002):", conductorId);
     if (nuevoId && nuevoId.trim() !== conductorId) {
       try {
-        const response = await fetch('/api/user/profile', {
+        const updatedUser = await apiFetch('/api/user/profile', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: usuario.identifier || usuario.email, unidad_id: nuevoId.trim().toUpperCase() })
+          json: { identifier: usuario.identifier || usuario.email, unidad_id: nuevoId.trim().toUpperCase() },
         });
-        if (!response.ok) throw new Error('Error al actualizar unidad');
-        const updatedUser = await response.json();
         
         localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
         if (setUsuarioActual) {

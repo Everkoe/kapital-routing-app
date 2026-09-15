@@ -3,6 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { toast } from 'react-hot-toast';
 import { Camera, Truck, Edit3, X, FileText, Download } from 'lucide-react';
 import DocumentResubmission from './components/DocumentResubmission';
+import { apiFetch } from './utils/apiClient';
 
 const DOC_LABELS = {
   comprobanteDomicilio: 'Comprobante de Domicilio',
@@ -160,22 +161,22 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         fotoVehiculo: fotoVehiculo !== usuario.perfil_conductor?.fotoVehiculo ? fotoVehiculo : undefined
       };
 
-      const res = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 404) {
+      let data;
+      try {
+        data = await apiFetch('/api/user/profile', { method: 'PUT', json: payload });
+      } catch (apiErr) {
+        // Un 404 significa que el usuario ya no existe en servidor. Un 401 lo
+        // gestiona el manejador global de sesión expirada del cliente HTTP.
+        if (apiErr?.status === 404) {
           toast.error('Sesión expirada. Inicia sesión nuevamente.');
           onLogout();
           return;
         }
-        const errMsg = typeof data.detail === 'string' ? data.detail
-          : Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join(', ')
-          : data.detail ? JSON.stringify(data.detail) : 'Error al actualizar perfil';
-        throw new Error(errMsg);
+        const detail = apiErr?.payload?.detail;
+        const errMsg = Array.isArray(detail)
+          ? detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+          : apiErr?.message || 'Error al actualizar perfil';
+        throw new Error(errMsg, { cause: apiErr });
       }
 
       setUsuarioActual(data);
