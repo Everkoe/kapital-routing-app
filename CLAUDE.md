@@ -11,8 +11,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 
 ## 2. Estado real de la infraestructura (verificado, no asumido)
 
-- **Supabase**: proyecto activo `kapital-routing` (id `pkyezkdssyrbwxhldsay`), Postgres 17, región us-east-2.
-  El backend accede vía REST directo con `httpx` (no usa el SDK `supabase-py`).
+- **Supabase**: la app corre en modo `KAPITAL_STORAGE_BACKEND=V2_COMPAT` contra el proyecto **nuevo**
+  `kapital-routing-v2`. El proyecto original `kapital-routing` (id `pkyezkdssyrbwxhldsay`) quedó como origen
+  histórico; no asumir que es el activo. El backend accede vía REST directo con `httpx` (sin SDK `supabase-py`).
+  Todo el estado vive en **una sola fila**: `public.app_state` con `id = 1`, donde `usuarios` contiene los
+  usuarios reales más las pseudo-claves `__flota__`, `__notifications__`, `__routes_summary__`,
+  `__historial_rutas__` y `__lock__`. Snapshot completo ≈ 3,95 MB (solo `usuarios` ≈ 3,42 MB): el egress es
+  una restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -27,9 +32,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **Migración de contraseñas preparada, todavía no activada**: el backend lee hashes PBKDF2 y texto plano. Solo
   escribe/migra hashes cuando `KAPITAL_PASSWORD_HASH_WRITE=true`; mantenerla en `false` durante el primer despliegue
   compatible para conservar un rollback seguro.
-- **Sesiones en transición**: el login ya emite una cookie opaca `HttpOnly` y persiste únicamente su hash. La
-  obligatoriedad por endpoint todavía no está activada; debe probarse antes de retirar la autorización heredada
-  basada en identificadores enviados por el navegador.
+- **Sesiones en transición — leer con cuidado**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`,
+  TTL 12 h) y persiste únicamente su hash. `KAPITAL_AUTH_ENFORCED` pasó a default `true` en el PR #2, pero
+  **solo ~12 de 46 endpoints tienen control de sesión** y el frontend **no maneja respuestas 401** (0
+  coincidencias en `src/`, con 42 llamadas `fetch`). Es decir: la exigencia está activada sin su precondición.
+  Ver `docs/handoff/2026-09-15-relevo.md` §7 antes de tocar autenticación.
 
 ## 3. Stack Tecnológico
 
@@ -42,14 +49,15 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
 - `framer-motion` — animaciones
 
-**Backend** (`frontend/api/index.py`, FastAPI/Python, ~2180 líneas en un solo archivo)
+**Backend** (`frontend/api/index.py`, FastAPI/Python, ~4625 líneas y 46 endpoints en un solo archivo —
+muy por encima del techo de 800; su modularización es el P2 del PR #1)
 - `fastapi`, `uvicorn`, `pandas`, `openpyxl`, `httpx`, `python-dotenv`
 - WebSockets nativos para eventos en tiempo real (`WebSocketManager`, broadcast por rol)
 - Sin SDK de Supabase ni de Gemini — todo por REST directo (decisión deliberada por límites de tamaño en Vercel)
 
 ## 4. Arquitectura por Roles
 
-`App.jsx` (~53KB / ~1130 líneas, componente raíz) enruta según rol a un portal distinto:
+`App.jsx` (~1365 líneas, componente raíz) enruta según rol a un portal distinto:
 
 | Rol | Componente | Archivo |
 |---|---|---|
@@ -86,11 +94,23 @@ Componentes de soporte en `frontend/src/components/`:
 
 ## 7. Variables de entorno (`frontend/.env` — nunca commitear valores reales)
 
+La lista completa y comentada está en [frontend/.env.example](frontend/.env.example). Resumen:
+
 ```
-SUPABASE_URL=
-SUPABASE_KEY=
-GEMINI_API_KEY=
+KAPITAL_STORAGE_BACKEND       # V2_COMPAT en la configuración actual
+KAPITAL_V2_SUPABASE_URL       # proyecto nuevo — solo backend
+KAPITAL_V2_SUPABASE_KEY       # solo backend, solo en el header `apikey`
+KAPITAL_V2_ENABLED / _REMOTE_ENABLED / _READ_ONLY
+KAPITAL_AUTH_ENFORCED         # default true desde el PR #2 (ver §2)
+KAPITAL_SESSION_TTL_HOURS     # 12 por defecto
+KAPITAL_PASSWORD_HASH_WRITE   # mantener en false hasta desplegar la lectura compatible
+SUPABASE_URL / SUPABASE_KEY   # proyecto original, ruta heredada
+GEMINI_API_KEY
+JSON_PE_TOKEN                 # tiene un literal como fallback en el código: rotar y retirar
 ```
+
+La clave secreta de Supabase se usa **solo en backend** y **solo** en el header `apikey`. Nunca
+`Authorization: Bearer`, nunca con prefijo `VITE_`/`NEXT_PUBLIC_`, nunca expuesta al navegador.
 
 ## 8. Comandos habituales
 
@@ -105,11 +125,24 @@ Backend local: `uvicorn api.index:app --reload` desde `frontend/` (requiere `req
 
 ## 9. Roadmap / próximos pasos
 
-1. ~~Migrar a DB en la nube~~ — **hecho** (Supabase), pero pendiente decidir si eliminar el estado en memoria
-   restante o formalizarlo como cache intencional.
-2. Algoritmos de optimización real de rutas (geográfico/matemático) — aún no implementado.
-3. Autenticación robusta con JWT — aún no implementado (verificar mecanismo actual de sesión antes de asumir que no hay nada).
-4. Mover credenciales hardcodeadas de Supabase a variables de entorno reales.
+**El plan de trabajo vivo está en [docs/handoff/2026-09-15-relevo.md](docs/handoff/2026-09-15-relevo.md) §8.**
+El backlog real es el cuerpo del PR #1, que es una especificación de 29 requisitos con un *Definition of Done*
+de 28 condiciones, no un registro de trabajo hecho. El §6 del relevo contrasta esa especificación contra el
+código, verificado endpoint por endpoint.
+
+Contexto que no cambia con cada lote:
+
+1. ~~Migrar a DB en la nube~~ — **hecho** (Supabase V2 en modo compat). Pendiente decidir si el estado en
+   memoria restante se elimina o se formaliza como caché intencional.
+2. Algoritmos de optimización real de rutas — no implementado, y **congelado a propósito** junto con el rol
+   Programador de rutas (casos `RTE` de `docs/phase-0/regression-matrix.md`). No optimizar por iniciativa propia.
+3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
+   Lo que falta no es el mecanismo, es la cobertura (~12 de 46 endpoints) y el manejo de 401 en el frontend.
+4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.
+5. **Separar backend y frontend en dos repositorios: evaluado el 2026-09-15 y descartado por ahora.**
+   El mismo origen es carga estructural: sostiene la cookie `SameSite=Lax` (que hoy neutraliza el CORS
+   wildcard), garantiza despliegues atómicos durante la migración de auth y mantiene un único baseline en CI.
+   Precondiciones para reconsiderarlo en el relevo §8.
 
 ## 10. Notas para el agente (cualquier cliente: terminal, desktop, plugin JetBrains)
 
