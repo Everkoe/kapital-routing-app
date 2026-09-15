@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:flota-status": "node --test tests/test_flota_document_status.mjs",
     "test:baseline": "python -m unittest discover -s tests -p \"test_*.py\" -v",
     "quality:baseline": "python ../scripts/phase0/check_quality_baseline.py",
     "verify:baseline": "npm run test:baseline && npm run quality:baseline && npm run build",

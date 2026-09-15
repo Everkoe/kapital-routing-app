@@ -456,6 +456,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             response = await backend.get_flota_status()
 
         vehicle = response["flota"][0]
+        self.assertEqual(vehicle["placa"], "K-001")
         self.assertEqual(vehicle["unidad_id"], "K-001")
         self.assertEqual(vehicle["real_placa"], "NEW-001")
         self.assertEqual(vehicle["celular"], "911111111")
@@ -1306,6 +1307,102 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"status":200', emitted)
         self.assertNotIn("private@example.com", emitted)
         self.assertNotIn("secret-token", emitted)
+
+    async def test_fleet_update_persists_multiple_dates_and_preserves_metadata(self):
+        backend.conductores_db["K-027"] = {
+            "capacidad": 15, "tipo": "Van", "chofer": "Driver",
+            "soat": "", "revision": "", "atu": "", "licencia": "",
+            "base": "MASIVO", "marca": "Mercedes", "modelo": "Sprinter",
+            "ano": 2024, "color": "Blanco", "soat_doc": "private://soat",
+            "metadata": {"source": "migration"},
+        }
+        persist_state = AsyncMock()
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as reload_db,
+            patch.object(backend, "_persist_app_state", new=persist_state),
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            response = await backend.update_flota("K-027", backend.FlotaUpdate(
+                soat="2027-05-20", revision="2026-09-30",
+                atu="2028-01-01", licencia="2029-12-31", capacidad=18,
+            ))
+
+        reload_db.assert_awaited_once_with(force=True)
+        persist_state.assert_awaited_once()
+        payload = persist_state.await_args.args[0]
+        stored = payload["usuarios"]["__flota__"]["K-027"]
+        self.assertEqual(stored["soat"], "2027-05-20")
+        self.assertEqual(stored["revision"], "2026-09-30")
+        self.assertEqual(stored["atu"], "2028-01-01")
+        self.assertEqual(stored["licencia"], "2029-12-31")
+        self.assertEqual(stored["soat_doc"], "private://soat")
+        self.assertEqual(stored["metadata"], {"source": "migration"})
+        self.assertEqual(stored["base"], "MASIVO")
+        self.assertFalse(response["unchanged"])
+
+    async def test_fleet_update_noop_does_not_persist(self):
+        backend.conductores_db["K-001"] = {
+            "capacidad": 15, "tipo": "Van", "chofer": "Driver", "soat": "2027-01-01"
+        }
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+        ):
+            response = await backend.update_flota(
+                "K-001", backend.FlotaUpdate(capacidad=15, soat="2027-01-01")
+            )
+        persist_state.assert_not_awaited()
+        self.assertTrue(response["unchanged"])
+
+    async def test_fleet_update_rejects_non_iso_or_impossible_date(self):
+        backend.conductores_db["K-001"] = {"soat": ""}
+        for invalid in ("20/05/2027", "2027-02-30", "2027-5-02"):
+            with patch.object(backend, "reload_db", new=AsyncMock()):
+                with self.assertRaises(HTTPException) as caught:
+                    await backend.update_flota("K-001", backend.FlotaUpdate(soat=invalid))
+            self.assertEqual(caught.exception.status_code, 400)
+
+    async def test_fleet_update_rolls_back_memory_when_persist_fails(self):
+        original = {"capacidad": 15, "soat": "", "soat_doc": "private://keep"}
+        backend.conductores_db["K-001"] = copy.deepcopy(original)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.update_flota("K-001", backend.FlotaUpdate(soat="2027-05-20"))
+        self.assertEqual(backend.conductores_db["K-001"], original)
+
+    async def test_fleet_update_requires_admin_session_when_enforced(self):
+        backend.AUTH_ENFORCED = True
+        driver = {
+            "identifier": "driver-1", "rol": "Conductor", "estado": "Activo",
+        }
+        backend.usuarios_db["driver-1"] = driver
+        token = backend.issue_session(driver)
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.update_flota(
+                    "K-001", backend.FlotaUpdate(soat="2027-05-20"), token
+                )
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            response = await backend.add_flota(backend.FlotaRegistro(
+                placa="K-NEW", capacidad=12, tipo="Van", chofer="New Driver",
+                soat=None, revision="", atu=None, licencia="",
+            ))
+        persist_state.assert_awaited_once()
+        self.assertEqual(response["unidad"]["soat"], "")
+        self.assertEqual(response["unidad"]["atu"], "")
 
 
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):

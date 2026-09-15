@@ -4,6 +4,7 @@ import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTri
 import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
 import FileUploadZone from './components/FileUploadZone';
+import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 
 import './App.css';
 
@@ -92,6 +93,9 @@ const FlotaView = ({ usuario, initialBase }) => {
     soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [editingUnitId, setEditingUnitId] = useState('');
+  const [initialEditData, setInitialEditData] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Conductor Modal state
   const [isConductorModalOpen, setIsConductorModalOpen] = useState(false);
@@ -437,28 +441,12 @@ const FlotaView = ({ usuario, initialBase }) => {
     return () => { document.body.style.overflow = 'unset'; };
   }, [showModal]);
 
-  const getStatus = (dateString) => {
-    if (!dateString) return { status: 'unknown', text: 'N/A' };
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const targetDate = new Date(dateString + 'T00:00:00');
-    const diffTime = targetDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) {
-      return { status: 'danger', text: 'Vencido' };
-    } else if (diffDays <= 15) {
-      return { status: 'warning', text: `Vence en ${diffDays} d` };
-    } else {
-      return { status: 'success', text: 'Vigente' };
-    }
-  };
-
   const renderBadge = (dateString, docUrl) => {
-    const { status, text } = getStatus(dateString);
+    const { status, text, daysRemaining } = getDocumentStatus(dateString);
+    const title = daysRemaining === null ? 'Sin fecha de vencimiento' : `${dateString} · ${daysRemaining} día${daysRemaining === 1 ? '' : 's'} restante${daysRemaining === 1 ? '' : 's'}`;
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div className={`status-badge status-${status}`} title={dateString}>
+        <div className={`status-badge status-${status}`} title={title}>
           <span className="dot"></span>
           {text}
         </div>
@@ -471,10 +459,10 @@ const FlotaView = ({ usuario, initialBase }) => {
     );
   };
 
-  const handleDelete = async (placa) => {
-    if (!window.confirm(`¿Estás seguro de eliminar la unidad ${placa}?`)) return;
+  const handleDelete = async (unitId) => {
+    if (!unitId || !window.confirm(`¿Estás seguro de eliminar la unidad ${unitId}?`)) return;
     try {
-      const res = await fetch(`/api/flota/${placa}`, { method: 'DELETE' });
+      const res = await fetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Error al eliminar');
       fetchFlota();
     } catch (err) {
@@ -483,7 +471,19 @@ const FlotaView = ({ usuario, initialBase }) => {
   };
 
   const handleEdit = (vehiculo) => {
-    setFormData(vehiculo);
+    const unitId = getFleetUnitId(vehiculo);
+    if (!unitId) {
+      toast.error('La unidad no tiene un identificador válido.');
+      return;
+    }
+    const editableData = {
+      capacidad: vehiculo.capacidad ?? 10,
+      tipo: vehiculo.tipo || 'Van', chofer: vehiculo.chofer || '', telefono: vehiculo.telefono || '',
+      soat: vehiculo.soat || '', revision: vehiculo.revision || '', atu: vehiculo.atu || '', licencia: vehiculo.licencia || '',
+    };
+    setFormData(editableData);
+    setEditingUnitId(unitId);
+    setInitialEditData(editableData);
     setIsEditing(true);
     setShowModal(true);
   };
@@ -491,6 +491,8 @@ const FlotaView = ({ usuario, initialBase }) => {
   const handleCreate = () => {
     setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
+    setEditingUnitId('');
+    setInitialEditData(null);
     setShowModal(true);
   };
 
@@ -542,22 +544,39 @@ const FlotaView = ({ usuario, initialBase }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
+
+    const editPayload = {
+      capacidad: formData.capacidad, tipo: formData.tipo,
+      chofer: formData.chofer, telefono: formData.telefono || '',
+      soat: formData.soat || '', revision: formData.revision || '', atu: formData.atu || '', licencia: formData.licencia || '',
+    };
+    if (isEditing && initialEditData && JSON.stringify(editPayload) === JSON.stringify(initialEditData)) {
+      setShowModal(false);
+      toast('No hay cambios para guardar.');
+      return;
+    }
+
+    setIsSaving(true);
     try {
       const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/flota/${formData.placa}` : '/api/flota';
+      const url = isEditing ? `/api/flota/${encodeURIComponent(editingUnitId)}` : '/api/flota';
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(isEditing ? editPayload : formData)
       });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || 'Error al guardar');
       }
       setShowModal(false);
-      fetchFlota();
+      await fetchFlota();
+      toast.success(isEditing ? 'Unidad actualizada.' : 'Unidad registrada.');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -566,6 +585,7 @@ const FlotaView = ({ usuario, initialBase }) => {
 
   const filteredFlota = flota.filter(vehiculo => {
     const matchesSearch = (vehiculo.placa || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (vehiculo.real_placa || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (vehiculo.unidad_id || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBase = baseFilter === 'Todas' || (vehiculo.base && vehiculo.base.toLowerCase().trim().includes(baseFilter.toLowerCase().trim()));
@@ -574,17 +594,10 @@ const FlotaView = ({ usuario, initialBase }) => {
 
   // KPIs calculations
   const totalUnits = flota.length;
-  let expiringDocsCount = 0;
-  let expiredDocsCount = 0;
-
-  flota.forEach(vehiculo => {
-    const docs = [vehiculo.soat, vehiculo.revision, vehiculo.atu, vehiculo.licencia];
-    docs.forEach(docDate => {
-      const { status } = getStatus(docDate);
-      if (status === 'danger') expiredDocsCount++;
-      if (status === 'warning') expiringDocsCount++;
-    });
-  });
+  const documentStatusCounts = countFleetDocumentStatuses(flota);
+  const validDocsCount = documentStatusCounts.valid;
+  const expiringDocsCount = documentStatusCounts.expiring;
+  const expiredDocsCount = documentStatusCounts.expired;
 
   return (
     <div className="card flota-view-card" style={{ maxWidth: '100%', overflowX: 'auto', position: 'relative' }}>
@@ -754,21 +767,21 @@ const FlotaView = ({ usuario, initialBase }) => {
             <div style={{ padding: '10px', background: 'rgba(10, 185, 129, 0.1)', color: '#10b981', borderRadius: '8px' }}><FileCheck size={24} /></div>
             <div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Doc. Vigentes</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>{totalUnits * 4 - expiringDocsCount - expiredDocsCount}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--kapital-accent-green)' }}>{validDocsCount}</div>
             </div>
           </div>
           <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px', borderColor: expiringDocsCount > 0 ? 'rgba(234, 179, 8, 0.3)' : 'var(--border-color)' }}>
             <div style={{ padding: '10px', background: 'rgba(234, 179, 8, 0.1)', color: '#eab308', borderRadius: '8px' }}><AlertTriangle size={24} /></div>
             <div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Por Vencer (15d)</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#eab308' }}>{expiringDocsCount}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--kapital-accent-orange)' }}>{expiringDocsCount}</div>
             </div>
           </div>
           <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '15px', borderColor: expiredDocsCount > 0 ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)' }}>
             <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '8px' }}><AlertTriangle size={24} /></div>
             <div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Vencidos</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444' }}>{expiredDocsCount}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--kapital-accent-red)' }}>{expiredDocsCount}</div>
             </div>
           </div>
         </div>
@@ -805,11 +818,11 @@ const FlotaView = ({ usuario, initialBase }) => {
             }
 
             return paginatedFlota.map((vehiculo, index) => {
-            const hasDanger = 
-              getStatus(vehiculo.soat).status === 'danger' || 
-              getStatus(vehiculo.revision).status === 'danger' ||
-              getStatus(vehiculo.atu).status === 'danger' ||
-              getStatus(vehiculo.licencia).status === 'danger';
+            const hasDanger =
+              getDocumentStatus(vehiculo.soat).status === 'danger' ||
+              getDocumentStatus(vehiculo.revision).status === 'danger' ||
+              getDocumentStatus(vehiculo.atu).status === 'danger' ||
+              getDocumentStatus(vehiculo.licencia).status === 'danger';
 
             return (
               <tr key={vehiculo.unidad_id || index} className={hasDanger ? 'row-danger' : ''}>
@@ -838,7 +851,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                       <a href={`https://wa.me/${vehiculo.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-icon" title="Contactar por WhatsApp" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><MessageCircle size={15} /></a>
                     )}
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} /></button>
-                    <button className="btn-icon" onClick={() => handleDelete(vehiculo.placa)} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
+                    <button className="btn-icon" onClick={() => handleDelete(getFleetUnitId(vehiculo))} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
                   </div>
                 </td>
                 )}
@@ -1194,9 +1207,10 @@ const FlotaView = ({ usuario, initialBase }) => {
             <h3>{isEditing ? 'Editar Unidad' : 'Registrar Nueva Unidad'}</h3>
             <form onSubmit={handleSubmit} className="flota-form">
               <div className="form-scroll-area">
+              <div className="form-section-title">Datos del conductor / unidad</div>
               <div className="form-row">
-                <label>Placa/ID</label>
-                <input required disabled={isEditing} value={formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
+                <label>{isEditing ? 'Padrón / ID de unidad' : 'Placa/ID'}</label>
+                <input required disabled={isEditing} value={isEditing ? editingUnitId : formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
               </div>
               <div className="form-row">
                 <label>Nombre Chofer</label>
@@ -1219,62 +1233,63 @@ const FlotaView = ({ usuario, initialBase }) => {
                 <label>Capacidad (Pax)</label>
                 <input type="number" required value={formData.capacidad} onChange={e => setFormData({...formData, capacidad: parseInt(e.target.value)})} min="1" />
               </div>
+              <div className="form-section-title">Documentación</div>
               <div className="form-row">
                 <label>Vencimiento SOAT</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" required value={formData.soat} onChange={e => setFormData({...formData, soat: e.target.value})} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input type="date" value={formData.soat || ''} onChange={e => setFormData({...formData, soat: e.target.value})} />
+                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
                       <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
                       📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
-                  </div>
+                  </div>}
                 </div>
               </div>
               <div className="form-row">
-                <label>Vencimiento Revisión</label>
+                <label>Vencimiento Revisión Técnica</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" required value={formData.revision} onChange={e => setFormData({...formData, revision: e.target.value})} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input type="date" value={formData.revision || ''} onChange={e => setFormData({...formData, revision: e.target.value})} />
+                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
                       <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
                       📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
-                  </div>
+                  </div>}
                 </div>
               </div>
               <div className="form-row">
-                <label>Vencimiento ATU</label>
+                <label>Vencimiento T.U.C. / ATU</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" required value={formData.atu} onChange={e => setFormData({...formData, atu: e.target.value})} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input type="date" value={formData.atu || ''} onChange={e => setFormData({...formData, atu: e.target.value})} />
+                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
                       <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
                       📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
-                  </div>
+                  </div>}
                 </div>
               </div>
               <div className="form-row">
-                <label>Vencimiento Licencia</label>
+                <label>Vencimiento Licencia MTC</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" required value={formData.licencia} onChange={e => setFormData({...formData, licencia: e.target.value})} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input type="date" value={formData.licencia || ''} onChange={e => setFormData({...formData, licencia: e.target.value})} />
+                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <label className="custom-file-upload">
                       <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
                       📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}
-                  </div>
+                  </div>}
                 </div>
               </div>
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button type="submit" className="btn-primary">Guardar</button>
+                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)} disabled={isSaving}>Cancelar</button>
+                <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? 'Guardando...' : 'Guardar'}</button>
               </div>
             </form>
           </div>
@@ -1533,6 +1548,17 @@ const FlotaView = ({ usuario, initialBase }) => {
           gap: 15px;
           margin-top: 20px;
         }
+        .form-section-title {
+          margin: 18px 0 12px;
+          padding-bottom: 8px;
+          border-bottom: 1px solid var(--kapital-border);
+          color: var(--kapital-text-primary);
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+        .form-section-title:first-child { margin-top: 0; }
         .form-row {
           display: flex;
           flex-direction: column;
