@@ -1405,6 +1405,53 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["unidad"]["soat"], "")
         self.assertEqual(response["unidad"]["atu"], "")
 
+    # --- Lote 4: endpoints administrativos y de coste ---
+
+    async def test_admin_write_endpoints_reject_anonymous(self):
+        """`clear_routes` borraba el tablero entero sin pedir nada."""
+        backend.AUTH_ENFORCED = True
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for coro in (
+                backend.clear_routes(None),
+                backend.save_history(None),
+                backend.update_routes([], None),
+            ):
+                with self.assertRaises(HTTPException) as caught:
+                    await coro
+                self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_admin_write_endpoints_reject_a_driver(self):
+        backend.AUTH_ENFORCED = True
+        driver = {"identifier": "drv", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv"] = driver
+        token = backend.issue_session(driver)
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.clear_routes(token)
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_paid_integrations_require_a_session(self):
+        """Gemini y la API de verificación se cobran: no deben quedar abiertas."""
+        backend.AUTH_ENFORCED = True
+        for coro in (
+            backend.verify_soat("ABC-123", None),
+            backend.verify_citv("ABC-123", None),
+            backend.verify_licencia("12345678", None),
+            backend.chat_with_copilot(backend.ChatRequest(message="hola"), None),
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await coro
+            self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_gating_admin_endpoints_costs_no_users_read(self):
+        backend.AUTH_ENFORCED = True
+        admin = {"identifier": "adm", "rol": "Administrador", "estado": "Activo"}
+        backend.usuarios_db["adm"] = admin
+        token = backend.issue_session(admin)
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()) as heavy:
+            self.assertIs(await backend.require_admin_session(token), admin)
+        heavy.assert_not_awaited()
+
     # --- Índice de sesiones ---
 
     async def test_issue_session_indexes_an_authorization_snapshot(self):

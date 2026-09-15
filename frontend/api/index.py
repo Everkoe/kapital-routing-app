@@ -2544,20 +2544,18 @@ async def _load_compat_sessions() -> None:
         _sessions_projection_loaded_at = time.monotonic()
 
 
-async def require_session_owner(
-    session_token: Optional[str],
-    *,
-    actor_fields: tuple,
-    requested: Any,
-    resource: str,
-) -> Optional[Dict[str, Any]]:
-    """Autoriza al dueño del recurso o a un administrador, por la vía barata.
+async def require_any_session(session_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Exige una sesión válida sin descargar el objeto de usuarios completo.
 
-    Con la exigencia desactivada no hace ninguna lectura, para no alterar el
-    coste de egress caracterizado en las pruebas de la fase 0.
+    Devuelve ``None`` cuando la exigencia está desactivada, igual que
+    ``require_request_actor``, para conservar el rollback de la fase 1.
     """
     if not AUTH_ENFORCED:
         return None
+    if not session_token:
+        # Sin cookie no hay nada que resolver: se rechaza sin tocar la base.
+        # Así una sonda anónima no cuesta ni una lectura.
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
     # 1. Índice ya en memoria: una instancia caliente no hace ninguna lectura.
     actor = session_actor_from_index(session_token)
     if actor is None and _is_compat_storage():
@@ -2574,6 +2572,34 @@ async def require_session_owner(
     blocked = account_block_reason(actor)
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
+    return actor
+
+
+async def require_admin_session(session_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Exige sesión con un rol administrativo, por la vía barata."""
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ADMIN_ROLES:
+        raise HTTPException(
+            status_code=403, detail="El rol actual no tiene permiso para esta acción."
+        )
+    return actor
+
+
+async def require_session_owner(
+    session_token: Optional[str],
+    *,
+    actor_fields: tuple,
+    requested: Any,
+    resource: str,
+) -> Optional[Dict[str, Any]]:
+    """Autoriza al dueño del recurso o a un administrador, por la vía barata.
+
+    Con la exigencia desactivada no hace ninguna lectura, para no alterar el
+    coste de egress caracterizado en las pruebas de la fase 0.
+    """
+    actor = await require_any_session(session_token)
+    if actor is None:
+        return None
     if actor.get("rol") in _ADMIN_ROLES:
         return actor
     if _owner_matches(actor, actor_fields, requested):
@@ -3571,8 +3597,9 @@ async def permanent_delete_user(target_email: str, admin_email: str, session_tok
     return {"message": f"Usuario {target_email} eliminado permanentemente."}
 
 @app.post("/api/admin/driver/review")
-async def review_driver_doc(payload: DriverDocReviewPayload):
+async def review_driver_doc(payload: DriverDocReviewPayload, session_token: SessionCookie = None):
     """Admin marca un documento individual del conductor como aprobado o rechazado."""
+    await require_admin_session(session_token)
 
     req_user = usuarios_db.get(payload.admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
@@ -3646,8 +3673,9 @@ async def review_driver_doc(payload: DriverDocReviewPayload):
     }
 
 @app.post("/api/admin/driver/notify")
-async def notify_driver(payload: DriverNotifyPayload):
+async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCookie = None):
     """Admin envía un aviso interno al conductor."""
+    await require_admin_session(session_token)
     await reload_db()
     req_user = usuarios_db.get(payload.admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
@@ -3839,7 +3867,8 @@ async def request_data_update(payload: UpdateDataRequestPayload):
     return {"status": "ok", "message": "Solicitud enviada"}
 
 @app.post("/api/admin/resolve-update")
-async def resolve_data_update(payload: ResolveDataRequestPayload):
+async def resolve_data_update(payload: ResolveDataRequestPayload, session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     admin = usuarios_db.get(payload.admin_email)
     if not admin or admin.get("rol") not in ["Administración", "Administrador", "Gerente de Operaciones"]:
         raise HTTPException(status_code=403, detail="No autorizado")
@@ -4186,7 +4215,8 @@ async def get_routes_summary():
     return []
 
 @app.post("/api/routes/publish")
-async def publish_routes_summary(rutas: list = Body(...)):
+async def publish_routes_summary(rutas: list = Body(...), session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     await ensure_db_loaded()
     summary = _build_routes_summary(rutas)
     
@@ -4221,7 +4251,8 @@ async def publish_routes_summary(rutas: list = Body(...)):
 
 
 @app.post("/api/routes")
-async def update_routes(rutas: list = Body(...)):
+async def update_routes(rutas: list = Body(...), session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     global rutas_estado_actual
     rutas_estado_actual = rutas
     await persist()
@@ -4233,8 +4264,10 @@ async def assign_routes_from_excel(
     fecha: str = Form(""),
     hora: str = Form(""),
     sentido: str = Form(""),
-    sede: str = Form("")
+    sede: str = Form(""),
+    session_token: SessionCookie = None,
 ):
+    await require_admin_session(session_token)
     global rutas_estado_actual
     await reload_db()
 
@@ -4385,7 +4418,8 @@ async def assign_routes_from_excel(
         raise HTTPException(status_code=500, detail=f"Error en el procesamiento AI del backend: {str(e)}")
 
 @app.post("/api/emergency-reassign/")
-async def emergency_reassign(request: EmergencyRequest):
+async def emergency_reassign(request: EmergencyRequest, session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     await reload_db()
     global rutas_estado_actual
     if request.horario == "Todos los turnos" or request.tipo_emergencia == "Baja Total (Siniestro)":
@@ -4658,9 +4692,10 @@ import asyncio
 JSON_PE_TOKEN = os.environ.get("JSON_PE_TOKEN", "0cea1f04743e822b1605856b5ca5e1c3912f5bcb228e661aa8878bc8da36")
 
 @app.get("/api/verify/soat/{placa}")
-async def verify_soat(placa: str):
+async def verify_soat(placa: str, session_token: SessionCookie = None):
     """Verifica el SOAT de un vehículo. Implementa caché en memoria para evitar consumir
     créditos de json.pe en consultas repetidas."""
+    await require_any_session(session_token)
     await reload_db()
     placa_limpia = placa.replace("-", "").strip()
 
@@ -4736,8 +4771,9 @@ async def verify_soat(placa: str):
 
 
 @app.get("/api/verify/citv/{placa}")
-async def verify_citv(placa: str):
+async def verify_citv(placa: str, session_token: SessionCookie = None):
     """Verifica la Revisión Técnica (CITV) con caché en memoria."""
+    await require_any_session(session_token)
     await reload_db()
     placa_limpia = placa.replace("-", "").strip()
 
@@ -4781,8 +4817,9 @@ async def verify_citv(placa: str):
 
 
 @app.get("/api/verify/licencia/{doc}")
-async def verify_licencia(doc: str):
+async def verify_licencia(doc: str, session_token: SessionCookie = None):
     """Verifica la licencia de un conductor con caché en memoria."""
+    await require_any_session(session_token)
     await reload_db()
     doc_limpio = doc.strip()
 
@@ -4855,7 +4892,8 @@ async def verify_licencia(doc: str):
     return result
 
 @app.post("/api/clear-routes")
-async def clear_routes():
+async def clear_routes(session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     await reload_db()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
@@ -4871,7 +4909,8 @@ async def clear_routes():
     return {"message": "Rutas archivadas y tablero limpiado"}
 
 @app.post("/api/save-history")
-async def save_history():
+async def save_history(session_token: SessionCookie = None):
+    await require_admin_session(session_token)
     await reload_db()
     global rutas_estado_actual, historial_rutas
     from datetime import datetime
@@ -4895,7 +4934,8 @@ async def get_reportes():
 
 # --- AI Copilot Chat Route (REST API) ---
 @app.post("/api/chat")
-async def chat_with_copilot(req: ChatRequest):
+async def chat_with_copilot(req: ChatRequest, session_token: SessionCookie = None):
+    await require_any_session(session_token)
     await reload_db()
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
