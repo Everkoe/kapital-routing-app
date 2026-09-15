@@ -1538,6 +1538,40 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             await backend.get_rutas_cliente("OTRA_EMPRESA", token)
         self.assertEqual(caught.exception.status_code, 403)
 
+    async def test_driver_reads_own_notifications_by_any_login_alias(self):
+        """El login acepta correo o DNI: la propiedad debe aceptar los mismos
+        alias, o entrar con el DNI da 403 sobre los propios datos."""
+        backend.AUTH_ENFORCED = True
+        user = {
+            "identifier": "anyelo@kapital.com", "rol": "Conductor", "estado": "Activo",
+            "email": "anyelo@kapital.com", "dni": "74538840",
+            "perfil_conductor": {"numDoc": "74538840"},
+        }
+        backend.usuarios_db["anyelo@kapital.com"] = user
+        token = backend.issue_session(user)
+        backend.notifications_db.append({"id": 1, "para": "anyelo@kapital.com", "fecha": "2026-01-01"})
+        for alias in ("anyelo@kapital.com", "74538840", "ANYELO@KAPITAL.COM"):
+            with self.subTest(alias=alias):
+                with patch.object(backend, "reload_notifications", new=AsyncMock()):
+                    await backend.get_conductor_notifications(alias, token)
+
+    async def test_ownership_is_rechecked_against_the_full_user_before_denying(self):
+        """Una instantánea sin todos los alias no debe producir un 403 falso."""
+        backend.AUTH_ENFORCED = True
+        user = {
+            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo",
+            "dni": "74538840",
+        }
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        backend.session_index[digest].pop("dni")  # instantánea antigua, sin dni
+        with (
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+        ):
+            await backend.get_conductor_notifications("74538840", token)
+
     async def test_driver_cannot_read_another_drivers_notifications(self):
         backend.AUTH_ENFORCED = True
         _, token = self._session_for("drv-1", email="uno@e.com")
