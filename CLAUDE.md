@@ -32,11 +32,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **Migración de contraseñas preparada, todavía no activada**: el backend lee hashes PBKDF2 y texto plano. Solo
   escribe/migra hashes cuando `KAPITAL_PASSWORD_HASH_WRITE=true`; mantenerla en `false` durante el primer despliegue
   compatible para conservar un rollback seguro.
-- **Sesiones en transición — leer con cuidado**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`,
-  TTL 12 h) y persiste únicamente su hash. `KAPITAL_AUTH_ENFORCED` pasó a default `true` en el PR #2, pero
-  **solo ~12 de 46 endpoints tienen control de sesión** y el frontend **no maneja respuestas 401** (0
-  coincidencias en `src/`, con 42 llamadas `fetch`). Es decir: la exigencia está activada sin su precondición.
-  Ver `docs/handoff/2026-09-15-relevo.md` §7 antes de tocar autenticación.
+- **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
+  hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
+  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual: **~19 de 47
+  endpoints**; los 28 restantes están inventariados en `docs/handoff/2026-09-15-relevo.md` §7.
+  **Validar una sesión NO debe costar el blob de usuarios**: existe `usuarios.__sessions__`, una pseudo-clave
+  con una instantánea de autorización por token. Al añadir un gate nuevo, usar `require_session_owner`, y si
+  se muta `rol` o `estado` de un usuario **llamar a `refresh_session_index_for()`** o la instantánea quedará
+  obsoleta y una desactivación no desactivará nada.
 
 ## 3. Stack Tecnológico
 

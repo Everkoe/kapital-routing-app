@@ -806,7 +806,9 @@ def password_for_storage(password: str) -> str:
     return hash_password(password) if PASSWORD_HASH_WRITE_ENABLED else password
 
 
-_SESSION_SNAPSHOT_FIELDS = ("rol", "estado", "email", "unidad_id", "empresa_id")
+_SESSION_SNAPSHOT_FIELDS = (
+    "rol", "estado", "email", "unidad_id", "empresa_id", "dni", "login_identifier",
+)
 
 
 def _session_auth_snapshot(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -2574,9 +2576,18 @@ async def require_session_owner(
         raise HTTPException(status_code=403, detail=blocked)
     if actor.get("rol") in _ADMIN_ROLES:
         return actor
-    wanted = _owner_key(requested)
-    if wanted and any(_owner_key(actor.get(field)) == wanted for field in actor_fields):
+    if _owner_matches(actor, actor_fields, requested):
         return actor
+    # Nunca denegar con información incompleta. Si el actor salió de una
+    # instantánea del índice, puede ser anterior a que esta llevara todos los
+    # alias de identidad, así que se contrasta una vez contra el usuario real
+    # antes de rechazar. Con el usuario ya cargado no hay nada que reconsultar,
+    # de modo que una denegación legítima no cuesta ninguna lectura extra.
+    if usuarios_db.get(actor.get("identifier")) is not actor:
+        await _load_compat_users()
+        full_actor = get_user_by_session(session_token)
+        if full_actor is not None and _owner_matches(full_actor, actor_fields, requested):
+            return full_actor
     raise HTTPException(status_code=403, detail=f"No tienes acceso a {resource}.")
 
 
@@ -3434,27 +3445,23 @@ def _owner_key(value: Any) -> str:
     return str(value).strip().upper() if value is not None else ""
 
 
-def require_resource_owner(
-    session_token: Optional[str],
-    *,
-    actor_fields: tuple,
-    requested: Any,
-    resource: str,
-) -> Optional[Dict[str, Any]]:
-    """Permite al dueño del recurso o a un administrador.
+# El login acepta correo o DNI, y `get_user_by_identifier` resuelve además
+# `login_identifier` y `perfil_conductor.numDoc`. La comprobación de propiedad
+# tiene que aceptar el mismo conjunto, o un conductor que entra con su DNI
+# recibe 403 sobre sus propios datos.
+_IDENTITY_FIELDS = ("identifier", "email", "dni", "login_identifier")
 
-    Con la exigencia desactivada es un no-op, igual que ``require_request_actor``,
-    para conservar el rollback de la fase 1.
-    """
-    actor = require_request_actor(session_token)
-    if actor is None:
-        return None
-    if actor.get("rol") in _ADMIN_ROLES:
-        return actor
+
+def _owner_matches(actor: Dict[str, Any], fields: tuple, requested: Any) -> bool:
     wanted = _owner_key(requested)
-    if wanted and any(_owner_key(actor.get(field)) == wanted for field in actor_fields):
-        return actor
-    raise HTTPException(status_code=403, detail=f"No tienes acceso a {resource}.")
+    if not wanted:
+        return False
+    values = [actor.get(field) for field in fields]
+    if "dni" in fields:
+        perfil = actor.get("perfil_conductor")
+        if isinstance(perfil, dict):
+            values.append(perfil.get("numDoc"))
+    return any(_owner_key(value) == wanted for value in values)
 
 
 def _next_notification_id() -> int:
@@ -3709,7 +3716,7 @@ class MarkReadPayload(BaseModel):
 @app.get("/api/conductor/notifications")
 async def get_conductor_notifications(email: str, session_token: SessionCookie = None):
     await require_session_owner(
-        session_token, actor_fields=("identifier", "email"), requested=email,
+        session_token, actor_fields=_IDENTITY_FIELDS, requested=email,
         resource="esas notificaciones",
     )
     await reload_notifications()  # Lightweight: only loads notifications from Supabase
