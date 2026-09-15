@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock, Download } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
+import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 
 const REQUEST_TIMEOUT_MS = 12000;
@@ -76,23 +77,19 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
       try {
         // Fetch notifications only when this component is not receiving the
         // already-fetched list from DriverPortal.
-        const notifsRes = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
+        const notifs = await apiFetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
           signal: controller.signal,
         });
-        if (notifsRes.ok) {
-          const notifs = await notifsRes.json();
-          if (!disposed) setNotifications(Array.isArray(notifs) ? notifs : []);
+        if (!disposed) setNotifications(Array.isArray(notifs) ? notifs : []);
 
-          // Mark as read while reusing the same abort signal and handling
-          // failures silently so one unavailable notification cannot break UX.
-          const unread = Array.isArray(notifs) ? notifs.filter(notification => !notification.leido) : [];
-          await Promise.allSettled(unread.map(notification => fetch('/api/conductor/notifications/mark-read', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notif_id: notification.id }),
-            signal: controller.signal,
-          })));
-        }
+        // Mark as read while reusing the same abort signal and handling
+        // failures silently so one unavailable notification cannot break UX.
+        const unread = Array.isArray(notifs) ? notifs.filter(notification => !notification.leido) : [];
+        await Promise.allSettled(unread.map(notification => apiFetch('/api/conductor/notifications/mark-read', {
+          method: 'POST',
+          json: { notif_id: notification.id },
+          signal: controller.signal,
+        })));
       } catch (error) {
         if (!disposed && error?.name !== 'AbortError') {
           console.warn('No se pudieron cargar las notificaciones:', error);
