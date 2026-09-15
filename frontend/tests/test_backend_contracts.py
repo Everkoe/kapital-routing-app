@@ -1404,6 +1404,90 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["unidad"]["soat"], "")
         self.assertEqual(response["unidad"]["atu"], "")
 
+    # --- Lote 1: identidad de sesión ---
+
+    async def test_document_states_do_not_block_driver_operations(self):
+        """Un conductor en revisión documental debe seguir operando: su portal
+        es donde sube y resube documentos."""
+        backend.AUTH_ENFORCED = True
+        for estado in ("Pendiente Revisión", "Documentos Observados", "Activo"):
+            with self.subTest(estado=estado):
+                user = {"identifier": "drv", "rol": "Conductor", "estado": estado}
+                backend.usuarios_db["drv"] = user
+                token = backend.issue_session(user)
+                self.assertIs(backend.require_request_actor(token, expected_user=user), user)
+
+    async def test_account_lifecycle_states_block_operations(self):
+        backend.AUTH_ENFORCED = True
+        for estado in ("Pendiente", "Rechazado", "Inactivo"):
+            with self.subTest(estado=estado):
+                user = {"identifier": "u", "rol": "Conductor", "estado": estado}
+                backend.usuarios_db["u"] = user
+                token = backend.issue_session(user)
+                with self.assertRaises(HTTPException) as caught:
+                    backend.require_request_actor(token, expected_user=user)
+                self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_auth_me_returns_server_side_identity(self):
+        user = {
+            "identifier": "drv-1", "nombre": "Driver", "rol": "Conductor",
+            "estado": "Pendiente Revisión", "password": "secret",
+            "perfil_conductor": {},
+        }
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            payload = await backend.get_authenticated_user(token)
+        self.assertEqual(payload["identifier"], "drv-1")
+        self.assertEqual(payload["rol"], "Conductor")
+        self.assertTrue(payload["profileComplete"])
+        self.assertNotIn("password", payload)
+        self.assertNotIn("_auth_sessions", payload)
+
+    async def test_auth_me_rejects_missing_or_invalid_session(self):
+        for token in (None, "not-a-real-token"):
+            with self.subTest(token=token):
+                with patch.object(backend, "reload_db", new=AsyncMock()):
+                    with self.assertRaises(HTTPException) as caught:
+                        await backend.get_authenticated_user(token)
+                self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_logout_revokes_session_server_side(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist_users,
+        ):
+            result = await backend.logout_user(Response(), token)
+        persist_users.assert_awaited_once()
+        self.assertTrue(result["revoked"])
+        # La sesión revocada ya no resuelve, aunque el token siga sin caducar.
+        self.assertIsNone(backend.get_user_by_session(token))
+
+    async def test_logout_is_idempotent_without_a_valid_session(self):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist_users,
+        ):
+            result = await backend.logout_user(Response(), "expired-token")
+        persist_users.assert_not_awaited()
+        self.assertFalse(result["revoked"])
+
+    async def test_logout_only_revokes_the_presented_session(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        phone = backend.issue_session(user)
+        laptop = backend.issue_session(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            await backend.logout_user(Response(), phone)
+        self.assertIsNone(backend.get_user_by_session(phone))
+        self.assertIs(backend.get_user_by_session(laptop), user)
+
     async def test_fleet_delete_requires_admin_session_when_enforced(self):
         backend.AUTH_ENFORCED = True
         unit = {"capacidad": 15, "tipo": "Van", "chofer": "Driver"}

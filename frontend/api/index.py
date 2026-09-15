@@ -848,14 +848,53 @@ def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
     return None
 
 
+# El campo ``estado`` almacena dos ejes distintos. Solo estos valores describen
+# una cuenta deshabilitada; el resto describe el avance documental del conductor
+# ("Pendiente Revisión", "Documentos Observados"), que debe poder entrar a su
+# portal precisamente para subir o resubir documentos.
+_ACCOUNT_BLOCKED_STATES = {
+    "Pendiente": "Tu cuenta está pendiente de aprobación por Administración.",
+    "Rechazado": "Tu cuenta fue rechazada por Administración.",
+    "Inactivo": "Tu cuenta está desactivada. Contacta con Administración.",
+}
+
+
+def account_block_reason(user: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return why the account cannot authenticate or operate, or None."""
+    if not isinstance(user, dict):
+        return None
+    estado = str(user.get("estado", "Activo") or "Activo").strip()
+    return _ACCOUNT_BLOCKED_STATES.get(estado)
+
+
+def _public_user_payload(
+    user: Dict[str, Any], fallback_identifier: Optional[str] = None
+) -> Dict[str, Any]:
+    """Shape returned by login and /api/auth/me. Never includes credentials."""
+    return {
+        "identifier": user.get("identifier", fallback_identifier),
+        "email": user.get("email"),
+        "dni": user.get("dni"),
+        "nombre": user.get("nombre", "Usuario"),
+        "rol": user.get("rol", "Usuario"),
+        "unidad_id": user.get("unidad_id"),
+        "empresa_id": user.get("empresa_id"),
+        "avatar": user.get("avatar"),
+        "estado": user.get("estado", "Activo"),
+        "needs_password_change": user.get("needs_password_change", False),
+        "profileComplete": "perfil_conductor" in user,
+    }
+
+
 async def get_current_user(session_token: SessionCookie = None) -> Dict[str, Any]:
     """FastAPI dependency prepared for the authorization rollout."""
     await reload_db()
     user = get_user_by_session(session_token)
     if not user:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
-    if user.get("estado", "Activo") != "Activo":
-        raise HTTPException(status_code=403, detail="La cuenta no está activa.")
+    blocked = account_block_reason(user)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
     return user
 
 
@@ -875,8 +914,9 @@ def require_request_actor(
     actor = get_user_by_session(session_token)
     if not actor:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
-    if actor.get("estado", "Activo") != "Activo":
-        raise HTTPException(status_code=403, detail="La cuenta no está activa.")
+    blocked = account_block_reason(actor)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
     if expected_user is not None and actor is not expected_user:
         raise HTTPException(status_code=403, detail="No puedes operar sobre otro usuario.")
     if allowed_roles is not None and actor.get("rol") not in allowed_roles:
@@ -2982,9 +3022,12 @@ async def login_user(usuario: UsuarioLogin, response: Response):
     if PASSWORD_HASH_WRITE_ENABLED and password_needs_upgrade(stored_password):
         user_in_db["password"] = hash_password(usuario.password)
     
-    # Verificar si está pendiente de aprobación
-    if user_in_db.get("estado", "Activo") == "Pendiente":
-        raise HTTPException(status_code=403, detail="Tu cuenta está pendiente de aprobación por Administración.")
+    # Un estado de ciclo de vida bloqueado impide autenticarse. Los estados
+    # documentales del conductor no bloquean: su portal es donde resuelve los
+    # documentos observados.
+    blocked = account_block_reason(user_in_db)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
 
     # Registrar última conexión
     user_in_db["last_login"] = datetime.now().isoformat()
@@ -3002,19 +3045,57 @@ async def login_user(usuario: UsuarioLogin, response: Response):
     )
 
     
-    return {
-        "identifier": user_in_db.get("identifier", usuario.identifier),
-        "email": user_in_db.get("email"),
-        "dni": user_in_db.get("dni"),
-        "nombre": user_in_db.get("nombre", "Usuario"),
-        "rol": user_in_db.get("rol", "Usuario"),
-        "unidad_id": user_in_db.get("unidad_id"),
-        "empresa_id": user_in_db.get("empresa_id"),
-        "avatar": user_in_db.get("avatar"),
-        "estado": user_in_db.get("estado", "Activo"),
-        "needs_password_change": user_in_db.get("needs_password_change", False),
-        "profileComplete": "perfil_conductor" in user_in_db
-    }
+    return _public_user_payload(user_in_db, usuario.identifier)
+
+@app.get("/api/auth/me")
+async def get_authenticated_user(session_token: SessionCookie = None):
+    """Identidad resuelta en servidor. El frontend debe preferirla a su propio estado."""
+    await reload_db()
+    user = get_user_by_session(session_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    blocked = account_block_reason(user)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
+    return _public_user_payload(user)
+
+
+@app.post("/api/auth/logout")
+async def logout_user(response: Response, session_token: SessionCookie = None):
+    """Revoca la sesión en servidor y limpia la cookie.
+
+    Idempotente a propósito: cerrar sesión con una cookie ya caducada debe
+    funcionar igual, o el usuario queda atrapado en una sesión que no puede soltar.
+    """
+    revoked = False
+    if session_token:
+        await reload_db()
+        user = get_user_by_session(session_token)
+        if user:
+            token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+            now = int(datetime.now(timezone.utc).timestamp())
+            for session in user.get("_auth_sessions", []):
+                if not isinstance(session, dict):
+                    continue
+                if hmac.compare_digest(session.get("token_hash", ""), token_hash):
+                    session["revoked_at"] = now
+                    revoked = True
+            if revoked:
+                # Solo se persiste si de verdad hubo algo que revocar.
+                await persist_users_only()
+    # Se sobreescribe con los mismos atributos del login para que el navegador
+    # reemplace exactamente esa cookie.
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value="",
+        max_age=0,
+        httponly=True,
+        secure=bool(os.environ.get("VERCEL")),
+        samesite="lax",
+        path="/",
+    )
+    return {"message": "Sesión cerrada.", "revoked": revoked}
+
 
 @app.post("/api/auth/change-password")
 async def change_password(req: ChangePasswordRequest):
