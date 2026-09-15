@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { apiFetch } from './utils/apiClient';
 
 const ClientPortal = ({ usuario, onLogout }) => {
   const [rutas, setRutas] = useState([]);
@@ -15,10 +16,7 @@ const ClientPortal = ({ usuario, onLogout }) => {
   useEffect(() => {
     const fetchMisRutas = async () => {
       try {
-        const response = await fetch(`/api/cliente/rutas/${empresaId}`);
-        if (!response.ok) throw new Error('Error al obtener datos');
-        const data = await response.json();
-        setRutas(data);
+        setRutas(await apiFetch(`/api/cliente/rutas/${encodeURIComponent(empresaId)}`));
       } catch (err) {
         setError(err.message);
       } finally {

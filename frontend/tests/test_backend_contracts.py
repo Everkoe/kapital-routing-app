@@ -47,6 +47,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.routes_summary = []
         backend.historial_rutas = []
         backend.board_lock = {}
+        backend.session_index.clear()
 
     def tearDown(self):
         random.setstate(self._random_state)
@@ -1403,6 +1404,335 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         persist_state.assert_awaited_once()
         self.assertEqual(response["unidad"]["soat"], "")
         self.assertEqual(response["unidad"]["atu"], "")
+
+    # --- Índice de sesiones ---
+
+    async def test_issue_session_indexes_an_authorization_snapshot(self):
+        user = {
+            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo",
+            "unidad_id": "K-001", "empresa_id": None, "email": "d@e.com",
+            "password": "secret",
+        }
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        entry = backend.session_index[
+            hashlib.sha256(token.encode("utf-8")).hexdigest()
+        ]
+        self.assertEqual(entry["identifier"], "drv-1")
+        self.assertEqual(entry["unidad_id"], "K-001")
+        self.assertNotIn("password", entry)
+        self.assertNotIn("_auth_sessions", entry)
+
+    async def test_session_resolves_without_loading_the_users_blob(self):
+        """El objetivo del índice: autorizar sin los ~3,42 MB de usuarios."""
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        backend.usuarios_db.clear()  # simula una instancia sin usuarios cargados
+
+        actor = backend.session_actor_from_index(token)
+        self.assertEqual(actor["identifier"], "drv-1")
+        self.assertEqual(actor["unidad_id"], "K-001")
+        self.assertEqual(actor["estado"], "Activo")
+
+    async def test_legacy_sessions_still_resolve_without_an_index(self):
+        """Rollback: una sesión emitida antes del índice sigue siendo válida."""
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        backend.session_index.clear()  # como si el índice no existiera
+        self.assertIs(backend.get_user_by_session(token), user)
+
+    async def test_deactivation_updates_the_indexed_snapshot(self):
+        """Una desactivación debe surtir efecto en el índice, no solo en el usuario."""
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        user["estado"] = "Inactivo"
+        backend.refresh_session_index_for(user)
+        backend.usuarios_db.clear()
+
+        actor = backend.session_actor_from_index(token)
+        self.assertEqual(actor["estado"], "Inactivo")
+        self.assertIsNotNone(backend.account_block_reason(actor))
+
+    async def test_logout_revokes_the_indexed_entry_too(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            await backend.logout_user(Response(), token)
+        self.assertIsNone(backend.session_actor_from_index(token))
+        self.assertIsNone(backend.get_user_by_session(token))
+
+    async def test_expired_entries_are_pruned_and_never_authorize(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        backend.session_index[digest]["expires_at"] = 1
+        self.assertIsNone(backend.session_actor_from_index(token))
+
+        other = {"identifier": "drv-2", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-2"] = other
+        backend.issue_session(other)  # poda al emitir
+        self.assertNotIn(digest, backend.session_index)
+
+    async def test_index_travels_inside_the_users_payload(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        backend.issue_session(user)
+        with patch.object(backend, "_persist_app_state", new=AsyncMock()) as persisted:
+            await backend.persist_users_only()
+        payload = persisted.await_args.args[0]
+        self.assertIn("__sessions__", payload["usuarios"])
+
+    async def test_decoding_state_restores_the_index_as_a_reserved_key(self):
+        decoded = backend._decode_full_state(
+            {"usuarios": {"drv-1": {"identifier": "drv-1"}, "__sessions__": {"abc": {"identifier": "drv-1"}}}},
+            include_defaults=False,
+        )
+        self.assertEqual(decoded["sessions"], {"abc": {"identifier": "drv-1"}})
+        self.assertNotIn("__sessions__", decoded["usuarios"])
+
+    # --- Lote 3: acceso cruzado ---
+
+    def _session_for(self, identifier, **extra):
+        user = {"identifier": identifier, "rol": "Conductor", "estado": "Activo", **extra}
+        backend.usuarios_db[identifier] = user
+        return user, backend.issue_session(user)
+
+    async def test_driver_cannot_read_another_units_routes(self):
+        backend.AUTH_ENFORCED = True
+        self._session_for("drv-1", unidad_id="K-001")
+        _, token = self._session_for("drv-1", unidad_id="K-001")
+        backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
+        with self.assertRaises(HTTPException) as caught:
+            await backend.mis_rutas("K-002", token)
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_driver_reads_their_own_unit_routes(self):
+        backend.AUTH_ENFORCED = True
+        _, token = self._session_for("drv-1", unidad_id="K-001")
+        backend.rutas_estado_actual = [
+            {"conductor": "K-001", "agentes": []}, {"conductor": "K-002", "agentes": []},
+        ]
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            routes = await backend.mis_rutas("K-001", token)
+        self.assertEqual([r["conductor"] for r in routes], ["K-001"])
+
+    async def test_admin_may_read_any_units_routes(self):
+        backend.AUTH_ENFORCED = True
+        _, token = self._session_for("adm", rol="Administrador")
+        backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            self.assertEqual(len(await backend.mis_rutas("K-002", token)), 1)
+
+    async def test_client_cannot_read_another_companys_routes(self):
+        backend.AUTH_ENFORCED = True
+        _, token = self._session_for("cli", rol="Cliente", empresa_id="GLOBO_AZUL")
+        with self.assertRaises(HTTPException) as caught:
+            await backend.get_rutas_cliente("OTRA_EMPRESA", token)
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_driver_cannot_read_another_drivers_notifications(self):
+        backend.AUTH_ENFORCED = True
+        _, token = self._session_for("drv-1", email="uno@e.com")
+        backend.notifications_db.append({"id": 1, "para": "otro@e.com", "fecha": "2026-01-01"})
+        with self.assertRaises(HTTPException) as caught:
+            await backend.get_conductor_notifications("otro@e.com", token)
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_anonymous_cannot_read_protected_resources(self):
+        backend.AUTH_ENFORCED = True
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()):
+            for coro in (
+                backend.mis_rutas("K-001", None),
+                backend.get_rutas_cliente("GLOBO_AZUL", None),
+                backend.get_conductor_notifications("a@e.com", None),
+            ):
+                with self.assertRaises(HTTPException) as caught:
+                    await coro
+                self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_gating_does_not_load_the_users_blob(self):
+        """El objetivo del lote: gatear sin volver a los ~3,42 MB de usuarios."""
+        backend.AUTH_ENFORCED = True
+        _, token = self._session_for("drv-1", unidad_id="K-001")
+        backend.rutas_estado_actual = []
+        with (
+            patch.object(backend, "_load_compat_users", new=AsyncMock()) as heavy,
+            patch.object(backend, "reload_db", new=AsyncMock()),
+        ):
+            await backend.mis_rutas("K-001", token)
+        heavy.assert_not_awaited()
+
+    # --- Lote 3: acceso cruzado (parcial; ver relevo §8) ---
+
+    async def test_sos_notification_requires_a_session(self):
+        backend.AUTH_ENFORCED = True
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.add_notification({"title": "falsa"}, None)
+        self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_notification_ids_stay_unique_past_the_cap(self):
+        """len(notifications_db) + 1 repetía el id 51 para siempre."""
+        backend.notifications_db.extend({"id": i + 1} for i in range(50))
+        seen = {n["id"] for n in backend.notifications_db}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            for _ in range(5):
+                created = await backend.add_notification({"title": "t"}, None)
+                self.assertNotIn(created["id"], seen)
+                seen.add(created["id"])
+
+    # --- Lote 1: identidad de sesión ---
+
+    async def test_document_states_do_not_block_driver_operations(self):
+        """Un conductor en revisión documental debe seguir operando: su portal
+        es donde sube y resube documentos."""
+        backend.AUTH_ENFORCED = True
+        for estado in ("Pendiente Revisión", "Documentos Observados", "Activo"):
+            with self.subTest(estado=estado):
+                user = {"identifier": "drv", "rol": "Conductor", "estado": estado}
+                backend.usuarios_db["drv"] = user
+                token = backend.issue_session(user)
+                self.assertIs(backend.require_request_actor(token, expected_user=user), user)
+
+    async def test_account_lifecycle_states_block_operations(self):
+        backend.AUTH_ENFORCED = True
+        for estado in ("Pendiente", "Rechazado", "Inactivo"):
+            with self.subTest(estado=estado):
+                user = {"identifier": "u", "rol": "Conductor", "estado": estado}
+                backend.usuarios_db["u"] = user
+                token = backend.issue_session(user)
+                with self.assertRaises(HTTPException) as caught:
+                    backend.require_request_actor(token, expected_user=user)
+                self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_auth_me_returns_server_side_identity(self):
+        user = {
+            "identifier": "drv-1", "nombre": "Driver", "rol": "Conductor",
+            "estado": "Pendiente Revisión", "password": "secret",
+            "perfil_conductor": {},
+        }
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            payload = await backend.get_authenticated_user(token)
+        self.assertEqual(payload["identifier"], "drv-1")
+        self.assertEqual(payload["rol"], "Conductor")
+        self.assertTrue(payload["profileComplete"])
+        self.assertNotIn("password", payload)
+        self.assertNotIn("_auth_sessions", payload)
+
+    async def test_auth_me_rejects_missing_or_invalid_session(self):
+        for token in (None, "not-a-real-token"):
+            with self.subTest(token=token):
+                with patch.object(backend, "reload_db", new=AsyncMock()):
+                    with self.assertRaises(HTTPException) as caught:
+                        await backend.get_authenticated_user(token)
+                self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_logout_revokes_session_server_side(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = backend.issue_session(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist_users,
+        ):
+            result = await backend.logout_user(Response(), token)
+        persist_users.assert_awaited_once()
+        self.assertTrue(result["revoked"])
+        # La sesión revocada ya no resuelve, aunque el token siga sin caducar.
+        self.assertIsNone(backend.get_user_by_session(token))
+
+    async def test_logout_is_idempotent_without_a_valid_session(self):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist_users,
+        ):
+            result = await backend.logout_user(Response(), "expired-token")
+        persist_users.assert_not_awaited()
+        self.assertFalse(result["revoked"])
+
+    async def test_logout_only_revokes_the_presented_session(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        phone = backend.issue_session(user)
+        laptop = backend.issue_session(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            await backend.logout_user(Response(), phone)
+        self.assertIsNone(backend.get_user_by_session(phone))
+        self.assertIs(backend.get_user_by_session(laptop), user)
+
+    async def test_fleet_delete_requires_admin_session_when_enforced(self):
+        backend.AUTH_ENFORCED = True
+        unit = {"capacidad": 15, "tipo": "Van", "chofer": "Driver"}
+        backend.conductores_db["K-001"] = copy.deepcopy(unit)
+        driver = {"identifier": "driver-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["driver-1"] = driver
+        token = backend.issue_session(driver)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.delete_flota("K-001", token)
+        self.assertEqual(caught.exception.status_code, 403)
+        persist_state.assert_not_awaited()
+        self.assertEqual(backend.conductores_db["K-001"], unit)
+
+    async def test_fleet_delete_rejects_anonymous_request_when_enforced(self):
+        backend.AUTH_ENFORCED = True
+        backend.conductores_db["K-001"] = {"capacidad": 15}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.delete_flota("K-001")
+        self.assertEqual(caught.exception.status_code, 401)
+        persist_state.assert_not_awaited()
+        self.assertIn("K-001", backend.conductores_db)
+
+    async def test_fleet_delete_verifies_removal_with_a_fresh_read(self):
+        backend.conductores_db["K-001"] = {"capacidad": 15}
+        backend.conductores_db["K-002"] = {"capacidad": 20}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            response = await backend.delete_flota("K-001")
+        persist_state.assert_awaited_once()
+        self.assertEqual(response["unidad_id"], "K-001")
+        self.assertNotIn("K-001", backend.conductores_db)
+        self.assertIn("K-002", backend.conductores_db)
+
+    async def test_fleet_delete_rolls_back_memory_when_persist_fails(self):
+        original = {"capacidad": 15, "soat": "", "soat_doc": "private://keep"}
+        backend.conductores_db["K-001"] = copy.deepcopy(original)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.delete_flota("K-001")
+        self.assertEqual(backend.conductores_db["K-001"], original)
 
 
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):

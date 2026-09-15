@@ -3,6 +3,20 @@
 La fase 1 se aplica de manera incremental para conservar la experiencia actual.
 El rol Programador de rutas y su motor no cambian durante esta etapa.
 
+> **⚠️ Estado real al 2026-09-15 — este documento describía el plan, no lo ocurrido.**
+>
+> El paso 4 de "Despliegue reversible" (más abajo) exige mantener
+> `KAPITAL_AUTH_ENFORCED=false` hasta instrumentar el manejo frontend de 401.
+> **El PR #2 cambió ese default a `true` y se desplegó a producción sin cumplir la
+> precondición**: el frontend sigue sin manejar respuestas 401 (0 coincidencias en
+> `frontend/src/`, con 42 llamadas `fetch`), y solo ~12 de 46 endpoints tienen control
+> de sesión.
+>
+> El paso 4 sigue siendo el criterio correcto; lo que está mal es el estado actual, no
+> el plan. El orden de trabajo para converger está en
+> [`docs/handoff/2026-09-15-relevo.md`](../handoff/2026-09-15-relevo.md) §8, y el
+> contraste requisito por requisito en su §6.
+
 ## Lote 1: credenciales y privilegios
 
 - El backend ya puede verificar contraseñas PBKDF2-HMAC-SHA256 con salt aleatorio

@@ -6,6 +6,7 @@ import ZenModeView from './components/ZenModeView';
 import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { apiFetch } from './utils/apiClient';
 import './App.css';
 
 const DRIVER_POLL_INTERVAL_MS = 90_000;
@@ -286,20 +287,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       let nextDelay = DRIVER_POLL_INTERVAL_MS;
 
       try {
-        const res = await fetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
+        const payload = await apiFetch(`/api/conductor/notifications?email=${encodeURIComponent(userKey)}`, {
           signal: controller.signal,
         });
-        if (!res.ok) {
-          if (RETRYABLE_POLL_STATUS_CODES.has(res.status)) {
-            backoffMs = backoffMs > 0
-              ? Math.min(backoffMs * 2, DRIVER_POLL_BACKOFF_MAX_MS)
-              : DRIVER_POLL_BACKOFF_BASE_MS;
-            nextDelay = backoffMs;
-          }
-          return;
-        }
-
-        const payload = await res.json();
         const allNotifs = Array.isArray(payload) ? payload : [];
         const unread = allNotifs.filter(notification => !notification.leido);
 
@@ -320,7 +310,12 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         }
         backoffMs = 0;
       } catch (error) {
-        if (error?.name !== 'AbortError' || !disposed) {
+        // Un problema de sesión no es transitorio: reintentarlo solo repetiría
+        // el 401 que el cliente HTTP ya convirtió en cierre de sesión.
+        const isAuthError = error?.status === 401 || error?.status === 403;
+        const isRetryable = error?.status === undefined
+          || RETRYABLE_POLL_STATUS_CODES.has(error.status);
+        if (!isAuthError && isRetryable && (error?.name !== 'AbortError' || !disposed)) {
           backoffMs = backoffMs > 0
             ? Math.min(backoffMs * 2, DRIVER_POLL_BACKOFF_MAX_MS)
             : DRIVER_POLL_BACKOFF_BASE_MS;
@@ -382,10 +377,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const fetchMisRutas = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/mis-rutas/${conductorId}`);
-      if (!response.ok) throw new Error('Error al obtener rutas');
-      const data = await response.json();
-      setRutas(data);
+      setRutas(await apiFetch(`/api/mis-rutas/${encodeURIComponent(conductorId)}`));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -401,13 +393,10 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     const nuevoId = prompt("Ingresa el nuevo ID de tu Unidad (Ej. KAP-002):", conductorId);
     if (nuevoId && nuevoId.trim() !== conductorId) {
       try {
-        const response = await fetch('/api/user/profile', {
+        const updatedUser = await apiFetch('/api/user/profile', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: usuario.identifier || usuario.email, unidad_id: nuevoId.trim().toUpperCase() })
+          json: { identifier: usuario.identifier || usuario.email, unidad_id: nuevoId.trim().toUpperCase() },
         });
-        if (!response.ok) throw new Error('Error al actualizar unidad');
-        const updatedUser = await response.json();
         
         localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
         if (setUsuarioActual) {

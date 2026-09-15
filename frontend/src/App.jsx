@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieC
 import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
+import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -211,20 +212,14 @@ const PasswordChangeModal = ({ user, onSuccess, onCancel }) => {
 
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth/change-password', {
+      await apiFetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           identifier: user.identifier || user.dni || user.email,
           old_password: user.typedPassword || user.identifier || user.dni,
-          new_password: newPassword
-        }),
+          new_password: newPassword,
+        },
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Error al actualizar contraseña.');
-      }
 
       toast.success('Contraseña actualizada correctamente.');
       onSuccess({ ...user, needs_password_change: false });
@@ -917,6 +912,18 @@ function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  // Punto único donde la app reacciona a una sesión caducada. Antes de esto
+  // ninguna de las llamadas manejaba un 401: los botones fallaban en silencio.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      profileRefreshRef.current += 1;
+      clearStoredUser();
+      setUsuarioActual(null);
+      toast.error('Tu sesión expiró. Vuelve a iniciar sesión.');
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let timeoutId;
@@ -953,31 +960,34 @@ function App() {
       }
 
       try {
-        // Never promote localStorage data to an authenticated identity without
-        // validating the server-side session first.
+        // La identidad la decide el servidor a partir de la cookie, no
+        // localStorage, que aquí solo indica que este navegador ya inició
+        // sesión alguna vez (la cookie es HttpOnly y JS no puede verla).
         timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
-        const response = await fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        const text = await response.text();
-        let data = {};
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch {
-          data = {};
-        }
+        const identity = await apiFetch('/api/auth/me', { signal: controller.signal });
 
-        if (!response.ok) {
-          const detail = data.detail || data.message || text || `HTTP ${response.status}`;
-          throw new Error(`No se pudo validar la sesión: ${detail}`);
+        if (!identity || typeof identity !== 'object' || !(identity.identifier || identity.email)) {
+          throw new Error('La sesión validada no contiene una identidad utilizable.');
         }
-        if (!data || typeof data !== 'object' || !(data.identifier || data.email)) {
-          throw new Error('El perfil validado no contiene una identidad utilizable.');
+        if (cancelled) return;
+
+        // El perfil trae `perfil_conductor`, que /api/auth/me no incluye y que
+        // renderVista necesita. Si falla, la sesión sigue siendo válida: se
+        // continúa con la identidad del servidor en lugar de expulsar.
+        const profileKey = identity.identifier || identity.email;
+        let profile = null;
+        try {
+          profile = await apiFetch(`/api/user/profile?email=${encodeURIComponent(profileKey)}`, {
+            signal: controller.signal,
+          });
+        } catch (profileErr) {
+          if (profileErr?.name !== 'AbortError') {
+            console.warn('Sesión válida pero no se pudo cargar el perfil:', profileErr);
+          }
         }
 
         if (cancelled) return;
-        const freshUser = { ...parsedUser, ...data };
+        const freshUser = { ...parsedUser, ...identity, ...(profile || {}) };
         localStorage.setItem('kapital_user', JSON.stringify(freshUser));
         setUsuarioActual(freshUser);
       } catch (err) {
@@ -1021,15 +1031,10 @@ function App() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
 
-        fetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`, {
-          cache: 'no-store',
+        apiFetch(`/api/user/profile?email=${encodeURIComponent(userKey)}`, {
           signal: controller.signal,
         })
-          .then(async response => {
-            if (!response.ok) {
-              throw new Error(`No se pudo actualizar el perfil (${response.status}).`);
-            }
-            const data = await response.json();
+          .then(data => {
             if (!data || typeof data !== 'object' || Array.isArray(data)) {
               throw new Error('La respuesta del perfil no es válida.');
             }
@@ -1055,6 +1060,9 @@ function App() {
 
   const handleLogout = () => {
     profileRefreshRef.current += 1;
+    // Se revoca en servidor sin esperar: el estado local se limpia igualmente,
+    // porque dejar al usuario en la app si el backend no contesta sería peor.
+    logoutSession();
     clearStoredUser();
     setUsuarioActual(null);
   };
