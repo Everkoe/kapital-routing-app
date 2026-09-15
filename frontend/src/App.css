@@ -627,6 +627,12 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 .status-danger .dot { background-color: #dc2626; }
 
+.status-unknown {
+  background-color: color-mix(in srgb, var(--kapital-accent-clear) 12%, transparent);
+  color: var(--kapital-accent-clear);
+}
+.status-unknown .dot { background-color: var(--kapital-accent-clear); }
+
 /* --- Driver Onboarding Wizard --- */
 .onboarding-wizard {
   max-width: 800px;

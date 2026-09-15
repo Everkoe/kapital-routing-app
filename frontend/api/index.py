@@ -744,7 +744,7 @@ SESSION_COOKIE_NAME = "kapital_session"
 SESSION_TTL_HOURS = int(os.environ.get("KAPITAL_SESSION_TTL_HOURS", "12"))
 AUTH_ENFORCED = os.environ.get(
     "KAPITAL_AUTH_ENFORCED",
-    "false",
+    "true",
 ).strip().lower() in {"1", "true", "yes", "on"}
 SessionCookie = Annotated[Optional[str], Cookie(alias=SESSION_COOKIE_NAME)]
 
@@ -1996,6 +1996,8 @@ async def _persist_normalized_state(operation: str) -> None:
             "notifications",
             "board_locks",
         }
+    elif operation.startswith("persist_fleet"):
+        resources_to_write = {"fleet_units"}
     else:
         resources_to_write = {resource for resource, _ in upsert_plan}
     for resource, conflict_key in upsert_plan:
@@ -2148,7 +2150,7 @@ async def _load_full_state(*, include_defaults: bool, force: bool = False) -> No
         async with _get_db_io_lock():
             # A concurrent request may have filled the cache while this one
             # waited. Re-check even for force loads to retain single-flight.
-            if _full_cache_is_fresh():
+            if not force and _full_cache_is_fresh():
                 return
             await _load_full_state_locked(include_defaults=include_defaults)
     except HTTPException:
@@ -2768,15 +2770,32 @@ class FlotaRegistro(BaseModel):
     capacidad: int
     tipo: str
     chofer: str
-    soat: str
-    revision: str
-    atu: str
-    licencia: str
+    soat: Optional[str] = None
+    revision: Optional[str] = None
+    atu: Optional[str] = None
+    licencia: Optional[str] = None
     telefono: Optional[str] = None
     soat_doc: Optional[str] = None
     revision_doc: Optional[str] = None
     atu_doc: Optional[str] = None
     licencia_doc: Optional[str] = None
+
+
+class FlotaUpdate(BaseModel):
+    """Structured fields editable from the fleet pencil modal.
+
+    Document blobs/URLs are intentionally not part of this contract. Pydantic
+    ignores old clients' extra ``*_doc`` fields, while the merge performed by
+    the endpoint preserves the values already stored for the driver dossier.
+    """
+    capacidad: Optional[int] = None
+    tipo: Optional[str] = None
+    chofer: Optional[str] = None
+    telefono: Optional[str] = None
+    soat: Optional[str] = None
+    revision: Optional[str] = None
+    atu: Optional[str] = None
+    licencia: Optional[str] = None
 
 class ChatMessagePayload(BaseModel):
     role: str
@@ -3616,6 +3635,10 @@ async def get_flota_status():
         )
 
         flota_list.append({
+            **data,
+            # The app_state object key is the immutable fleet identity (padrón)
+            # used by PUT/DELETE routes. Never let a stored physical plate
+            # overwrite it in the serialized response.
             "placa": unidad_id,
             "unidad_id": unidad_id,
             "real_placa": real_placa or unidad_id,
@@ -3624,7 +3647,6 @@ async def get_flota_status():
             "dni": dni,
             "fecha_nacimiento": fecha_nacimiento,
             "celular": celular,
-            **data,
         })
     return {"flota": flota_list}
 
@@ -4172,41 +4194,122 @@ async def get_conductor_info(unidad_id: str):
     }
 
 
+_FLEET_EXPIRY_FIELDS = ("soat", "revision", "atu", "licencia")
+_FLEET_EDITABLE_FIELDS = (
+    "capacidad", "tipo", "chofer", "telefono", *_FLEET_EXPIRY_FIELDS,
+)
+
+
+def _model_changes(model: BaseModel) -> Dict[str, Any]:
+    """Return explicitly supplied fields on Pydantic 1 and 2."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_unset=True)
+    return model.dict(exclude_unset=True)
+
+
+def _normalize_fleet_expiries(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate canonical optional ISO dates; status labels are never stored."""
+    normalized = dict(values)
+    for field in _FLEET_EXPIRY_FIELDS:
+        if field not in normalized:
+            continue
+        value = normalized[field]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            normalized[field] = ""
+            continue
+        if not isinstance(value, str):
+            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
+        candidate = value.strip()
+        try:
+            parsed = datetime.strptime(candidate, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.") from exc
+        # strptime accepts some non-zero-padded variants; require a canonical
+        # round-trip so every consumer derives status from one stable shape.
+        if parsed.strftime("%Y-%m-%d") != candidate:
+            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
+        normalized[field] = candidate
+    return normalized
+
+
+async def _persist_and_verify_fleet(unit_id: str, expected: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist the fleet source of truth and confirm it with a fresh read."""
+    await _persist_app_state({
+        "id": 1,
+        "usuarios": {
+            **usuarios_db,
+            "__routes_summary__": routes_summary,
+            "__historial_rutas__": historial_rutas,
+            "__lock__": board_lock,
+            "__flota__": conductores_db,
+            "__notifications__": notifications_db,
+        },
+    }, "persist_fleet")
+    await _load_compat_fleet(force=True)
+    stored = conductores_db.get(unit_id)
+    if not isinstance(stored, dict) or any(stored.get(key) != value for key, value in expected.items()):
+        _raise_database_unavailable(
+            "verify_fleet_write",
+            error=ValueError("fleet write could not be verified"),
+            detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+        )
+    return stored
+
+
 @app.post("/api/flota")
-async def add_flota(flota: FlotaRegistro):
-    await reload_db()
+async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
+    await reload_db(force=True)
+    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
-    conductores_db[flota.placa] = {
-        "capacidad": flota.capacidad,
-        "tipo": flota.tipo,
-        "chofer": flota.chofer,
-        "soat": flota.soat,
-        "revision": flota.revision,
-        "atu": flota.atu,
-        "licencia": flota.licencia,
-        "telefono": flota.telefono
-    }
-    await persist()
-    return {"message": "Unidad agregada exitosamente", "flota": conductores_db}
+    unit_id = flota.placa.strip()
+    if not unit_id:
+        raise HTTPException(status_code=400, detail="El padrón de la unidad no puede estar vacío.")
+    if unit_id in conductores_db:
+        raise HTTPException(status_code=409, detail="La unidad ya existe.")
+    values = _normalize_fleet_expiries({
+        key: getattr(flota, key) for key in _FLEET_EDITABLE_FIELDS
+    })
+    # Uploads remain accepted for the independent new-unit flow. They are not
+    # part of FlotaUpdate and therefore cannot be changed from the pencil modal.
+    for field in ("soat_doc", "revision_doc", "atu_doc", "licencia_doc"):
+        value = getattr(flota, field)
+        if value is not None:
+            values[field] = value
+    conductores_db[unit_id] = values
+    try:
+        stored = await _persist_and_verify_fleet(unit_id, values)
+    except Exception:
+        conductores_db.pop(unit_id, None)
+        raise
+    return {"message": "Unidad agregada exitosamente", "unidad": {"unidad_id": unit_id, **stored}, "flota": conductores_db}
+
 
 @app.put("/api/flota/{placa}")
-async def update_flota(placa: str, flota: FlotaRegistro):
-    await reload_db()
+async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCookie = None):
+    # A fresh provider read prevents a warm Vercel instance from overwriting a
+    # newer fleet snapshot written by another instance.
+    await reload_db(force=True)
+    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
-    conductores_db[placa] = {
-        "capacidad": flota.capacidad,
-        "tipo": flota.tipo,
-        "chofer": flota.chofer,
-        "soat": flota.soat,
-        "revision": flota.revision,
-        "atu": flota.atu,
-        "licencia": flota.licencia,
-        "telefono": flota.telefono
-    }
-    await persist()
-    return {"message": "Unidad actualizada", "flota": conductores_db}
+    previous = dict(conductores_db[placa])
+    changes = _normalize_fleet_expiries({
+        key: value for key, value in _model_changes(flota).items()
+        if key in _FLEET_EDITABLE_FIELDS
+    })
+    updated = {**previous, **changes}
+    # Preserve base/make/model/year/color, document URLs and any future
+    # metadata by merging only the explicit structured allow-list above.
+    if updated == previous:
+        return {"message": "Sin cambios", "unchanged": True, "unidad": {"unidad_id": placa, **previous}, "flota": conductores_db}
+    conductores_db[placa] = updated
+    try:
+        stored = await _persist_and_verify_fleet(placa, updated)
+    except Exception:
+        conductores_db[placa] = previous
+        raise
+    return {"message": "Unidad actualizada", "unchanged": False, "unidad": {"unidad_id": placa, **stored}, "flota": conductores_db}
 
 @app.delete("/api/flota/{placa}")
 async def delete_flota(placa: str):
