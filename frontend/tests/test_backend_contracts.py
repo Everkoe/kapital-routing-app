@@ -1404,6 +1404,28 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["unidad"]["soat"], "")
         self.assertEqual(response["unidad"]["atu"], "")
 
+    # --- Lote 3: acceso cruzado (parcial; ver relevo §8) ---
+
+    async def test_sos_notification_requires_a_session(self):
+        backend.AUTH_ENFORCED = True
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.add_notification({"title": "falsa"}, None)
+        self.assertEqual(caught.exception.status_code, 401)
+
+    async def test_notification_ids_stay_unique_past_the_cap(self):
+        """len(notifications_db) + 1 repetía el id 51 para siempre."""
+        backend.notifications_db.extend({"id": i + 1} for i in range(50))
+        seen = {n["id"] for n in backend.notifications_db}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            for _ in range(5):
+                created = await backend.add_notification({"title": "t"}, None)
+                self.assertNotIn(created["id"], seen)
+                seen.add(created["id"])
+
     # --- Lote 1: identidad de sesión ---
 
     async def test_document_states_do_not_block_driver_operations(self):

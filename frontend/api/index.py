@@ -2900,9 +2900,12 @@ async def get_notifications(last_id: int = 0):
     return new_notifs
 
 @app.post("/api/notifications")
-async def add_notification(notif: dict):
+async def add_notification(notif: dict, session_token: SessionCookie = None):
     await reload_db()
-    new_id = len(notifications_db) + 1
+    # Lo usa el SOS del conductor, así que basta con una sesión válida: sin esto
+    # cualquiera podía inyectar entradas en el panel de Administración.
+    require_request_actor(session_token)
+    new_id = _next_notification_id()
     new_notif = {
         "id": new_id,
         "title": notif.get("title", "Notificación"),
@@ -2968,7 +2971,7 @@ async def register_user(usuario: UsuarioRegistro):
     # Add notification for new registration
     if rol_solicitado == "Conductor":
         notifications_db.append({
-            "id": len(notifications_db) + 1,
+            "id": _next_notification_id(),
             "title": "Nuevo Conductor",
             "message": f"{usuario.nombre} se ha registrado y está en lista de espera.",
             "type": "success",
@@ -3270,6 +3273,51 @@ async def approve_user(
 _ADMIN_ROLES = ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]
 
 
+def _owner_key(value: Any) -> str:
+    """Normaliza identificadores de propiedad (padrón, empresa, correo)."""
+    return str(value).strip().upper() if value is not None else ""
+
+
+def require_resource_owner(
+    session_token: Optional[str],
+    *,
+    actor_fields: tuple,
+    requested: Any,
+    resource: str,
+) -> Optional[Dict[str, Any]]:
+    """Permite al dueño del recurso o a un administrador.
+
+    Con la exigencia desactivada es un no-op, igual que ``require_request_actor``,
+    para conservar el rollback de la fase 1.
+    """
+    actor = require_request_actor(session_token)
+    if actor is None:
+        return None
+    if actor.get("rol") in _ADMIN_ROLES:
+        return actor
+    wanted = _owner_key(requested)
+    if wanted and any(_owner_key(actor.get(field)) == wanted for field in actor_fields):
+        return actor
+    raise HTTPException(status_code=403, detail=f"No tienes acceso a {resource}.")
+
+
+def _next_notification_id() -> int:
+    """Id monotónico.
+
+    ``_next_notification_id()`` se repetía indefinidamente: la lista se recorta
+    a 50, así que a partir de ahí toda notificación nueva recibía el id 51.
+    """
+    highest = 0
+    for notification in notifications_db:
+        if not isinstance(notification, dict):
+            continue
+        try:
+            highest = max(highest, int(float(str(notification.get("id", 0)))))
+        except (TypeError, ValueError):
+            continue
+    return highest + 1
+
+
 def _require_admin(admin_email: str) -> Dict[str, Any]:
     """Valida que admin_email exista y tenga rol administrativo. Retorna el user."""
     req_user = usuarios_db.get(admin_email)
@@ -3561,7 +3609,7 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
     if getattr(payload, 'uploaded_by', 'conductor') != 'admin':
         conductor_nombre = user.get("nombre", payload.email)
         notif_obj = {
-            "id": len(notifications_db) + 1,
+            "id": _next_notification_id(),
             "tipo": "docs_resubmitted",
             "type": "info", # To be picked up by App.jsx polling
             "title": "📥 Documentos resubidos",
