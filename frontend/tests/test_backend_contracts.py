@@ -1404,6 +1404,64 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["unidad"]["soat"], "")
         self.assertEqual(response["unidad"]["atu"], "")
 
+    async def test_fleet_delete_requires_admin_session_when_enforced(self):
+        backend.AUTH_ENFORCED = True
+        unit = {"capacidad": 15, "tipo": "Van", "chofer": "Driver"}
+        backend.conductores_db["K-001"] = copy.deepcopy(unit)
+        driver = {"identifier": "driver-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["driver-1"] = driver
+        token = backend.issue_session(driver)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.delete_flota("K-001", token)
+        self.assertEqual(caught.exception.status_code, 403)
+        persist_state.assert_not_awaited()
+        self.assertEqual(backend.conductores_db["K-001"], unit)
+
+    async def test_fleet_delete_rejects_anonymous_request_when_enforced(self):
+        backend.AUTH_ENFORCED = True
+        backend.conductores_db["K-001"] = {"capacidad": 15}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.delete_flota("K-001")
+        self.assertEqual(caught.exception.status_code, 401)
+        persist_state.assert_not_awaited()
+        self.assertIn("K-001", backend.conductores_db)
+
+    async def test_fleet_delete_verifies_removal_with_a_fresh_read(self):
+        backend.conductores_db["K-001"] = {"capacidad": 15}
+        backend.conductores_db["K-002"] = {"capacidad": 20}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            response = await backend.delete_flota("K-001")
+        persist_state.assert_awaited_once()
+        self.assertEqual(response["unidad_id"], "K-001")
+        self.assertNotIn("K-001", backend.conductores_db)
+        self.assertIn("K-002", backend.conductores_db)
+
+    async def test_fleet_delete_rolls_back_memory_when_persist_fails(self):
+        original = {"capacidad": 15, "soat": "", "soat_doc": "private://keep"}
+        backend.conductores_db["K-001"] = copy.deepcopy(original)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.delete_flota("K-001")
+        self.assertEqual(backend.conductores_db["K-001"], original)
+
 
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""

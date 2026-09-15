@@ -4232,8 +4232,14 @@ def _normalize_fleet_expiries(values: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-async def _persist_and_verify_fleet(unit_id: str, expected: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist the fleet source of truth and confirm it with a fresh read."""
+async def _persist_and_verify_fleet(
+    unit_id: str, expected: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Persist the fleet source of truth and confirm it with a fresh read.
+
+    ``expected=None`` verifies a removal: the unit must be gone after the
+    re-read, so a silently rejected delete cannot report success.
+    """
     await _persist_app_state({
         "id": 1,
         "usuarios": {
@@ -4247,7 +4253,13 @@ async def _persist_and_verify_fleet(unit_id: str, expected: Dict[str, Any]) -> D
     }, "persist_fleet")
     await _load_compat_fleet(force=True)
     stored = conductores_db.get(unit_id)
-    if not isinstance(stored, dict) or any(stored.get(key) != value for key, value in expected.items()):
+    if expected is None:
+        verified = stored is None
+    else:
+        verified = isinstance(stored, dict) and all(
+            stored.get(key) == value for key, value in expected.items()
+        )
+    if not verified:
         _raise_database_unavailable(
             "verify_fleet_write",
             error=ValueError("fleet write could not be verified"),
@@ -4312,14 +4324,23 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     return {"message": "Unidad actualizada", "unchanged": False, "unidad": {"unidad_id": placa, **stored}, "flota": conductores_db}
 
 @app.delete("/api/flota/{placa}")
-async def delete_flota(placa: str):
-    await reload_db()
+async def delete_flota(placa: str, session_token: SessionCookie = None):
+    # Removing a unit is irreversible, so it is gated exactly like POST/PUT and
+    # reloads first: a warm Vercel instance must not delete from a stale
+    # snapshot, nor drop a unit another instance just created.
+    await reload_db(force=True)
+    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
-    if placa in conductores_db:
-        del conductores_db[placa]
-        await persist()
-        return {"message": "Unidad eliminada", "flota": conductores_db}
-    raise HTTPException(status_code=404, detail="Unidad no encontrada")
+    if placa not in conductores_db:
+        raise HTTPException(status_code=404, detail="Unidad no encontrada")
+    previous = dict(conductores_db[placa])
+    del conductores_db[placa]
+    try:
+        await _persist_and_verify_fleet(placa, None)
+    except Exception:
+        conductores_db[placa] = previous
+        raise
+    return {"message": "Unidad eliminada", "unidad_id": placa, "flota": conductores_db}
 
 import asyncio
 

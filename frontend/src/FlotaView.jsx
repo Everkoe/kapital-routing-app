@@ -463,10 +463,16 @@ const FlotaView = ({ usuario, initialBase }) => {
     if (!unitId || !window.confirm(`¿Estás seguro de eliminar la unidad ${unitId}?`)) return;
     try {
       const res = await fetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Error al eliminar');
-      fetchFlota();
+      if (!res.ok) {
+        // Surface the backend reason (expired session, insufficient role) instead
+        // of a generic failure the admin cannot act on.
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Error al eliminar');
+      }
+      await fetchFlota();
+      toast.success('Unidad eliminada.');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
