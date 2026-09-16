@@ -4,6 +4,7 @@ import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide
 import FileUploadZone from './FileUploadZone';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
+import { documentoABase64 } from '../utils/imageUtils';
 
 const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
   return (
@@ -187,19 +188,20 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
       setFormData(prev => ({ ...prev, [name]: file }));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result;
-      const fileObj = { name: file.name, size: file.size, type: file.type, base64, isRestored: false };
-      setFormData(prev => ({ ...prev, [name]: fileObj }));
-      // Persist to localStorage
-      try {
-        const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
-        existing[name] = fileObj;
-        localStorage.setItem(filesKey, JSON.stringify(existing));
-      } catch (e) { console.error('Error saving file to storage', e); }
-    };
-    reader.readAsDataURL(file);
+    // Comprimir aquí es lo que mantiene el envío del perfil por debajo del
+    // límite de tiempo de la función: sin ello, diecisiete documentos suman
+    // 2 MB y el «Enviar para Revisión» falla sin explicar por qué.
+    documentoABase64(file)
+      .then(documento => {
+        const fileObj = { ...documento, isRestored: false };
+        setFormData(prev => ({ ...prev, [name]: fileObj }));
+        try {
+          const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
+          existing[name] = fileObj;
+          localStorage.setItem(filesKey, JSON.stringify(existing));
+        } catch (err) { console.error('Error saving file to storage', err); }
+      })
+      .catch(err => console.error('Error al procesar el documento', err));
   };
 
   // Calculate age automatically

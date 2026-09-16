@@ -4,6 +4,7 @@ import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
+import { documentoABase64 } from '../utils/imageUtils';
 
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
@@ -130,16 +131,9 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result;
-      setNewFiles(prev => ({
-        ...prev,
-        [docKey]: { name: file.name, size: file.size, type: file.type, base64 }
-      }));
-    };
-    reader.onerror = () => toast.error('No se pudo leer el documento. Intenta nuevamente.');
-    reader.readAsDataURL(file);
+    documentoABase64(file)
+      .then(documento => setNewFiles(prev => ({ ...prev, [docKey]: documento })))
+      .catch(() => toast.error('No se pudo leer el documento. Intenta nuevamente.'));
   };
 
   const handleSubmit = async () => {

@@ -9,6 +9,7 @@ import { apiFetch, apiRequest } from './utils/apiClient';
 
 import DocumentReviewCard from './components/DocumentReviewCard';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
+import { documentoABase64 } from './utils/imageUtils';
 import DocumentViewer from './components/DocumentViewer';
 import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
 import './App.css';
@@ -287,12 +288,10 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      const fileObj = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve({ name: file.name, size: file.size, type: file.type, base64: e.target.result });
-        reader.onerror = () => reject(new Error('Error al leer el archivo'));
-        reader.readAsDataURL(file);
-      });
+      // Comprime si es imagen: guardar el original llevaba un perfil completo
+      // a 2 MB, y como todo vive en una sola fila el envío superaba el límite
+      // de tiempo de la función serverless.
+      const fileObj = await documentoABase64(file);
 
       const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
       
@@ -524,12 +523,9 @@ const FlotaView = ({ usuario, initialBase }) => {
       e.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setFormData(prev => ({ ...prev, [field]: event.target.result }));
-    };
-    reader.onerror = () => toast.error('No se pudo leer el documento. Intenta nuevamente.');
-    reader.readAsDataURL(file);
+    documentoABase64(file)
+      .then(({ base64 }) => setFormData(prev => ({ ...prev, [field]: base64 })))
+      .catch(() => toast.error('No se pudo leer el documento. Intenta nuevamente.'));
   };
 
   // Delega la generación al backend, que rellena la plantilla oficial
