@@ -524,10 +524,10 @@ const AuditLog = ({ logs }) => ( <div className="card"><div className="card-head
 const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved, onSaveSession, onUnsaveSession, onSessionDirty }) => {
   const syncToBackend = async (newRoutes) => {
     try {
-      await fetch('/api/routes', {
+      await apiFetch('/api/routes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Owner-Email': usuarioActual?.email || 'Desconocido' },
-        body: JSON.stringify(newRoutes)
+        headers: { 'X-Owner-Email': usuarioActual?.email || 'Desconocido' },
+        json: newRoutes,
       });
     } catch (err) {
       console.error("Error guardando cambios:", err);
@@ -600,22 +600,17 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     formData.append('sede', filtroSede);
 
     try {
-      const response = await fetch(`/api/assign-routes/`, { method: 'POST', body: formData });
-      if (!response.ok) {
-        const errData = await response.json();
-        let errMsg = errData.detail;
-        if (typeof errMsg === 'object') {
-          errMsg = JSON.stringify(errMsg).replace(/[\[\]"{}]+/g, ' ');
-        }
-        throw new Error(errMsg || 'Ocurrió un error interno en el servidor.');
-      }
-      const result = await response.json();
+      const result = await apiFetch('/api/assign-routes/', { method: 'POST', body: formData });
       setRoutes(result);
       if (onSessionDirty) onSessionDirty(); // Mark session as unsaved after new generation
       addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos usando Smart Routing.`);
     } catch (err) {
-      setError(err.message);
-      addLog(`ERROR al generar rutas: ${err.message}`);
+      const detail = err?.payload?.detail;
+      const message = typeof detail === 'object'
+        ? JSON.stringify(detail).replace(/[\[\]"{}]+/g, ' ')
+        : (err.message || 'Ocurrió un error interno en el servidor.');
+      setError(message);
+      addLog(`ERROR al generar rutas: ${message}`);
     } finally {
       setIsLoading(false);
 
@@ -633,9 +628,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/emergency-reassign/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emergencyData) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Error en la reasignación.');
+      const data = await apiFetch('/api/emergency-reassign/', { method: 'POST', json: emergencyData });
       toast.success(data.message);
       setRoutes(data.rutas_actualizadas);
       addLog(`🚨 URGENTE: Ruta de ${conductor_id} (${horario}) reasignada a ${data.rescatista_id}.`);
@@ -676,10 +669,9 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     if (onUnsaveSession) onUnsaveSession();
     // Clear on backend
     try {
-      await fetch('/api/routes', {
+      await apiFetch('/api/routes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([])
+        json: [],
       });
     } catch(e) {
       console.error("Error clearing board on server:", e);
@@ -886,19 +878,15 @@ function App() {
     setSessionSaved(true);
     addLog('Sesión guardada. Publicando al Gerente de Operaciones...');
     try {
-      const res = await fetch('/api/routes/publish', {
+      const data = await apiFetch('/api/routes/publish', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(routes),
+        json: routes,
       });
-      if (res.ok) {
-        const data = await res.json();
-        addLog(`✅ ${data.message || 'Datos publicados al Gerente.'}`);
-      } else {
-        addLog('⚠️ Sesión guardada localmente. Error al publicar al Gerente.');
-      }
+      addLog(`✅ ${data.message || 'Datos publicados al Gerente.'}`);
     } catch (e) {
-      addLog('⚠️ Sesión guardada localmente (sin conexión al servidor).');
+      addLog(e?.status
+        ? '⚠️ Sesión guardada localmente. Error al publicar al Gerente.'
+        : '⚠️ Sesión guardada localmente (sin conexión al servidor).');
     }
   };
 

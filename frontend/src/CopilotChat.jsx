@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://kapital-routing-app.vercel.app/api";
-const LOCAL_API_BASE = "http://localhost:8000/api";
+import { apiFetch } from './utils/apiClient';
 
 const CopilotChat = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -36,23 +34,13 @@ const CopilotChat = () => {
     setIsLoading(true);
 
     try {
-      const apiUrl = window.location.hostname === 'localhost' ? LOCAL_API_BASE : '/api';
-      
-      const response = await fetch(`${apiUrl}/chat`, {
+      const data = await apiFetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           message: userMessage.text,
           history: currentHistory.slice(1) // Omitimos el primer mensaje.
-        })
+        },
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Error de red en servidor');
-      }
-
-      const data = await response.json();
       if (data.error) {
         setMessages(prev => [...prev, { role: 'assistant', text: `Debug Info: ${data.detail}` }]);
       } else {

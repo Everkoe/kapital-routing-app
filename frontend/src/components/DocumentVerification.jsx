@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { Shield, ShieldAlert, ShieldCheck, CheckCircle2, XCircle, Search, Calendar, Building, Info, FileText } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
 
 const DocumentVerification = ({ placa, doc, style, cachedResults = {} }) => {
   const [verifying, setVerifying] = useState({});
@@ -13,8 +14,7 @@ const DocumentVerification = ({ placa, doc, style, cachedResults = {} }) => {
     if (!param) return toast.error(`Falta parámetro para verificar ${type}`);
     setVerifying(prev => ({ ...prev, [type]: true }));
     try {
-      const res = await fetch(`/api/verify/${type}/${encodeURIComponent(param)}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/verify/${type}/${encodeURIComponent(param)}`);
       setLocalResults(prev => ({ ...prev, [type]: data }));
       
       if (data.valido) {
@@ -23,7 +23,7 @@ const DocumentVerification = ({ placa, doc, style, cachedResults = {} }) => {
         toast.error(`Atención: Problemas con ${type.toUpperCase()}`);
       }
     } catch (e) {
-      toast.error(`Error verificando ${type}`);
+      toast.error(e?.message || `Error verificando ${type}`);
     } finally {
       setVerifying(prev => ({ ...prev, [type]: false }));
     }

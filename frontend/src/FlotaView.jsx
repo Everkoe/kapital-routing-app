@@ -239,18 +239,15 @@ const FlotaView = ({ usuario, initialBase }) => {
     if (!conductorInfo || !usuario) return;
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      const res = await fetch('/api/admin/driver/review', {
+      const data = await apiFetch('/api/admin/driver/review', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           admin_email: usuario?.email || usuario?.identifier || '',
           conductor_email: conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '',
           campo,
           estado,
-        })
+        },
       });
-      if (!res.ok) throw new Error('Error al revisar documento');
-      const data = await res.json();
       setLocalRevisionDocs(data.revision_docs || {});
       toast.success(`Documento marcado como ${estado === 'aprobado' ? '✅ Aprobado' : '❌ Rechazado'}`);
     } catch (e) {
@@ -311,19 +308,15 @@ const FlotaView = ({ usuario, initialBase }) => {
     if (!conductorInfo || !usuario) return;
     setResolveLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      const res = await fetch('/api/admin/resolve-update', {
+      await apiFetch('/api/admin/resolve-update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           admin_email: usuario?.identifier || usuario?.email || '',
           conductor_email: conductorInfo?.usuario?.identifier || conductorInfo?.usuario?.email || conductorInfo?.flota?.conductor || '',
           field: campo,
           action: action,
-        })
+        },
       });
-      if (!res.ok) throw new Error('Error al resolver solicitud');
-      
-      const data = await res.json();
       
       // Update local state to reflect the change immediately
       const updatedConductorInfo = { ...conductorInfo };
@@ -353,16 +346,14 @@ const FlotaView = ({ usuario, initialBase }) => {
     if (!notifyMsg.trim() || !conductorInfo || !usuario) return;
     setIsSendingNotify(true);
     try {
-      const res = await fetch('/api/admin/driver/notify', {
+      await apiFetch('/api/admin/driver/notify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        json: {
           admin_email: usuario?.email || usuario?.identifier || '',
           conductor_email: conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '',
           mensaje: notifyMsg,
-        })
+        },
       });
-      if (!res.ok) throw new Error('Error al enviar aviso');
       toast.success('✉️ Aviso enviado al conductor exitosamente');
       setNotifyMsg('');
     } catch (e) {

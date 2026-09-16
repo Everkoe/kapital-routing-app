@@ -34,8 +34,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   compatible para conservar un rollback seguro.
 - **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
-  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual: **~19 de 47
-  endpoints**; los 28 restantes están inventariados en `docs/handoff/2026-09-15-relevo.md` §7.
+  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual:
+  **36 de 47 endpoints**; los 11 restantes —todos de lectura— están inventariados en
+  `docs/handoff/2026-09-15-relevo.md` §7. Las escrituras destructivas y las integraciones de pago
+  (Gemini, API de verificación) ya están cerradas.
   **Validar una sesión NO debe costar el blob de usuarios**: existe `usuarios.__sessions__`, una pseudo-clave
   con una instantánea de autorización por token. Al añadir un gate nuevo, usar `require_session_owner`, y si
   se muta `rol` o `estado` de un usuario **llamar a `refresh_session_index_for()`** o la instantánea quedará
@@ -140,7 +142,9 @@ Contexto que no cambia con cada lote:
 2. Algoritmos de optimización real de rutas — no implementado, y **congelado a propósito** junto con el rol
    Programador de rutas (casos `RTE` de `docs/phase-0/regression-matrix.md`). No optimizar por iniciativa propia.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
-   Lo que falta no es el mecanismo, es la cobertura (~12 de 46 endpoints) y el manejo de 401 en el frontend.
+   El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
+   Lo que falta es cerrar los 11 endpoints de lectura restantes, el handshake del WebSocket, y retirar el
+   usuario sembrado con contraseña por defecto que inyecta `_decode_full_state`.
 4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.
 5. **Separar backend y frontend en dos repositorios: evaluado el 2026-09-15 y descartado por ahora.**
    El mismo origen es carga estructural: sostiene la cookie `SameSite=Lax` (que hoy neutraliza el CORS
