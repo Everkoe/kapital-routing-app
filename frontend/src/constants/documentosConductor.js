@@ -77,3 +77,16 @@ export const etiquetaCara = (documento, cara) => {
   if (!admiteReverso(documento)) return documento.label;
   return `${documento.label} · ${cara === 'reverso' ? 'Reverso' : 'Anverso'}`;
 };
+
+/**
+ * Cara a la que va un archivo soltado sobre la tarjeta del documento.
+ *
+ * El primer hueco libre, anverso antes que reverso. Si ya están todas llenas,
+ * reemplaza la primera: es lo que se reemplaza casi siempre, y cualquier otra
+ * regla obligaría al usuario a adivinar dónde cae lo que suelta.
+ */
+export const caraDestinoParaArrastre = (caras) => {
+  const lista = Array.isArray(caras) ? caras.filter(Boolean) : [];
+  if (lista.length === 0) return null;
+  return (lista.find((cara) => !cara.tieneArchivo) || lista[0]).campo;
+};

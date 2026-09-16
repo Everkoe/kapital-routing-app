@@ -1,18 +1,24 @@
+import { useState } from 'react';
 import { CheckCircle, Clock, Eye, Upload, XCircle } from 'lucide-react';
 import DocumentDropZone from './DocumentDropZone';
-import { admiteReverso, claveReverso } from '../constants/documentosConductor';
+import {
+  admiteReverso,
+  caraDestinoParaArrastre,
+  claveReverso,
+} from '../constants/documentosConductor';
 
 /**
- * Tarjeta de revisión de un documento, con sus caras dentro.
+ * Tarjeta de revisión de un documento.
  *
- * Un documento de dos caras ocupaba antes dos tarjetas, y con trece documentos
- * el panel se volvía una pared de tarjetas difícil de recorrer. Aquí cada
- * documento es una sola tarjeta y sus caras son filas: se sigue viendo el
- * estado de ambas de un vistazo, sin abrir modales que escondan lo que falta.
+ * Plana a propósito: una tarjeta dentro de otra tarjeta añade bordes y sangrías
+ * que no aportan información. Los documentos de dos caras no se parten en
+ * tarjetas ni en cajas anidadas — al pulsar «Subir» se despliega una fila con
+ * un botón por cara, y el resto del tiempo la tarjeta se lee igual que la de un
+ * documento de una sola cara.
  *
- * La revisión sigue siendo por cara. El administrador puede rechazar solo el
- * reverso borroso sin tumbar el anverso, que ya estaba bien, y el conductor
- * resube únicamente esa cara.
+ * Arrastrar sobre la tarjeta llena **el primer hueco libre**, anverso antes que
+ * reverso. Es la regla más predecible: sin ella habría que adivinar a qué cara
+ * iba un archivo soltado sobre el conjunto.
  */
 
 const ESTADOS = {
@@ -29,95 +35,21 @@ const fuenteDeArchivo = (fileData) => {
   return '';
 };
 
-const EstadoCara = ({ revision, tieneArchivo }) => {
-  if (!tieneArchivo) return <span className="rev-badge rev-missing">Sin archivo</span>;
-  const estado = ESTADOS[revision?.estado] || ESTADOS.pendiente;
-  return (
-    <span className={`rev-badge ${estado.clase}`}>
-      <estado.Icon size={12} /> {estado.texto}
-    </span>
-  );
-};
+/**
+ * Estado del documento a partir de sus caras presentes.
+ *
+ * Un rechazo manda sobre todo lo demás: si una cara está mal, el documento no
+ * sirve aunque la otra esté aprobada. Y solo se da por aprobado cuando lo están
+ * todas las caras subidas, para que una aprobación no tape una cara pendiente.
+ */
+const estadoDocumento = (caras, revisiones) => {
+  const presentes = caras.filter((cara) => cara.tieneArchivo);
+  if (presentes.length === 0) return null;
 
-const CaraDocumento = ({
-  campo,
-  nombre,
-  opcional,
-  fileData,
-  revision,
-  cargando,
-  onUpload,
-  onReview,
-  onView,
-  mostrarNombre,
-  accept,
-}) => {
-  const tieneArchivo = Boolean(fileData);
-
-  return (
-    <DocumentDropZone
-      className="doc-cara"
-      label={nombre}
-      disabled={cargando}
-      onFile={(file) => onUpload(campo, file)}
-    >
-      <div className="doc-cara-info">
-        {mostrarNombre && <span className="doc-cara-nombre">{nombre}</span>}
-        {opcional && <span className="rev-badge rev-optional">Opcional</span>}
-        <EstadoCara revision={revision} tieneArchivo={tieneArchivo} />
-      </div>
-
-      <div className="doc-cara-acciones">
-        {tieneArchivo && (
-          <button
-            type="button"
-            className="btn-view-doc"
-            title="Ver documento"
-            onClick={() => onView({ name: nombre, src: fuenteDeArchivo(fileData), raw: fileData })}
-          >
-            <Eye size={13} /> Ver
-          </button>
-        )}
-
-        <label className="btn-view-doc doc-cara-subir" title={tieneArchivo ? 'Reemplazar archivo' : 'Subir archivo'}>
-          <Upload size={13} /> {tieneArchivo ? 'Reemplazar' : 'Subir'}
-          <input
-            type="file"
-            accept={accept}
-            style={{ display: 'none' }}
-            onChange={(e) => onUpload(campo, e.target.files[0])}
-          />
-        </label>
-
-        {tieneArchivo && (
-          <>
-            <button
-              type="button"
-              className="btn-approve-doc"
-              disabled={cargando || revision?.estado === 'aprobado'}
-              onClick={() => onReview(campo, 'aprobado')}
-            >
-              {cargando ? '...' : <><CheckCircle size={13} /> Aprobar</>}
-            </button>
-            <button
-              type="button"
-              className="btn-reject-doc"
-              disabled={cargando || revision?.estado === 'rechazado'}
-              onClick={() => onReview(campo, 'rechazado')}
-            >
-              {cargando ? '...' : <><XCircle size={13} /> Rechazar</>}
-            </button>
-          </>
-        )}
-      </div>
-
-      {!tieneArchivo && (
-        <p className="review-doc-missing">
-          Arrastra el archivo aquí o usa el botón.
-        </p>
-      )}
-    </DocumentDropZone>
-  );
+  const estados = presentes.map((cara) => revisiones?.[cara.campo]?.estado);
+  if (estados.includes('rechazado')) return ESTADOS.rechazado;
+  if (estados.every((estado) => estado === 'aprobado')) return ESTADOS.aprobado;
+  return ESTADOS.pendiente;
 };
 
 const DocumentReviewCard = ({
@@ -130,42 +62,139 @@ const DocumentReviewCard = ({
   onView,
   accept,
 }) => {
+  const [subiendo, setSubiendo] = useState(false);
   const dosCaras = admiteReverso(documento);
 
-  const caras = dosCaras
+  const caras = (dosCaras
     ? [
-        { campo: documento.key, nombre: 'Anverso', opcional: documento.opcional },
+        { campo: documento.key, nombre: 'Anverso' },
         // El reverso siempre es opcional: un PDF puede traer ambas páginas.
         { campo: claveReverso(documento.key), nombre: 'Reverso', opcional: true },
       ]
-    : [{ campo: documento.key, nombre: documento.label, opcional: documento.opcional }];
+    : [{ campo: documento.key, nombre: documento.label }]
+  ).map((cara) => ({ ...cara, archivo: perfil?.[cara.campo], tieneArchivo: Boolean(perfil?.[cara.campo]) }));
+
+  const conArchivo = caras.filter((cara) => cara.tieneArchivo);
+  const estado = estadoDocumento(caras, revisiones);
+  const ocupado = caras.some((cara) => cargando?.[cara.campo]);
+
+  const caraParaArrastre = caraDestinoParaArrastre(caras);
+
+  const revisarTodas = (estadoNuevo) => {
+    conArchivo.forEach((cara) => onReview(cara.campo, estadoNuevo));
+  };
 
   return (
-    <div className="review-doc-card">
+    <DocumentDropZone
+      className="review-doc-card"
+      label={documento.label}
+      disabled={ocupado}
+      onFile={(file) => onUpload(caraParaArrastre, file)}
+    >
       <div className="review-doc-header">
         <span className="review-doc-name">{documento.label}</span>
         {documento.opcional && <span className="rev-badge rev-optional">Opcional</span>}
+        {estado ? (
+          <span className={`rev-badge ${estado.clase}`}><estado.Icon size={12} /> {estado.texto}</span>
+        ) : (
+          <span className="rev-badge rev-missing">Sin archivo</span>
+        )}
       </div>
 
-      <div className="doc-caras">
-        {caras.map((cara) => (
-          <CaraDocumento
+      {dosCaras && conArchivo.length > 0 && (
+        <p className="doc-caras-resumen">
+          {conArchivo.length === caras.length
+            ? 'Anverso y reverso subidos'
+            : `Solo ${conArchivo[0].nombre.toLowerCase()} · falta ${caras.find((c) => !c.tieneArchivo).nombre.toLowerCase()}`}
+        </p>
+      )}
+
+      <div className="review-doc-actions">
+        {conArchivo.map((cara) => (
+          <button
             key={cara.campo}
-            campo={cara.campo}
-            nombre={cara.nombre}
-            opcional={dosCaras ? cara.opcional && cara.nombre === 'Reverso' : false}
-            fileData={perfil?.[cara.campo]}
-            revision={revisiones?.[cara.campo]}
-            cargando={cargando?.[cara.campo]}
-            onUpload={onUpload}
-            onReview={onReview}
-            onView={onView}
-            mostrarNombre={dosCaras}
-            accept={accept}
-          />
+            type="button"
+            className="btn-view-doc"
+            onClick={() => onView({
+              name: dosCaras ? `${documento.label} · ${cara.nombre}` : documento.label,
+              src: fuenteDeArchivo(cara.archivo),
+              raw: cara.archivo,
+            })}
+          >
+            <Eye size={13} /> {dosCaras ? `Ver ${cara.nombre.toLowerCase()}` : 'Ver'}
+          </button>
         ))}
+
+        {dosCaras ? (
+          <button
+            type="button"
+            className="btn-view-doc"
+            aria-expanded={subiendo}
+            onClick={() => setSubiendo((abierto) => !abierto)}
+          >
+            <Upload size={13} /> Subir
+          </button>
+        ) : (
+          <label className="btn-view-doc doc-subir-label">
+            <Upload size={13} /> {conArchivo.length ? 'Reemplazar' : 'Subir'}
+            <input
+              type="file"
+              accept={accept}
+              style={{ display: 'none' }}
+              onChange={(e) => onUpload(documento.key, e.target.files[0])}
+            />
+          </label>
+        )}
+
+        {conArchivo.length > 0 && (
+          <>
+            <button
+              type="button"
+              className="btn-approve-doc"
+              disabled={ocupado || estado === ESTADOS.aprobado}
+              onClick={() => revisarTodas('aprobado')}
+            >
+              {ocupado ? '...' : <><CheckCircle size={13} /> Aprobar</>}
+            </button>
+            <button
+              type="button"
+              className="btn-reject-doc"
+              disabled={ocupado || estado === ESTADOS.rechazado}
+              onClick={() => revisarTodas('rechazado')}
+            >
+              {ocupado ? '...' : <><XCircle size={13} /> Rechazar</>}
+            </button>
+          </>
+        )}
       </div>
-    </div>
+
+      {dosCaras && subiendo && (
+        <div className="doc-caras-subida">
+          {caras.map((cara) => (
+            <label key={cara.campo} className="btn-view-doc doc-subir-label">
+              <Upload size={13} />
+              {cara.tieneArchivo ? `Reemplazar ${cara.nombre.toLowerCase()}` : `Subir ${cara.nombre.toLowerCase()}`}
+              {cara.opcional && !cara.tieneArchivo && <span className="doc-cara-opcional">opcional</span>}
+              <input
+                type="file"
+                accept={accept}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  onUpload(cara.campo, e.target.files[0]);
+                  setSubiendo(false);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+
+      {conArchivo.length === 0 && (
+        <p className="review-doc-missing">
+          El conductor aún no ha subido este documento. Arrastra el archivo aquí o usa el botón.
+        </p>
+      )}
+    </DocumentDropZone>
   );
 };
 

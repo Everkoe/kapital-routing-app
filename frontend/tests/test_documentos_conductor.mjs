@@ -7,6 +7,7 @@ import {
   TIPO_PAPEL,
   TIPO_TARJETA,
   admiteReverso,
+  caraDestinoParaArrastre,
   claveReverso,
   documentosPorDueno,
   etiquetaCara,
@@ -92,4 +93,38 @@ test('las lunas polarizadas son opcionales', () => {
   assert.ok(lunas, 'el documento existe');
   assert.equal(lunas.opcional, true);
   assert.equal(lunas.tipo, TIPO_TARJETA);
+});
+
+test('un archivo arrastrado cae en el primer hueco libre', () => {
+  const caras = [
+    { campo: 'dniScaneado', tieneArchivo: false },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+  ];
+
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneado', 'con todo vacío, al anverso');
+});
+
+test('con el anverso ya subido, el archivo arrastrado va al reverso', () => {
+  const caras = [
+    { campo: 'dniScaneado', tieneArchivo: true },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+  ];
+
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneadoReverso');
+});
+
+test('con las dos caras llenas, reemplaza la primera', () => {
+  // Cualquier otra regla obligaría a adivinar dónde cae lo que se suelta.
+  const caras = [
+    { campo: 'dniScaneado', tieneArchivo: true },
+    { campo: 'dniScaneadoReverso', tieneArchivo: true },
+  ];
+
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneado');
+});
+
+test('un documento de una sola cara siempre recibe en ella', () => {
+  assert.equal(caraDestinoParaArrastre([{ campo: 'cv', tieneArchivo: true }]), 'cv');
+  assert.equal(caraDestinoParaArrastre([]), null, 'sin caras no hay destino');
+  assert.equal(caraDestinoParaArrastre(null), null);
 });
