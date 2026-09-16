@@ -3737,8 +3737,10 @@ async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCook
 
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):
-    await reload_db()
-    user = get_user_by_identifier(payload.email)
+    # Cargar solo los usuarios, no el estado completo: el envío del perfil no
+    # necesita rutas ni pasajeros, y descargarlos añadía un viaje entero contra
+    # Supabase a una operación que ya rozaba el límite de tiempo de la función.
+    user = await _load_compat_user(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     
