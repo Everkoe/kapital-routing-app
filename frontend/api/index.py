@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote
 import base64
+import re
 import hashlib
 import hmac
 import secrets
@@ -2821,6 +2822,90 @@ async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
         print(f"[Supabase] storage upload failed error={type(e).__name__}")
         return ""
 
+# --- Documentos del conductor en Supabase Storage -------------------------
+#
+# Guardarlos como base64 dentro de `app_state` hacía que cada envío de perfil
+# reescribiera la fila entera: 9,8 MB que tardaban 18,7 s en subir, por encima
+# del límite de 10 s de una función serverless. El envío fallaba sin decir por
+# qué. Con los archivos fuera, el perfil guarda rutas de unos pocos bytes.
+#
+# El bucket es **privado**: son DNI, licencias y antecedentes. El acceso se da
+# con URLs firmadas de vida corta, emitidas solo a quien ya tiene sesión.
+
+DOCUMENTS_BUCKET = "documentos"
+DOCUMENT_URL_TTL_SECONDS = 300
+
+_documents_bucket_ready = False
+
+
+def _storage_base_url() -> str:
+    return SUPABASE_URL.replace("/rest/v1", "") + "/storage/v1"
+
+
+async def ensure_documents_bucket() -> None:
+    """Crea el bucket privado la primera vez. Idempotente."""
+    global _documents_bucket_ready
+    if _documents_bucket_ready:
+        return
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        existe = await client.get(f"{_storage_base_url()}/bucket/{DOCUMENTS_BUCKET}", headers=hdrs)
+        if existe.status_code == 200:
+            _documents_bucket_ready = True
+            return
+        creado = await client.post(
+            f"{_storage_base_url()}/bucket",
+            headers=hdrs,
+            json={"name": DOCUMENTS_BUCKET, "id": DOCUMENTS_BUCKET, "public": False},
+        )
+        # 409 significa que ya existía: otra instancia se adelantó.
+        if creado.status_code in (200, 201, 409):
+            _documents_bucket_ready = True
+            return
+        _raise_database_unavailable(
+            "storage_bucket", detail=DATABASE_WRITE_UNAVAILABLE_DETAIL
+        )
+
+
+async def upload_document_to_storage(base64_str: str, path: str, content_type: str) -> str:
+    """Sube un documento y devuelve su ruta dentro del bucket."""
+    _ensure_storage_ready("document_upload", write=True, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    await ensure_documents_bucket()
+
+    if "," in base64_str:
+        _, base64_str = base64_str.split(",", 1)
+    contenido = base64.b64decode(base64_str)
+
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key, content_type=content_type or "application/octet-stream")
+    # `upsert` permite reemplazar un documento sin tener que borrarlo antes.
+    hdrs["x-upsert"] = "true"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(
+            f"{_storage_base_url()}/object/{DOCUMENTS_BUCKET}/{path}", headers=hdrs, content=contenido
+        )
+    if res.status_code not in (200, 201):
+        print(f"[Supabase] document upload failed status={res.status_code}")
+        _raise_database_unavailable("document_upload", detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    return path
+
+
+async def signed_document_url(path: str, ttl: int = DOCUMENT_URL_TTL_SECONDS) -> Optional[str]:
+    """URL temporal para ver un documento. `None` si la ruta ya no existe."""
+    _ensure_storage_ready("document_sign", write=False)
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.post(
+            f"{_storage_base_url()}/object/sign/{DOCUMENTS_BUCKET}/{path}",
+            headers=hdrs,
+            json={"expiresIn": ttl},
+        )
+    if res.status_code != 200:
+        return None
+    firmada = res.json().get("signedURL") or res.json().get("signedUrl")
+    return f"{_storage_base_url()}{firmada}".replace("/storage/v1/storage/v1", "/storage/v1") if firmada else None
+
+
 async def persist():
     payload = {
         "id": 1,
@@ -3063,6 +3148,53 @@ class DriverProfilePayload(BaseModel):
     email: str
     perfilData: dict
 
+def _capacidad_declarada(valor: Any) -> Optional[int]:
+    """Capacidad como entero, o `None` si el conductor no declaró una usable."""
+    try:
+        capacidad = int(float(str(valor).strip()))
+    except (TypeError, ValueError):
+        return None
+    return capacidad if capacidad > 0 else None
+
+
+def _sembrar_unidad(unidad_id: str, usuario: Dict[str, Any]) -> None:
+    """Crea o completa la unidad de flota con lo que el conductor ya declaró.
+
+    Antes esta siembra escribía una forma distinta de la que lee la flota
+    —`nombre` en vez de `chofer`— y rellenaba el resto con constantes: 15
+    plazas, tipo «Sprinter» y cuatro vencimientos en 2027. El resultado era una
+    unidad sin nombre de chofer, con una capacidad que nadie había declarado y
+    con documentos marcados como vigentes sin que nadie los hubiera revisado.
+
+    Ahora se toma del perfil lo que el conductor sí rellenó y se deja fuera lo
+    que nadie preguntó: el tipo de unidad y los vencimientos no están en el
+    alta, así que quedan vacíos y la flota los muestra como pendientes, que es
+    lo que son. Los campos que ya tengan valor no se tocan: la unidad puede
+    existir porque Administración la creó antes a mano.
+    """
+    if not unidad_id:
+        return
+
+    perfil = usuario.get("perfil_conductor")
+    perfil = perfil if isinstance(perfil, dict) else {}
+
+    declarado: Dict[str, Any] = {}
+    nombre = str(perfil.get("nombres") or usuario.get("nombre") or "").strip()
+    if nombre:
+        declarado["chofer"] = nombre
+    telefono = str(perfil.get("telefonoDirecto") or usuario.get("telefono") or "").strip()
+    if telefono:
+        declarado["telefono"] = telefono
+    capacidad = _capacidad_declarada(perfil.get("vehiculoCapacidad"))
+    if capacidad is not None:
+        declarado["capacidad"] = capacidad
+
+    unidad = conductores_db.setdefault(unidad_id, {})
+    for campo, valor in declarado.items():
+        if not str(unidad.get(campo) or "").strip():
+            unidad[campo] = valor
+
+
 class BulkActionPayload(BaseModel):
     admin_email: str
     target_emails: List[str]
@@ -3161,11 +3293,7 @@ async def register_user(usuario: UsuarioRegistro):
     usuarios_db[identifier_clean] = nuevo_usuario
     
     if rol_solicitado == "Conductor" and usuario.unidad_id:
-        if usuario.unidad_id not in conductores_db:
-            conductores_db[usuario.unidad_id] = {
-                "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre,
-                "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
-            }
+        _sembrar_unidad(usuario.unidad_id.strip(), nuevo_usuario)
             
     # Add notification for new registration
     if rol_solicitado == "Conductor":
@@ -3429,6 +3557,7 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
             if payload.action == "approve":
                 usuarios_db[target]["estado"] = "Activo"
                 refresh_session_index_for(usuarios_db[target])
+                _sembrar_unidad(str(usuarios_db[target].get("unidad_id") or "").strip(), usuarios_db[target])
             elif payload.action in ["reject", "deactivate"]:
                 usuarios_db[target]["estado"] = "Rechazado"
                 refresh_session_index_for(usuarios_db[target])
@@ -3460,16 +3589,7 @@ async def approve_user(
     # Si es conductor y el admin proporcionó un Padrón (unidad_id)
     if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
         usuarios_db[target_email]["unidad_id"] = unidad_id.strip()
-        # Initialize in conductores_db if not exists
-        if unidad_id.strip() not in conductores_db:
-            conductores_db[unidad_id.strip()] = {
-                "id": unidad_id.strip(),
-                "nombre": usuarios_db[target_email].get("nombre"),
-                "status": "Activo",
-                "ubicacion": "Base",
-                "capacidad": 15,
-                "turno": "08:00 AM"
-            }
+        _sembrar_unidad(unidad_id.strip(), usuarios_db[target_email])
 
     await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
@@ -3680,6 +3800,10 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
     elif len(revisiones) > 0 and all(v["estado"] == "aprobado" for v in revisiones.values()):
         conductor["estado"] = "Activo"
         refresh_session_index_for(conductor)
+        # Aprobar el último documento es lo que da de alta al conductor, así
+        # que es aquí donde su unidad tiene que recoger lo que él declaró. Sin
+        # esto quedaba en la flota sin nombre de chofer ni capacidad.
+        _sembrar_unidad(str(conductor.get("unidad_id") or "").strip(), conductor)
 
     await persist_users_only()
     return {
@@ -3735,10 +3859,132 @@ async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCook
 
     return {"message": "Aviso enviado al conductor exitosamente.", "notif_id": notif_id}
 
+class DocumentoSubida(BaseModel):
+    unidad_id: str
+    campo: str
+    nombre: str
+    tipo: str
+    base64: str
+
+
+def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
+    """Ruta dentro del bucket, agrupada por carpeta del propietario.
+
+    El nombre original se descarta salvo su extensión: viene del dispositivo
+    del usuario y puede traer acentos, espacios o rutas. El campo ya identifica
+    de qué documento se trata.
+    """
+    carpeta = re.sub(r"[^A-Za-z0-9_-]", "", unidad_id or "") or "sin-unidad"
+    campo_limpio = re.sub(r"[^A-Za-z0-9_-]", "", campo or "documento") or "documento"
+    extension = ""
+    if "." in (nombre or ""):
+        cruda = nombre.rsplit(".", 1)[-1].lower()
+        if 1 <= len(cruda) <= 5 and cruda.isalnum():
+            extension = f".{cruda}"
+    return f"{carpeta}/{campo_limpio}{extension}"
+
+
+def _carpeta_personal(identidad: Any) -> str:
+    """Carpeta propia de quien todavía no tiene unidad.
+
+    Se deriva de un hash y no del DNI en claro: la ruta viaja al navegador y
+    aparece en los registros, así que no debe llevar el documento de nadie.
+    """
+    digest = hashlib.sha256(_owner_key(identidad).encode("utf-8")).hexdigest()
+    return f"usuario-{digest[:16]}"
+
+
+def _carpetas_del_actor(actor: Dict[str, Any]) -> List[str]:
+    """Todas las carpetas que pertenecen a este usuario, de la preferida abajo.
+
+    Son varias porque un conductor sube sus documentos antes de tener unidad y
+    la recibe después: si solo se aceptara la carpeta actual, al asignarle la
+    unidad dejaría de ver lo que él mismo subió.
+    """
+    carpetas = []
+    unidad = re.sub(r"[^A-Za-z0-9_-]", "", str(actor.get("unidad_id") or ""))
+    if unidad:
+        carpetas.append(unidad)
+    valores = [actor.get(campo) for campo in _IDENTITY_FIELDS]
+    perfil = actor.get("perfil_conductor")
+    if isinstance(perfil, dict):
+        valores.append(perfil.get("numDoc"))
+    for valor in valores:
+        if _owner_key(valor):
+            personal = _carpeta_personal(valor)
+            if personal not in carpetas:
+                carpetas.append(personal)
+    return carpetas
+
+
+def _carpeta_destino(actor: Optional[Dict[str, Any]], unidad_id: str) -> str:
+    """Carpeta en la que se guarda lo que sube este usuario.
+
+    Administración escribe en la unidad que indique —sube documentos en nombre
+    del conductor—, pero el resto no elige: el destino sale de su sesión. Un
+    conductor sin unidad mandaba `unidad_id` vacío, que caía en la carpeta
+    compartida `sin-unidad`, de modo que el DNI del siguiente conductor
+    sobrescribía el del anterior y ninguno de los dos podía volver a verlo.
+    """
+    if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
+        return unidad_id or "sin-unidad"
+    if actor.get("rol") in _ADMIN_ROLES:
+        if not (unidad_id or "").strip():
+            raise HTTPException(status_code=400, detail="Falta la unidad de destino.")
+        return unidad_id
+    carpetas = _carpetas_del_actor(actor)
+    if not carpetas:
+        raise HTTPException(status_code=403, detail="Tu cuenta no tiene una unidad asociada.")
+    return carpetas[0]
+
+
+def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
+    """Administración ve cualquier carpeta; un conductor, solo las suyas."""
+    if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
+        return True
+    if actor.get("rol") in _ADMIN_ROLES:
+        return True
+    pedida = _owner_key(unidad_id)
+    return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
+
+
+@app.post("/api/documentos/subir")
+async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie = None):
+    """Guarda un documento en Storage y devuelve su ruta.
+
+    El perfil pasa a almacenar esa ruta en vez del base64 completo, que es lo
+    que hacía que cada envío reescribiera una fila de casi diez megas.
+    """
+    actor = await require_any_session(session_token)
+    ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+    await upload_document_to_storage(datos.base64, ruta, datos.tipo)
+    return {"path": ruta, "name": datos.nombre, "type": datos.tipo}
+
+
+@app.get("/api/documentos/url")
+async def url_de_documento(path: str, session_token: SessionCookie = None):
+    """URL temporal para ver un documento guardado en Storage.
+
+    Se emite solo a quien tiene sesión y sobre la unidad que le corresponde:
+    sin esto, conocer o adivinar una ruta bastaría para ver el DNI de otro.
+    """
+    actor = await require_any_session(session_token)
+    unidad = (path or "").split("/", 1)[0]
+    if not _puede_ver_unidad(actor, unidad):
+        raise HTTPException(status_code=403, detail="No puedes ver documentos de otra unidad.")
+
+    url = await signed_document_url(path)
+    if not url:
+        raise HTTPException(status_code=404, detail="El documento ya no está disponible.")
+    return {"url": url}
+
+
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):
-    await reload_db()
-    user = get_user_by_identifier(payload.email)
+    # Cargar solo los usuarios, no el estado completo: el envío del perfil no
+    # necesita rutas ni pasajeros, y descargarlos añadía un viaje entero contra
+    # Supabase a una operación que ya rozaba el límite de tiempo de la función.
+    user = await _load_compat_user(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     

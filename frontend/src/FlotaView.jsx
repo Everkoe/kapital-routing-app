@@ -9,6 +9,8 @@ import { apiFetch, apiRequest } from './utils/apiClient';
 
 import DocumentReviewCard from './components/DocumentReviewCard';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
+import { subirDocumento } from './utils/documentoStorage';
+import { documentoABase64 } from './utils/imageUtils';
 import DocumentViewer from './components/DocumentViewer';
 import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
 import './App.css';
@@ -287,11 +289,12 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      const fileObj = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve({ name: file.name, size: file.size, type: file.type, base64: e.target.result });
-        reader.onerror = () => reject(new Error('Error al leer el archivo'));
-        reader.readAsDataURL(file);
+      // El archivo va a Storage y el perfil solo guarda su ruta. Guardarlo
+      // dentro llevaba la fila a casi diez megas y la escritura por encima del
+      // límite de tiempo de la función.
+      const fileObj = await subirDocumento(file, {
+        unidadId: conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || '',
+        campo,
       });
 
       const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
@@ -524,12 +527,9 @@ const FlotaView = ({ usuario, initialBase }) => {
       e.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setFormData(prev => ({ ...prev, [field]: event.target.result }));
-    };
-    reader.onerror = () => toast.error('No se pudo leer el documento. Intenta nuevamente.');
-    reader.readAsDataURL(file);
+    documentoABase64(file)
+      .then(({ base64 }) => setFormData(prev => ({ ...prev, [field]: base64 })))
+      .catch(() => toast.error('No se pudo leer el documento. Intenta nuevamente.'));
   };
 
   // Delega la generación al backend, que rellena la plantilla oficial
@@ -867,7 +867,16 @@ const FlotaView = ({ usuario, initialBase }) => {
                     )}
                   </span>
                 </td>
-                {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
+                {/* Ni el tipo ni la capacidad se preguntan siempre en el alta.
+                    Sin respaldo la celda quedaba como « (15 pax)», con el tipo
+                    en blanco, que parecía un fallo de carga en vez de un dato
+                    que nadie ha rellenado todavía. */}
+                {!isCliente && (
+                  <td>
+                    {vehiculo.tipo || 'Sin tipo'}
+                    {' '}({vehiculo.capacidad ? `${vehiculo.capacidad} pax` : 'sin capacidad'})
+                  </td>
+                )}
                 <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
                 <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
                 <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>

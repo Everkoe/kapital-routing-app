@@ -4,6 +4,7 @@ import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide
 import FileUploadZone from './FileUploadZone';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
+import { subirDocumento } from '../utils/documentoStorage';
 
 const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
   return (
@@ -187,19 +188,23 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
       setFormData(prev => ({ ...prev, [name]: file }));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result;
-      const fileObj = { name: file.name, size: file.size, type: file.type, base64, isRestored: false };
-      setFormData(prev => ({ ...prev, [name]: fileObj }));
-      // Persist to localStorage
-      try {
-        const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
-        existing[name] = fileObj;
-        localStorage.setItem(filesKey, JSON.stringify(existing));
-      } catch (e) { console.error('Error saving file to storage', e); }
-    };
-    reader.readAsDataURL(file);
+    // El archivo viaja a Storage y aquí solo queda su ruta: guardar diecisiete
+    // documentos en base64 dentro del perfil es lo que hacía que «Enviar para
+    // Revisión» superara el límite de tiempo y fallara sin explicar por qué.
+    subirDocumento(file, { unidadId: usuario?.unidad_id || '', campo: name })
+      .then(documento => {
+        const fileObj = { ...documento, isRestored: false };
+        setFormData(prev => ({ ...prev, [name]: fileObj }));
+        try {
+          const existing = JSON.parse(localStorage.getItem(filesKey) || '{}');
+          existing[name] = fileObj;
+          localStorage.setItem(filesKey, JSON.stringify(existing));
+        } catch (err) { console.error('Error saving file to storage', err); }
+      })
+      .catch(err => {
+        console.error('Error al subir el documento', err);
+        toast.error(err?.message || 'No se pudo subir el documento. Intenta de nuevo.');
+      });
   };
 
   // Calculate age automatically

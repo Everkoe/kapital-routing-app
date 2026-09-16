@@ -133,6 +133,9 @@ const DocumentReviewCard = ({
               caras: caras.map((cara) => ({
                 nombre: dosCaras ? cara.nombre : null,
                 src: fuenteDeArchivo(cara.archivo),
+                // Los documentos nuevos viven en Storage: el visor pide su URL
+                // firmada al abrirlos, porque caduca en minutos.
+                path: cara.archivo?.path || null,
                 raw: cara.archivo,
               })),
             })}

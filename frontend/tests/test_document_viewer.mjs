@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { carasDe, esPdf, tieneContenido } from '../src/utils/documentoArchivo.js';
+import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../src/utils/documentoArchivo.js';
 
 test('reconoce un PDF tanto por extensión como por data URL', () => {
   assert.equal(esPdf('data:application/pdf;base64,AAAA'), true);
@@ -42,4 +42,27 @@ test('un documento de dos caras conserva las suyas y su orden', () => {
 
 test('sin documento no hay caras que resolver', () => {
   assert.deepEqual(carasDe(null).map((c) => c.src), [undefined]);
+});
+
+test('una cara guardada en Storage cuenta como documento, aunque no traiga contenido', () => {
+  // Su contenido no existe hasta que llega la URL firmada. Mirar solo `src`
+  // marcaba como «sin archivo» todo lo que estaba subido al bucket.
+  assert.equal(caraTieneDocumento({ src: '', path: 'K-027/dniScaneado.jpg' }), true);
+  assert.equal(caraTieneDocumento({ src: 'data:image/png;base64,AA' }), true);
+});
+
+test('una cara sin contenido ni ruta no tiene documento', () => {
+  assert.equal(caraTieneDocumento({ src: '' }), false);
+  assert.equal(caraTieneDocumento({}), false);
+  assert.equal(caraTieneDocumento(null), false);
+  // Una ruta relativa suelta no es contenido mostrable ni una ruta de bucket.
+  assert.equal(caraTieneDocumento({ src: '/uploads/a.png' }), false);
+});
+
+test('un documento de una sola cara conserva su ruta de Storage', () => {
+  // El visor pide la firma con `cara.path`. Si la cara implícita lo perdiera,
+  // un documento de una sola cara —los del conductor— nunca se mostraría.
+  const [cara] = carasDe({ name: 'Licencia', src: '', path: 'K-027/licencia.jpg' });
+  assert.equal(cara.path, 'K-027/licencia.jpg');
+  assert.equal(caraTieneDocumento(cara), true);
 });
