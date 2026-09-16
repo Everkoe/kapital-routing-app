@@ -127,6 +127,20 @@ test('serializa json y fija Content-Type sin pisar otras cabeceras', async () =>
   });
 });
 
+test('preserva FormData y deja que el navegador construya su boundary', async () => {
+  await withFetch(() => jsonResponse({ ok: true }), async (calls) => {
+    const formData = new FormData();
+    formData.append('file', new Blob(['routes']), 'routes.xlsx');
+    formData.append('fecha', '2026-09-15');
+
+    await apiFetch('/api/assign-routes/', { method: 'POST', body: formData });
+
+    const [{ init }] = calls;
+    assert.equal(init.body, formData);
+    assert.equal(init.headers['Content-Type'], undefined);
+  });
+});
+
 test('apiRequest devuelve la Response sin consumir, para descargas', async () => {
   await withFetch(() => new Response('binario', { status: 200 }), async () => {
     const response = await apiRequest('/api/flota/export?base=MASIVO');
