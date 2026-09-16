@@ -1359,3 +1359,14 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 /* Mientras se arrastra, el aviso de soltar manda sobre el de pegar. */
 .doc-dropzone-activa[data-pegable]::after { content: none; }
+
+/* Un documento en Storage está cargando hasta que llega su URL firmada. */
+.doc-viewer-cargando {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.doc-viewer-cargando p { margin: 0; font-size: 0.9rem; }

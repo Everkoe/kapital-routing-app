@@ -24,7 +24,7 @@ export const tieneContenido = (src = '') =>
 export const carasDe = (documento) =>
   documento?.caras?.length
     ? documento.caras
-    : [{ nombre: null, src: documento?.src, raw: documento?.raw }];
+    : [{ nombre: null, src: documento?.src, path: documento?.path, raw: documento?.raw }];
 
 /**
  * Archivo de imagen contenido en un pegado, si lo hay.
@@ -59,3 +59,13 @@ export const archivoDePortapapeles = (clipboardData) => {
  */
 export const pegadoEnCampoDeTexto = (target) =>
   Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+
+/**
+ * Una cara tiene documento si trae contenido mostrable o una ruta en Storage.
+ *
+ * Mirar solo `src` marcaba como «sin archivo» todo lo guardado en el bucket,
+ * porque su contenido no existe hasta que se pide la URL firmada. Las pestañas
+ * del visor salían deshabilitadas para documentos que sí estaban subidos.
+ */
+export const caraTieneDocumento = (cara) =>
+  tieneContenido(cara?.src) || Boolean(cara?.path);

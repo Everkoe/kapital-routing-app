@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText, X } from 'lucide-react';
-import { carasDe, esPdf, tieneContenido } from '../utils/documentoArchivo';
+import { Download, FileText, Loader, X } from 'lucide-react';
+import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../utils/documentoArchivo';
 import { urlFirmada } from '../utils/documentoStorage';
 
 /**
@@ -44,6 +44,10 @@ const DocumentViewer = ({ documento, onClose }) => {
   const src = firmadas[cara?.path] || cara?.src || '';
   const pdf = esPdf(src);
   const disponible = tieneContenido(src);
+  // Un documento en Storage no tiene contenido hasta que llega su firma.
+  // Mientras tanto está cargando, no roto: decir «no disponible» durante ese
+  // instante hacía parpadear un error en cada apertura.
+  const esperandoFirma = Boolean(cara?.path) && !firmadas[cara.path];
   const titulo = cara?.nombre ? `${documento.name} · ${cara.nombre}` : documento.name;
 
   const descargar = () => {
@@ -83,17 +87,22 @@ const DocumentViewer = ({ documento, onClose }) => {
                 aria-selected={i === indice}
                 className={`doc-viewer-cara${i === indice ? ' activa' : ''}`}
                 onClick={() => setIndice(i)}
-                disabled={!tieneContenido(opcion.src || '')}
+                disabled={!caraTieneDocumento(opcion)}
               >
                 {opcion.nombre}
-                {!tieneContenido(opcion.src || '') && <span className="doc-cara-opcional">sin archivo</span>}
+                {!caraTieneDocumento(opcion) && <span className="doc-cara-opcional">sin archivo</span>}
               </button>
             ))}
           </div>
         )}
 
         <div className="doc-viewer-body doc-viewer-centrado">
-          {!disponible ? (
+          {esperandoFirma ? (
+            <div className="doc-viewer-cargando">
+              <Loader size={28} className="animate-spin" aria-hidden="true" />
+              <p>Cargando documento…</p>
+            </div>
+          ) : !disponible ? (
             <div className="doc-viewer-error">
               <h4>Documento no disponible</h4>
               <p>El archivo no se cargó correctamente. Pide al conductor que lo vuelva a subir.</p>

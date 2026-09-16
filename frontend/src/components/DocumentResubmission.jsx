@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck, FileText, X, Clock, Download } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, ArrowRight, Loader, Hourglass, ShieldCheck, FileText, Clock } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
 import { subirDocumento } from '../utils/documentoStorage';
+import DocumentViewer from './DocumentViewer';
 
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
@@ -190,51 +191,13 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
 
   return (
     <>
-      {viewingDoc && (() => {
-        const src = viewingDoc.src || '';
-        const hasData = src.startsWith('data:') || src.startsWith('http');
-        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
-        const downloadDoc = () => {
-          if (!hasData) return;
-          const a = document.createElement('a');
-          a.href = src;
-          a.download = viewingDoc.name;
-          a.click();
-        };
-        return (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto', background: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{viewingDoc.name}</h3>
-                <button onClick={() => setViewingDoc(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={24} /></button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px 30px' }}>
-                {hasData ? (
-                  isPdf ? (
-                    <div style={{ padding: '20px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-                        <FileText size={72} color="#38BDF8" />
-                      </div>
-                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
-                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
-                        <Download size={20} /> Descargar para visualizar
-                      </button>
-                    </div>
-                  ) : (
-                    <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt="Documento" />
-                  )
-                ) : (
-                  <div style={{ padding: '40px 20px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</div>
-                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>{viewingDoc.name}</h3>
-                    <p style={{ color: 'var(--text-muted, #aaa)' }}>No hay archivo disponible para previsualizar.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* Visor compartido: la copia en línea que había aquí solo sabía leer
+          `src`, así que no mostraba los documentos guardados en Storage. */}
+      <DocumentViewer
+        key={viewingDoc?.name}
+        documento={viewingDoc}
+        onClose={() => setViewingDoc(null)}
+      />
 
       <div>
         
@@ -312,7 +275,10 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
                       } else if (fileData && typeof fileData === 'object') {
                         docSrc = fileData.base64 || fileData.url || fileData.file || '';
                       }
-                      setViewingDoc({ name: DOC_LABELS[docKey], src: docSrc, raw: fileData });
+                      setViewingDoc({
+                        name: DOC_LABELS[docKey],
+                        caras: [{ nombre: null, src: docSrc, path: fileData?.path || null, raw: fileData }],
+                      });
                     }}
                     style={{ background: 'transparent', border: 'none', color: '#f59e0b', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', padding: 0 }}
                   >

@@ -2128,6 +2128,49 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # Con la exigencia desactivada no hay actor: se conserva el rollback.
         self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
 
+    def test_two_drivers_without_a_unit_do_not_share_a_folder(self):
+        """El destino sale de la sesión, no de lo que mande el navegador.
+
+        Un conductor en alta todavía no tiene unidad y enviaba `unidad_id`
+        vacío, que caía en la carpeta común `sin-unidad`: el DNI del segundo
+        conductor sobrescribía el del primero.
+        """
+        uno = {"rol": "Conductor", "unidad_id": "", "dni": "13245678"}
+        otro = {"rol": "Conductor", "unidad_id": "", "dni": "87654321"}
+
+        carpeta_uno = backend._carpeta_destino(uno, "")
+        carpeta_otro = backend._carpeta_destino(otro, "")
+
+        self.assertNotEqual(carpeta_uno, carpeta_otro)
+        self.assertNotIn("sin-unidad", (carpeta_uno, carpeta_otro))
+        # La ruta viaja al navegador: no debe llevar el documento en claro.
+        self.assertNotIn("13245678", carpeta_uno)
+        # Y cada uno ve lo suyo y solo lo suyo.
+        self.assertTrue(backend._puede_ver_unidad(uno, carpeta_uno))
+        self.assertFalse(backend._puede_ver_unidad(otro, carpeta_uno))
+
+    def test_a_driver_keeps_their_documents_after_getting_a_unit(self):
+        """Sube en el alta, recibe la unidad después: debe seguir viéndolos."""
+        alta = {"rol": "Conductor", "unidad_id": "", "dni": "13245678"}
+        carpeta_alta = backend._carpeta_destino(alta, "")
+
+        asignado = {"rol": "Conductor", "unidad_id": "K-500", "dni": "13245678"}
+        self.assertEqual(backend._carpeta_destino(asignado, ""), "K-500")
+        self.assertTrue(backend._puede_ver_unidad(asignado, carpeta_alta))
+
+    def test_a_driver_cannot_choose_where_their_document_lands(self):
+        """Mandar la unidad de otro no debe escribir en la carpeta de otro."""
+        conductor = {"rol": "Conductor", "unidad_id": "K-027", "dni": "13245678"}
+        self.assertEqual(backend._carpeta_destino(conductor, "K-142"), "K-027")
+
+    def test_administration_uploads_on_behalf_of_a_unit(self):
+        admin = {"rol": "Administración"}
+        self.assertEqual(backend._carpeta_destino(admin, "K-142"), "K-142")
+        # Sin unidad no hay dónde guardarlo: mejor fallar que inventar carpeta.
+        with self.assertRaises(HTTPException) as error:
+            backend._carpeta_destino(admin, "")
+        self.assertEqual(error.exception.status_code, 400)
+
 
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""

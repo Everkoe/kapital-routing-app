@@ -3829,29 +3829,84 @@ class DocumentoSubida(BaseModel):
 
 
 def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
-    """Ruta dentro del bucket, agrupada por unidad.
+    """Ruta dentro del bucket, agrupada por carpeta del propietario.
 
     El nombre original se descarta salvo su extensión: viene del dispositivo
     del usuario y puede traer acentos, espacios o rutas. El campo ya identifica
     de qué documento se trata.
     """
-    unidad = re.sub(r"[^A-Za-z0-9_-]", "", unidad_id or "sin-unidad") or "sin-unidad"
+    carpeta = re.sub(r"[^A-Za-z0-9_-]", "", unidad_id or "") or "sin-unidad"
     campo_limpio = re.sub(r"[^A-Za-z0-9_-]", "", campo or "documento") or "documento"
     extension = ""
     if "." in (nombre or ""):
         cruda = nombre.rsplit(".", 1)[-1].lower()
         if 1 <= len(cruda) <= 5 and cruda.isalnum():
             extension = f".{cruda}"
-    return f"{unidad}/{campo_limpio}{extension}"
+    return f"{carpeta}/{campo_limpio}{extension}"
+
+
+def _carpeta_personal(identidad: Any) -> str:
+    """Carpeta propia de quien todavía no tiene unidad.
+
+    Se deriva de un hash y no del DNI en claro: la ruta viaja al navegador y
+    aparece en los registros, así que no debe llevar el documento de nadie.
+    """
+    digest = hashlib.sha256(_owner_key(identidad).encode("utf-8")).hexdigest()
+    return f"usuario-{digest[:16]}"
+
+
+def _carpetas_del_actor(actor: Dict[str, Any]) -> List[str]:
+    """Todas las carpetas que pertenecen a este usuario, de la preferida abajo.
+
+    Son varias porque un conductor sube sus documentos antes de tener unidad y
+    la recibe después: si solo se aceptara la carpeta actual, al asignarle la
+    unidad dejaría de ver lo que él mismo subió.
+    """
+    carpetas = []
+    unidad = re.sub(r"[^A-Za-z0-9_-]", "", str(actor.get("unidad_id") or ""))
+    if unidad:
+        carpetas.append(unidad)
+    valores = [actor.get(campo) for campo in _IDENTITY_FIELDS]
+    perfil = actor.get("perfil_conductor")
+    if isinstance(perfil, dict):
+        valores.append(perfil.get("numDoc"))
+    for valor in valores:
+        if _owner_key(valor):
+            personal = _carpeta_personal(valor)
+            if personal not in carpetas:
+                carpetas.append(personal)
+    return carpetas
+
+
+def _carpeta_destino(actor: Optional[Dict[str, Any]], unidad_id: str) -> str:
+    """Carpeta en la que se guarda lo que sube este usuario.
+
+    Administración escribe en la unidad que indique —sube documentos en nombre
+    del conductor—, pero el resto no elige: el destino sale de su sesión. Un
+    conductor sin unidad mandaba `unidad_id` vacío, que caía en la carpeta
+    compartida `sin-unidad`, de modo que el DNI del siguiente conductor
+    sobrescribía el del anterior y ninguno de los dos podía volver a verlo.
+    """
+    if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
+        return unidad_id or "sin-unidad"
+    if actor.get("rol") in _ADMIN_ROLES:
+        if not (unidad_id or "").strip():
+            raise HTTPException(status_code=400, detail="Falta la unidad de destino.")
+        return unidad_id
+    carpetas = _carpetas_del_actor(actor)
+    if not carpetas:
+        raise HTTPException(status_code=403, detail="Tu cuenta no tiene una unidad asociada.")
+    return carpetas[0]
 
 
 def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
-    """Administración ve cualquier unidad; un conductor, solo la suya."""
+    """Administración ve cualquier carpeta; un conductor, solo las suyas."""
     if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
         return True
     if actor.get("rol") in _ADMIN_ROLES:
         return True
-    return _owner_key(actor.get("unidad_id")) == _owner_key(unidad_id)
+    pedida = _owner_key(unidad_id)
+    return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
 
 @app.post("/api/documentos/subir")
@@ -3862,10 +3917,7 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
     que hacía que cada envío reescribiera una fila de casi diez megas.
     """
     actor = await require_any_session(session_token)
-    if not _puede_ver_unidad(actor, datos.unidad_id):
-        raise HTTPException(status_code=403, detail="No puedes subir documentos de otra unidad.")
-
-    ruta = _ruta_de_documento(datos.unidad_id, datos.campo, datos.nombre)
+    ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     return {"path": ruta, "name": datos.nombre, "type": datos.tipo}
 
