@@ -82,9 +82,12 @@ test('la etiqueta nombra la cara solo cuando el documento tiene dos', () => {
   const dni = DOCUMENTOS_CONDUCTOR.find((d) => d.key === 'dniScaneado');
   const cv = DOCUMENTOS_CONDUCTOR.find((d) => d.key === 'cv');
 
-  assert.equal(etiquetaCara(dni, 'anverso'), 'DNI Escaneado · Anverso');
-  assert.equal(etiquetaCara(dni, 'reverso'), 'DNI Escaneado · Reverso');
-  assert.equal(etiquetaCara(cv, 'anverso'), 'Currículum Vitae', 'un papel no tiene anverso que anunciar');
+  // La interfaz dice «delante» y «detrás»; la clave del campo conserva
+  // «Reverso» para no dejar huérfano lo ya subido.
+  assert.equal(etiquetaCara(dni, 'anverso'), 'DNI Escaneado · Delante');
+  assert.equal(etiquetaCara(dni, 'reverso'), 'DNI Escaneado · Detrás');
+  assert.equal(etiquetaCara(cv, 'anverso'), 'Currículum Vitae', 'un papel no tiene cara que anunciar');
+  assert.equal(claveReverso('dniScaneado'), 'dniScaneadoReverso', 'la clave no cambia con el texto');
 });
 
 test('las lunas polarizadas son opcionales', () => {

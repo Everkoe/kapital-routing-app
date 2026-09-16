@@ -1238,3 +1238,79 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   opacity: 0.7;
   text-transform: lowercase;
 }
+
+/* --- Selector de cara dentro del visor ----------------------------------- */
+
+.doc-viewer-caras {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.doc-viewer-cara {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.doc-viewer-cara:hover:not(:disabled) { border-color: var(--primary-color); }
+
+/* La cara activa se marca con fondo y borde, no solo con color de texto. */
+.doc-viewer-cara.activa {
+  background: var(--accent-bg, rgba(56, 189, 248, 0.1));
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.doc-viewer-cara:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.doc-viewer-centrado {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 30px;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.doc-viewer-pdf { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.doc-viewer-pdf svg { color: var(--primary-color); }
+.doc-viewer-pdf h3 { margin: 0; font-size: 1.4rem; color: var(--text-primary); }
+
+.doc-viewer-descargar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--primary-color);
+  color: var(--kapital-card-bg);
+}
+
+.doc-viewer-error {
+  padding: 30px;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  border: 1px solid var(--border-color);
+}
+
+.doc-viewer-error h4 { margin: 0 0 10px; color: var(--kapital-accent-red); }
+.doc-viewer-error p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { CheckCircle, Clock, Eye, Upload, XCircle } from 'lucide-react';
 import DocumentDropZone from './DocumentDropZone';
 import {
+  CARA_DELANTE,
+  CARA_DETRAS,
   admiteReverso,
   caraDestinoParaArrastre,
   claveReverso,
@@ -67,9 +69,9 @@ const DocumentReviewCard = ({
 
   const caras = (dosCaras
     ? [
-        { campo: documento.key, nombre: 'Anverso' },
-        // El reverso siempre es opcional: un PDF puede traer ambas páginas.
-        { campo: claveReverso(documento.key), nombre: 'Reverso', opcional: true },
+        { campo: documento.key, nombre: CARA_DELANTE },
+        // La cara de detrás siempre es opcional: un PDF puede traer ambas.
+        { campo: claveReverso(documento.key), nombre: CARA_DETRAS, opcional: true },
       ]
     : [{ campo: documento.key, nombre: documento.label }]
   ).map((cara) => ({ ...cara, archivo: perfil?.[cara.campo], tieneArchivo: Boolean(perfil?.[cara.campo]) }));
@@ -104,26 +106,30 @@ const DocumentReviewCard = ({
       {dosCaras && conArchivo.length > 0 && (
         <p className="doc-caras-resumen">
           {conArchivo.length === caras.length
-            ? 'Anverso y reverso subidos'
+            ? 'Delante y detrás subidos'
             : `Solo ${conArchivo[0].nombre.toLowerCase()} · falta ${caras.find((c) => !c.tieneArchivo).nombre.toLowerCase()}`}
         </p>
       )}
 
       <div className="review-doc-actions">
-        {conArchivo.map((cara) => (
+        {conArchivo.length > 0 && (
           <button
-            key={cara.campo}
             type="button"
             className="btn-view-doc"
             onClick={() => onView({
-              name: dosCaras ? `${documento.label} · ${cara.nombre}` : documento.label,
-              src: fuenteDeArchivo(cara.archivo),
-              raw: cara.archivo,
+              name: documento.label,
+              // El visor recibe todas las caras y resuelve dentro cuál mostrar,
+              // para no llenar la tarjeta de un botón «Ver» por cara.
+              caras: caras.map((cara) => ({
+                nombre: dosCaras ? cara.nombre : null,
+                src: fuenteDeArchivo(cara.archivo),
+                raw: cara.archivo,
+              })),
             })}
           >
-            <Eye size={13} /> {dosCaras ? `Ver ${cara.nombre.toLowerCase()}` : 'Ver'}
+            <Eye size={13} /> Ver
           </button>
-        ))}
+        )}
 
         {dosCaras ? (
           <button

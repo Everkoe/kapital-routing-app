@@ -26,8 +26,18 @@ export const TIPO_PAPEL = 'papel';
 export const DUENO_CONDUCTOR = 'conductor';
 export const DUENO_VEHICULO = 'vehiculo';
 
-/** Sufijo del campo hermano que guarda la segunda cara. */
+/**
+ * Sufijo del campo hermano que guarda la segunda cara.
+ *
+ * La clave conserva «Reverso» aunque la interfaz diga «detrás»: renombrarla
+ * dejaría huérfano todo lo ya subido. El nombre visible y el nombre del campo
+ * son cosas distintas y solo el primero necesita ser coloquial.
+ */
 export const SUFIJO_REVERSO = 'Reverso';
+
+/** Nombres visibles de cada cara. */
+export const CARA_DELANTE = 'Delante';
+export const CARA_DETRAS = 'Detrás';
 
 export const DOCUMENTOS_CONDUCTOR = [
   // --- Personales ---
@@ -75,7 +85,7 @@ export const todasLasClaves = () =>
  */
 export const etiquetaCara = (documento, cara) => {
   if (!admiteReverso(documento)) return documento.label;
-  return `${documento.label} · ${cara === 'reverso' ? 'Reverso' : 'Anverso'}`;
+  return `${documento.label} · ${cara === 'reverso' ? CARA_DETRAS : CARA_DELANTE}`;
 };
 
 /**
