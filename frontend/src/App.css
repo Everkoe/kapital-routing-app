@@ -1314,3 +1314,39 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .doc-viewer-error h4 { margin: 0 0 10px; color: var(--kapital-accent-red); }
 .doc-viewer-error p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }
+
+/* Aviso bajo un campo cuyo cambio arrastra más de lo que aparenta. */
+.form-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--kapital-text-secondary);
+}
+
+/**
+ * La tarjeta bajo el cursor es la que recibe un Ctrl+V.
+ *
+ * El realce es deliberadamente tenue: con trece tarjetas, algo llamativo al
+ * pasar el ratón sería ruido constante. Basta con que, al ir a pegar, se vea
+ * cuál va a recibirlo.
+ */
+.doc-dropzone[data-pegable] {
+  border-color: var(--kapital-text-secondary);
+}
+
+.doc-dropzone[data-pegable]::after {
+  content: 'Ctrl+V para pegar';
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  opacity: 0.55;
+  color: var(--kapital-text-secondary);
+}
+
+/* Mientras se arrastra, el aviso de soltar manda sobre el de pegar. */
+.doc-dropzone-activa[data-pegable]::after { content: none; }

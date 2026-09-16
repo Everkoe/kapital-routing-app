@@ -24,6 +24,19 @@ const announceAdminWebSocketState = (connected) => {
   window.dispatchEvent(new CustomEvent(ADMIN_WS_STATE_EVENT, { detail: { connected } }));
 };
 
+/**
+ * Tipos de unidad que la flota usa realmente.
+ *
+ * La lista anterior ofrecía «Sprinter», «Auto (Remisse)» y «Moto (Courier)»,
+ * que no aparecían en ninguna de las 109 unidades, mientras que AUTO, SUV y
+ * VAN —los tres mayoritarios— no estaban. La base operativa (Masivo, Remisse)
+ * es un campo aparte y no se duplica en el tipo.
+ */
+const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
+
+/** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
+const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
+
 const validateDocumentFile = (file) => {
   if (!file) return 'Selecciona un archivo.';
   if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
@@ -55,6 +68,10 @@ const _resolveInitialBase = (raw) => {
 
 const FlotaView = ({ usuario, initialBase }) => {
   const isCliente = usuario?.rol === 'Cliente';
+  // Renombrar migra la clave que relaciona unidad, conductor y sesión, así que
+  // se reserva a Administración. El backend lo exige igual; esto solo evita
+  // ofrecer un control que iba a devolver 403.
+  const puedeRenombrar = ROLES_QUE_RENOMBRAN.has(usuario?.rol);
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -474,8 +491,14 @@ const FlotaView = ({ usuario, initialBase }) => {
       return;
     }
     const editableData = {
+      placa: unitId,
       capacidad: vehiculo.capacidad ?? 10,
-      tipo: vehiculo.tipo || 'Van', chofer: vehiculo.chofer || '', telefono: vehiculo.telefono || '',
+      tipo: vehiculo.tipo || 'AUTO',
+      chofer: vehiculo.chofer || '',
+      // El perfil del conductor ya trae su número: solo 1 de 109 unidades
+      // guarda `telefono` propio, mientras 108 tienen `celular` del perfil.
+      // Partir de un campo vacío obligaba a teclear un dato que ya existe.
+      telefono: vehiculo.telefono || vehiculo.celular || '',
       soat: vehiculo.soat || '', revision: vehiculo.revision || '', atu: vehiculo.atu || '', licencia: vehiculo.licencia || '',
     };
     setFormData(editableData);
@@ -486,7 +509,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   };
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setEditingUnitId('');
     setInitialEditData(null);
@@ -544,16 +567,37 @@ const FlotaView = ({ usuario, initialBase }) => {
       chofer: formData.chofer, telefono: formData.telefono || '',
       soat: formData.soat || '', revision: formData.revision || '', atu: formData.atu || '', licencia: formData.licencia || '',
     };
-    if (isEditing && initialEditData && JSON.stringify(editPayload) === JSON.stringify(initialEditData)) {
+    // El padrón viaja por su propio endpoint, así que se compara aparte de los
+    // campos que edita el PUT.
+    const padronIntacto = !isEditing || (formData.placa || '').trim() === editingUnitId;
+    const camposIntactos = initialEditData
+      && Object.keys(editPayload).every(clave => editPayload[clave] === initialEditData[clave]);
+
+    if (isEditing && padronIntacto && camposIntactos) {
       setShowModal(false);
       toast('No hay cambios para guardar.');
       return;
     }
 
+    const nuevoPadron = (formData.placa || '').trim();
+    const renombra = isEditing && puedeRenombrar && nuevoPadron && nuevoPadron !== editingUnitId;
+
     setIsSaving(true);
     try {
+      // El renombrado va primero para que la edición de los demás campos
+      // apunte ya a la clave nueva; si falla, no se toca nada más.
+      let unidadDestino = editingUnitId;
+      if (renombra) {
+        await apiFetch(`/api/flota/${encodeURIComponent(editingUnitId)}/renombrar`, {
+          method: 'POST',
+          json: { nuevo_id: nuevoPadron },
+        });
+        unidadDestino = nuevoPadron;
+        setEditingUnitId(nuevoPadron);
+      }
+
       const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/flota/${encodeURIComponent(editingUnitId)}` : '/api/flota';
+      const url = isEditing ? `/api/flota/${encodeURIComponent(unidadDestino)}` : '/api/flota';
       await apiFetch(url, { method, json: isEditing ? editPayload : formData });
       setShowModal(false);
       await fetchFlota();
@@ -1134,7 +1178,18 @@ const FlotaView = ({ usuario, initialBase }) => {
               <div className="form-section-title">Datos del conductor / unidad</div>
               <div className="form-row">
                 <label>{isEditing ? 'Padrón / ID de unidad' : 'Placa/ID'}</label>
-                <input required disabled={isEditing} value={isEditing ? editingUnitId : formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
+                <input
+                  required
+                  disabled={isEditing && !puedeRenombrar}
+                  value={isEditing ? (formData.placa ?? editingUnitId) : formData.placa}
+                  onChange={e => setFormData({ ...formData, placa: e.target.value })}
+                  placeholder="Ej. KAP-008"
+                />
+                {isEditing && puedeRenombrar && (
+                  <small className="form-hint">
+                    Cambiarlo migra también al conductor asociado y su sesión abierta.
+                  </small>
+                )}
               </div>
               <div className="form-row">
                 <label>Nombre Chofer</label>
@@ -1146,11 +1201,18 @@ const FlotaView = ({ usuario, initialBase }) => {
               </div>
               <div className="form-row">
                 <label>Tipo</label>
+                {/* Los tipos salen de los que la flota usa de verdad. Los
+                    anteriores —Sprinter, Auto (Remisse), Moto (Courier)— no
+                    existían en ninguna unidad, así que editar una le cambiaba
+                    el tipo por un valor inventado. La base (Masivo/Remisse) es
+                    un campo propio y no se mezcla aquí. */}
                 <select value={formData.tipo} onChange={e => setFormData({...formData, tipo: e.target.value})}>
-                  <option>Sprinter</option>
-                  <option>Van</option>
-                  <option>Auto (Remisse)</option>
-                  <option>Moto (Courier)</option>
+                  {TIPOS_DE_UNIDAD.map(tipo => <option key={tipo}>{tipo}</option>)}
+                  {formData.tipo && !TIPOS_DE_UNIDAD.includes(formData.tipo) && (
+                    // Una unidad con un tipo fuera de la lista conserva el suyo
+                    // en vez de que abrir el formulario se lo cambie en silencio.
+                    <option>{formData.tipo}</option>
+                  )}
                 </select>
               </div>
               <div className="form-row">

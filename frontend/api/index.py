@@ -2585,6 +2585,17 @@ async def require_admin_session(session_token: Optional[str]) -> Optional[Dict[s
     return actor
 
 
+async def require_administration_session(session_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Exige un rol de Administración, más estrecho que `_ADMIN_ROLES`."""
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ADMINISTRATION_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Administración puede realizar esta acción.",
+        )
+    return actor
+
+
 async def require_session_owner(
     session_token: Optional[str],
     *,
@@ -3464,6 +3475,11 @@ async def approve_user(
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
 
 _ADMIN_ROLES = ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]
+
+# Renombrar un padrón migra la clave con la que se identifican unidad, usuario y
+# sesión. No es una edición más, así que se reserva a Administración: el Gerente
+# y el Programador entran en `_ADMIN_ROLES` y no deben poder hacerlo.
+_ADMINISTRATION_ROLES = ("Admin", "Administración", "Administrador")
 
 
 def _owner_key(value: Any) -> str:
@@ -4734,6 +4750,82 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
         conductores_db[placa] = previous
         raise
     return {"message": "Unidad actualizada", "unchanged": False, "unidad": {"unidad_id": placa, **stored}, "flota": conductores_db}
+
+class FlotaRenombrar(BaseModel):
+    nuevo_id: str
+
+
+@app.post("/api/flota/{placa}/renombrar")
+async def rename_flota(placa: str, datos: FlotaRenombrar, session_token: SessionCookie = None):
+    """Cambia el padrón de una unidad migrando todo lo que lo referencia.
+
+    El padrón no es un campo más: es la clave con la que se relacionan la
+    unidad, el usuario conductor y su sesión. Cambiarlo solo en la flota
+    dejaría al conductor apuntando a una unidad inexistente, y su sesión
+    conservaría el padrón viejo — perdería el acceso a sus propias rutas sin
+    que nada lo explicara.
+
+    Por eso la operación migra las tres referencias a la vez y refresca el
+    índice de sesiones, que es obligatorio al mutar datos de autorización.
+    """
+    # Autorizar antes de leer, por el mismo motivo que el resto de escrituras
+    # de flota: `reload_db(force=True)` descarga el estado completo.
+    await require_administration_session(session_token)
+    await reload_db(force=True)
+
+    global conductores_db, rutas_estado_actual
+
+    origen = placa.strip()
+    destino = (datos.nuevo_id or "").strip()
+
+    if not destino:
+        raise HTTPException(status_code=400, detail="El nuevo padrón no puede estar vacío.")
+    if origen not in conductores_db:
+        raise HTTPException(status_code=404, detail="Unidad no encontrada")
+    if destino == origen:
+        return {"message": "Sin cambios", "unchanged": True, "unidad_id": origen}
+    # Aceptar un destino existente fusionaría dos unidades y perdería una.
+    if destino in conductores_db:
+        raise HTTPException(status_code=409, detail=f"Ya existe una unidad con el padrón {destino}.")
+
+    previo_flota = dict(conductores_db)
+    previo_rutas = [dict(r) for r in rutas_estado_actual]
+    usuarios_migrados = []
+
+    conductores_db[destino] = conductores_db.pop(origen)
+
+    for user in usuarios_db.values():
+        if isinstance(user, dict) and user.get("unidad_id") == origen:
+            user["unidad_id"] = destino
+            usuarios_migrados.append(user)
+            # Sin esto la sesión abierta del conductor mantiene el padrón viejo
+            # y deja de autorizarle sobre su propia unidad.
+            refresh_session_index_for(user)
+
+    rutas_estado_actual = [
+        {**ruta, "conductor": destino} if ruta.get("conductor") == origen else ruta
+        for ruta in rutas_estado_actual
+    ]
+
+    try:
+        await _persist_and_verify_fleet(destino, conductores_db[destino])
+    except Exception:
+        conductores_db = previo_flota
+        rutas_estado_actual = previo_rutas
+        for user in usuarios_migrados:
+            user["unidad_id"] = origen
+            refresh_session_index_for(user)
+        raise
+
+    return {
+        "message": "Padrón actualizado",
+        "unchanged": False,
+        "anterior": origen,
+        "unidad_id": destino,
+        "usuarios_actualizados": len(usuarios_migrados),
+        "flota": conductores_db,
+    }
+
 
 @app.delete("/api/flota/{placa}")
 async def delete_flota(placa: str, session_token: SessionCookie = None):
