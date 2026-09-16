@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardList, Inbox, Info } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Inbox } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { apiFetch } from '../utils/apiClient';
@@ -15,6 +15,7 @@ import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
+import UpcomingPanel from './components/UpcomingPanel.jsx';
 import './programador.css';
 
 /**
@@ -169,12 +170,7 @@ const ProgramadorWorkbench = () => {
         canExport={!isLoading && visibleServices.length > 0}
       />
 
-      <p className="pw-notice">
-        <Info size={16} aria-hidden="true" />
-        Tablero de revisión sobre la programación vigente. La importación de los dos Excel,
-        el guardado versionado y el orden de recogida por agente llegan en las siguientes
-        entregas: todavía no existe el contrato de backend que los sostenga.
-      </p>
+      <UpcomingPanel />
 
       {error && (
         <p className="pw-notice" data-tone="danger" role="alert">

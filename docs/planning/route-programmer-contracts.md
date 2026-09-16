@@ -57,11 +57,21 @@ descarta su resultado más valioso.
 }
 ```
 
-### Decisión pendiente
+### Decisión tomada (2026-09-15)
 
-¿El Programador puede **reordenar paradas a mano**, o solo acepta/rechaza el orden que
-propone el motor? Cambia la interacción del servicio expandido y determina si hace falta
-recalcular ETAs en el cliente.
+**El Programador reordena paradas a mano.** El motor propone una secuencia y el humano puede
+modificarla, no solo aceptarla o rechazarla en bloque.
+
+Consecuencias que esto fija:
+
+- El servicio expandido necesita una interacción de reordenamiento, con alternativa accesible
+  por teclado — no solo arrastre.
+- `orden_version` y `origen_orden` del contrato de §1 dejan de ser opcionales: hay que
+  distinguir una parada movida por el motor de una movida por una persona.
+- `fijada` cobra sentido: una parada que el humano colocó no debería moverla un recálculo
+  posterior sin avisar (queda abierta la pregunta 21).
+- Si los ETAs se recalculan al reordenar, hace falta decidir si los recalcula el servidor
+  —llamada por cada cambio— o el cliente con una estimación provisional.
 
 ---
 
@@ -235,7 +245,7 @@ sesiones de planificación, o `app_state` reducido al puntero de la sesión vige
 
 Se suman a las 16 de `route-programmer-workbench.md` §13.
 
-17. ¿El Programador puede reordenar paradas a mano, o solo acepta/rechaza el orden del motor?
+17. ~~¿El Programador puede reordenar paradas a mano?~~ **Resuelta el 2026-09-15: sí, manual.** Ver §1.
 18. ¿"Aprobar un servicio" incluye aprobar el orden de recogida, o solo la lista de agentes?
 19. ¿Cuál es la capacidad real por unidad y de dónde se lee como fuente única de verdad?
 20. ¿Dónde vive la sesión de planificación: `app_state`, tabla nueva, o híbrido? (§5)
