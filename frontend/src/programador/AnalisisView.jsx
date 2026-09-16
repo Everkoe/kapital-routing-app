@@ -83,7 +83,7 @@ const AnalisisView = () => {
                     El tablero cuenta <strong>{quality.registros.toLocaleString('es-PE')}</strong> registros
                     de pasajero, pero corresponden a <strong>{quality.personas.toLocaleString('es-PE')}</strong>{' '}
                     personas distintas. La ocupación que ves está inflada, y con ella la sensación de
-                    que no queda sitio.
+                    que no queda sitio. <strong>El padrón real es el de personas.</strong>
                   </span>
                 </p>
               )}
@@ -109,9 +109,25 @@ const AnalisisView = () => {
                   tone={quality.personasEnAmbosEstados > 0 ? 'danger' : 'ok'}
                 />
                 <Metric
-                  value={quality.sinCoordenadas + quality.sinDireccion}
-                  label="Registros sin ubicación o dirección"
-                  tone={quality.sinCoordenadas + quality.sinDireccion > 0 ? 'warn' : 'ok'}
+                  value={quality.coordenadasDistintas}
+                  label="Ubicaciones distintas"
+                  note={`Para ${quality.registros.toLocaleString('es-PE')} registros`}
+                  tone={quality.coordenadasDistintas < quality.personas ? 'warn' : 'ok'}
+                />
+                <Metric
+                  value={quality.coordenadaDominante?.registros ?? 0}
+                  label="Registros en una misma ubicación"
+                  note={
+                    quality.coordenadaDominante
+                      ? `${pct(quality.coordenadaDominante.registros, quality.registros)}% en un solo punto`
+                      : null
+                  }
+                  tone={
+                    quality.coordenadaDominante &&
+                    pct(quality.coordenadaDominante.registros, quality.registros) > 20
+                      ? 'danger'
+                      : 'ok'
+                  }
                 />
               </div>
 
@@ -125,6 +141,19 @@ const AnalisisView = () => {
                   </span>
                 </p>
               )}
+
+              <p className="pw-footnote">
+                <Info size={14} aria-hidden="true" />
+                <span>
+                  <strong>Qué son estas repeticiones.</strong> No parecen errores del Excel de
+                  origen: los registros repetidos son idénticos campo a campo, la misma persona
+                  aparece en varias unidades a la vez y las rutas comparten un único horario. El
+                  patrón es el de un tablero sobre el que se acumularon varias generaciones sin
+                  limpiar, perdiendo por el camino la fecha y el turno. La concentración de
+                  ubicaciones apunta en la misma dirección: direcciones que nunca llegaron a
+                  geocodificarse.
+                </span>
+              </p>
             </div>
           </section>
 

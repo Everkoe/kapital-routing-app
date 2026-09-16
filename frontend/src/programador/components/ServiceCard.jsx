@@ -211,8 +211,9 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               <span>
                 La ocupación cuenta {service.agentCount} registros pero solo{' '}
                 {distinctDocuments(service.agentes)} documentos distintos: hay pasajeros
-                repetidos en los datos de origen, así que la capacidad mostrada está inflada.
-                La validación de la importación lo detectará como <code>DNI_DUPLICADO</code>.
+                repetidos, así que la capacidad mostrada está inflada. Los registros son idénticos
+                entre sí: apuntan a generaciones acumuladas sobre el mismo tablero, no a un fallo
+                de captura. Ver la sección Análisis.
               </span>
             </p>
           )}

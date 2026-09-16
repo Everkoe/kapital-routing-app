@@ -7,8 +7,16 @@
  * del día y su calidad.
  *
  * El hallazgo que justifica este módulo: la base trae 2.645 registros de
- * pasajero para 580 personas distintas. La flota parece saturada porque cuenta
- * duplicados como ocupantes.
+ * pasajero para 580 personas distintas, y la flota parece saturada porque
+ * cuenta esas repeticiones como ocupantes.
+ *
+ * Importante para no repetir un diagnóstico equivocado: **no son errores de
+ * captura del Excel**. Los registros repetidos son idénticos campo a campo
+ * (579 de 580 personas), la misma persona aparece en varias unidades a la vez,
+ * las 193 rutas comparten el horario `00:00` y el 70 % de los registros
+ * comparte una única coordenada, la del centro por defecto del mapa. El patrón
+ * es el de un tablero sobre el que se acumularon varias generaciones sin
+ * limpiar, perdiendo por el camino la dimensión de fecha y turno.
  */
 
 const norm = (value) => String(value ?? '').trim();
@@ -32,6 +40,7 @@ export const dataQuality = (services) => {
   let serviciosConRepetidos = 0;
   let sinCoordenadas = 0;
   let sinDireccion = 0;
+  const coordenadas = new Map();
 
   for (const service of list) {
     const docs = documentsOf(service);
@@ -44,7 +53,13 @@ export const dataQuality = (services) => {
       (service.asignado ? asignadas : pendientes).add(doc);
     }
     for (const agente of service.agentes || []) {
-      if (!norm(agente?.lat) || !norm(agente?.lng)) sinCoordenadas += 1;
+      const lat = norm(agente?.lat);
+      const lng = norm(agente?.lng);
+      if (!lat || !lng) sinCoordenadas += 1;
+      else {
+        const clave = `${lat},${lng}`;
+        coordenadas.set(clave, (coordenadas.get(clave) ?? 0) + 1);
+      }
       if (!norm(agente?.direccion)) sinDireccion += 1;
     }
   }
@@ -53,8 +68,18 @@ export const dataQuality = (services) => {
   // del origen, no un estado válido: el Programador la trataría dos veces.
   const enAmbos = [...asignadas].filter((doc) => pendientes.has(doc));
 
+  // Una coordenada que concentra a una parte grande del padrón no es una
+  // casualidad geográfica: es el punto al que caen las direcciones que nunca se
+  // geocodificaron. Se informa como señal, sin afirmar cuál es ese punto.
+  const dominante = [...coordenadas.entries()].sort((a, b) => b[1] - a[1])[0];
+  const coordenadaDominante = dominante && dominante[1] > 1
+    ? { clave: dominante[0], registros: dominante[1] }
+    : null;
+
   return {
     registros,
+    coordenadasDistintas: coordenadas.size,
+    coordenadaDominante,
     personas: new Set([...asignadas, ...pendientes]).size,
     personasAsignadas: asignadas.size,
     personasPendientes: pendientes.size,
