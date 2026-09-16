@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, Eye, Clock, X, Check, CheckCircle, XCircle, Send, ShieldCheck, ShieldAlert, FileText, Upload, ChevronDown } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldCheck, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import DocumentVerification from './components/DocumentVerification';
 import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
 
+import DocumentReviewCard from './components/DocumentReviewCard';
+import DocumentViewer from './components/DocumentViewer';
+import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -1058,80 +1061,19 @@ const FlotaView = ({ usuario, initialBase }) => {
                       Revisión de Documentos del Conductor
                     </h4>
                     <div className="review-docs-grid">
-                      {[
-                        { key: 'comprobanteDomicilio', label: 'Comprobante de Domicilio' },
-                        { key: 'dniScaneado', label: 'DNI Escaneado' },
-                        { key: 'licenciaConducir', label: 'Licencia de Conducir' },
-                        { key: 'recordConductor', label: 'Récord de Conductor' },
-                        { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales' },
-                        { key: 'cv', label: 'Currículum Vitae' },
-                        { key: 'tarjetaPropiedad', label: 'Tarjeta de Propiedad' },
-                        { key: 'soat', label: 'SOAT' },
-                        { key: 'revisionTecnica', label: 'Revisión Técnica' },
-                      ].map((doc) => {
-                        const fileData = conductorInfo.usuario.perfil_conductor?.[doc.key];
-                        const rev = localRevisionDocs[doc.key];
-                        const isLoading = reviewLoading[doc.key];
-                        return (
-                          <div key={doc.key} className="review-doc-card">
-                            <div className="review-doc-header">
-                              <FileText size={15} style={{flexShrink:0, color:'var(--text-secondary)'}} />
-                              <span className="review-doc-name">{doc.label}</span>
-                              {rev ? (
-                                rev.estado === 'aprobado'
-                                  ? <span className="rev-badge rev-ok"><CheckCircle size={12} /> Aprobado</span>
-                                  : <span className="rev-badge rev-no"><XCircle size={12} /> Rechazado</span>
-                              ) : (
-                                fileData
-                                  ? <span className="rev-badge rev-pending"><Clock size={12} /> Pendiente</span>
-                                  : <span className="rev-badge rev-missing">Sin archivo</span>
-                              )}
-                            </div>
-                            {fileData && (
-                              <div className="review-doc-actions">
-                                <button className="btn-view-doc" onClick={() => {
-                                  let docSrc = '';
-                                  if (typeof fileData === 'string') {
-                                    docSrc = fileData;
-                                  } else if (fileData && typeof fileData === 'object') {
-                                    docSrc = fileData.base64 || fileData.url || fileData.file || '';
-                                  }
-                                  setViewingDoc({ name: doc.label, src: docSrc, raw: fileData });
-                                }}>
-                                  <Eye size={13} /> Ver
-                                </button>
-                                <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px' }} title="Reemplazar archivo">
-                                  <Upload size={13} /> 
-                                  <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
-                                </label>
-                                <button
-                                  className="btn-approve-doc"
-                                  disabled={isLoading || rev?.estado === 'aprobado'}
-                                  onClick={() => handleDocReview(doc.key, 'aprobado')}
-                                >
-                                  {isLoading ? '...' : <><CheckCircle size={13} /> Aprobar</>}
-                                </button>
-                                <button
-                                  className="btn-reject-doc"
-                                  disabled={isLoading || rev?.estado === 'rechazado'}
-                                  onClick={() => handleDocReview(doc.key, 'rechazado')}
-                                >
-                                  {isLoading ? '...' : <><XCircle size={13} /> Rechazar</>}
-                                </button>
-                              </div>
-                            )}
-                            {!fileData && (
-                              <div className="review-doc-actions" style={{ justifyContent: 'space-between', marginTop: '10px' }}>
-                                <p className="review-doc-missing" style={{ margin: 0 }}>El conductor aún no ha subido este documento.</p>
-                                <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                                  <Upload size={13} /> Subir
-                                  <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {DOCUMENTOS_CONDUCTOR.map((documento) => (
+                        <DocumentReviewCard
+                          key={documento.key}
+                          documento={documento}
+                          perfil={conductorInfo.usuario.perfil_conductor}
+                          revisiones={localRevisionDocs}
+                          cargando={reviewLoading}
+                          accept={DOCUMENT_ACCEPT_ATTRIBUTE}
+                          onUpload={handleAdminUploadDoc}
+                          onReview={handleDocReview}
+                          onView={setViewingDoc}
+                        />
+                      ))}
                     </div>
                   </div>
 
@@ -1609,50 +1551,13 @@ const FlotaView = ({ usuario, initialBase }) => {
       `}</style>
 
       {/* DOCUMENT VIEWER MODAL - image only */}
-      {viewingDoc && (() => {
-        const src = viewingDoc.src || '';
-        const hasData = src.startsWith('data:') || src.startsWith('http');
-        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
-        const downloadDoc = () => {
-          if (!hasData) return;
-          const a = document.createElement('a');
-          a.href = src;
-          a.download = viewingDoc.name;
-          a.click();
-        };
-        return (
-          <div className="doc-viewer-overlay" onClick={() => setViewingDoc(null)}>
-            <div className="doc-viewer-content" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto' }}>
-              <div className="doc-viewer-header">
-                <h3>{viewingDoc.name}</h3>
-                <button className="close-btn-inline" onClick={() => setViewingDoc(null)}><X size={20} /></button>
-              </div>
-              <div className="doc-viewer-body" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: 'var(--text-primary)', padding: '40px 30px', textAlign: 'center', gap: '16px' }}>
-                {hasData ? (
-                  isPdf ? (
-                    <div style={{ padding: '20px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-                        <FileText size={72} color="#38BDF8" />
-                      </div>
-                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
-                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
-                        <Download size={20} /> Descargar para visualizar
-                      </button>
-                    </div>
-                  ) : (
-                    <img src={src} alt={viewingDoc.name} className="doc-image" />
-                  )
-                ) : (
-                  <div style={{ padding: '30px', background: 'rgba(255,100,100,0.1)', borderRadius: '8px', border: '1px solid rgba(255,100,100,0.3)' }}>
-                    <h4 style={{ color: '#ff6b6b', marginBottom: '10px' }}>Documento no disponible</h4>
-                    <p style={{ fontSize: '14px', color: '#ccc' }}>El archivo no se cargó correctamente. Por favor solicita al conductor que lo vuelva a subir.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* `key` por documento: remonta el visor y con él vuelve a la primera
+          cara, sin necesidad de un efecto que reinicie el estado. */}
+      <DocumentViewer
+        key={viewingDoc?.name}
+        documento={viewingDoc}
+        onClose={() => setViewingDoc(null)}
+      />
 
 
     </div>
