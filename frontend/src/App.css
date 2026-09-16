@@ -1157,3 +1157,48 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 .doc-image {
   max-width: 100%; max-height: 100%; object-fit: contain;
 }
+
+/* --- Arrastrar y soltar sobre una tarjeta de documento ------------------- */
+
+/**
+ * Se suma al botón de subida, nunca lo sustituye: arrastrar no funciona con
+ * teclado ni en táctil. El realce usa el borde y un aviso con texto, no solo
+ * color, para que se entienda también en escala de grises.
+ */
+.doc-dropzone {
+  position: relative;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.doc-dropzone-activa {
+  border-color: var(--kapital-badge-text) !important;
+  box-shadow: 0 0 0 2px var(--kapital-badge-bg);
+}
+
+.doc-dropzone-aviso {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  padding: 8px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  pointer-events: none;
+  background: var(--kapital-card-bg);
+  color: var(--kapital-badge-text);
+  border: 2px dashed var(--kapital-badge-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-dropzone { transition: none; }
+}
+
+/* Un documento opcional no debe leerse como un pendiente por resolver. */
+.rev-badge.rev-optional {
+  background: transparent;
+  border: 1px solid var(--kapital-border);
+  color: var(--kapital-text-secondary);
+}

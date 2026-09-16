@@ -3,21 +3,35 @@ import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck
 import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
+import {
+  DOCUMENTOS_CONDUCTOR,
+  admiteReverso,
+  claveReverso,
+  etiquetaCara,
+} from '../constants/documentosConductor';
 
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
 
-const DOC_LABELS = {
-  comprobanteDomicilio: 'Comprobante de Domicilio',
-  dniScaneado: 'DNI Escaneado',
-  licenciaConducir: 'Licencia de Conducir',
-  recordConductor: 'Récord de Conductor',
-  antecedentesPoliciales: 'Antecedentes Policiales',
-  cv: 'Currículum Vitae',
-  tarjetaPropiedad: 'Tarjeta de Propiedad',
-  soat: 'SOAT',
-  revisionTecnica: 'Revisión Técnica'
-};
+/**
+ * Etiquetas derivadas del catálogo, reversos incluidos.
+ *
+ * Antes esta pantalla tenía su propia lista de nueve claves. Con documentos de
+ * dos caras eso se vuelve un agujero: si el administrador rechaza
+ * `dniScaneadoReverso` y la clave no figura aquí, el conductor no ve el rechazo
+ * y no puede resubir la cara mala. El catálogo evita que las tres pantallas
+ * vuelvan a desincronizarse.
+ */
+const DOC_LABELS = Object.fromEntries(
+  DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
+    admiteReverso(documento)
+      ? [
+          [documento.key, etiquetaCara(documento, 'anverso')],
+          [claveReverso(documento.key), etiquetaCara(documento, 'reverso')],
+        ]
+      : [[documento.key, documento.label]],
+  ),
+);
 
 const DocumentResubmission = ({ usuario, onComplete, notifications: notificationsProp }) => {
   const [notifications, setNotifications] = useState([]);

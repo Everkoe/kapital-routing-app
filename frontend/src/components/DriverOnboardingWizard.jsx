@@ -67,7 +67,19 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   const draftKey = `driver_onboarding_draft_${usuario?.identifier || 'unknown'}`;
   const filesKey = `driver_onboarding_files_${usuario?.identifier || 'unknown'}`;
 
-  const FILE_FIELDS = ['comprobanteDomicilio','dniScaneado','licenciaConducir','recordConductor','antecedentesPoliciales','cv','certificadosTrabajo','referenciasLaborales','cuestionarioManejoDefensivo','tarjetaPropiedad','soat','revisionTecnica'];
+  // Los documentos de dos caras guardan la segunda en un campo hermano
+  // (`dniScaneado` + `dniScaneadoReverso`), de modo que lo ya subido sigue
+  // siendo válido y cada cara conserva su propia revisión.
+  const FILE_FIELDS = [
+    'comprobanteDomicilio',
+    'dniScaneado', 'dniScaneadoReverso',
+    'licenciaConducir', 'licenciaConducirReverso',
+    'lunasPolarizadas', 'lunasPolarizadasReverso',
+    'recordConductor', 'antecedentesPoliciales', 'cv',
+    'certificadosTrabajo', 'referenciasLaborales', 'cuestionarioManejoDefensivo',
+    'tarjetaPropiedad', 'tarjetaPropiedadReverso',
+    'soat', 'revisionTecnica',
+  ];
 
   const [formData, setFormData] = useState({
     // Datos Personales
@@ -84,7 +96,11 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     // Archivos (Files)
     comprobanteDomicilio: null,
     dniScaneado: null,
+    dniScaneadoReverso: null,
     licenciaConducir: null,
+    licenciaConducirReverso: null,
+    lunasPolarizadas: null,
+    lunasPolarizadasReverso: null,
     recordConductor: null,
     antecedentesPoliciales: null,
     cv: null,
@@ -100,6 +116,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     vehiculoColor: '',
     vehiculoCapacidad: '',
     tarjetaPropiedad: null,
+    tarjetaPropiedadReverso: null,
     soat: null,
     revisionTecnica: null,
   });
@@ -340,18 +357,48 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           </div>
           
           <div className="form-grid">
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="DNI Escaneado (Ambos lados)" 
-                file={formData.dniScaneado} 
-                onFileSelect={(f) => handleFileChange('dniScaneado', f)} 
+            {/* Una foto solo muestra una cara. Se pide cada una por separado,
+                y el reverso queda opcional porque un PDF puede traer ambas. */}
+            <div className="form-group">
+              <FileUploadZone
+                label="DNI · Anverso"
+                file={formData.dniScaneado}
+                onFileSelect={(f) => handleFileChange('dniScaneado', f)}
               />
             </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Licencia de Conducir (Vigente)" 
-                file={formData.licenciaConducir} 
-                onFileSelect={(f) => handleFileChange('licenciaConducir', f)} 
+            <div className="form-group">
+              <FileUploadZone
+                label="DNI · Reverso (opcional)"
+                file={formData.dniScaneadoReverso}
+                onFileSelect={(f) => handleFileChange('dniScaneadoReverso', f)}
+              />
+            </div>
+            <div className="form-group">
+              <FileUploadZone
+                label="Licencia de Conducir · Anverso"
+                file={formData.licenciaConducir}
+                onFileSelect={(f) => handleFileChange('licenciaConducir', f)}
+              />
+            </div>
+            <div className="form-group">
+              <FileUploadZone
+                label="Licencia de Conducir · Reverso (opcional)"
+                file={formData.licenciaConducirReverso}
+                onFileSelect={(f) => handleFileChange('licenciaConducirReverso', f)}
+              />
+            </div>
+            <div className="form-group">
+              <FileUploadZone
+                label="Lunas Polarizadas · Anverso (opcional)"
+                file={formData.lunasPolarizadas}
+                onFileSelect={(f) => handleFileChange('lunasPolarizadas', f)}
+              />
+            </div>
+            <div className="form-group">
+              <FileUploadZone
+                label="Lunas Polarizadas · Reverso (opcional)"
+                file={formData.lunasPolarizadasReverso}
+                onFileSelect={(f) => handleFileChange('lunasPolarizadasReverso', f)}
               />
             </div>
             <div className="form-group full-width">
@@ -435,8 +482,11 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               <input type="number" name="vehiculoCapacidad" value={formData.vehiculoCapacidad} onChange={handleChange} placeholder="Ej. 15" />
             </div>
 
-            <div className="form-group full-width">
-              <FileUploadZone label="Tarjeta de Propiedad" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)} />
+            <div className="form-group">
+              <FileUploadZone label="Tarjeta de Propiedad · Anverso" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)} />
+            </div>
+            <div className="form-group">
+              <FileUploadZone label="Tarjeta de Propiedad · Reverso (opcional)" file={formData.tarjetaPropiedadReverso} onFileSelect={(f) => handleFileChange('tarjetaPropiedadReverso', f)} />
             </div>
             <div className="form-group full-width">
               <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)} />

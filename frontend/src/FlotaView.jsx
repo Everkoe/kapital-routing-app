@@ -7,6 +7,13 @@ import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
 
+import DocumentDropZone from './components/DocumentDropZone';
+import {
+  DOCUMENTOS_CONDUCTOR,
+  admiteReverso,
+  claveReverso,
+  etiquetaCara,
+} from './constants/documentosConductor';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -20,6 +27,24 @@ const announceAdminWebSocketState = (connected) => {
   window.__kapitalAdminWebSocketConnected = connected;
   window.dispatchEvent(new CustomEvent(ADMIN_WS_STATE_EVENT, { detail: { connected } }));
 };
+
+/**
+ * Caras revisables, una entrada por archivo.
+ *
+ * Un documento de dos caras aporta dos entradas —anverso y reverso— con claves
+ * hermanas. Así cada cara conserva su propia subida, su revisión y su estado:
+ * el administrador puede rechazar solo el reverso borroso sin tumbar el
+ * documento entero.
+ */
+const CARAS_REVISABLES = DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
+  admiteReverso(documento)
+    ? [
+        { key: documento.key, label: etiquetaCara(documento, 'anverso'), opcional: documento.opcional },
+        // El reverso siempre es opcional: un PDF puede traer ambas caras.
+        { key: claveReverso(documento.key), label: etiquetaCara(documento, 'reverso'), opcional: true },
+      ]
+    : [{ key: documento.key, label: documento.label, opcional: documento.opcional }],
+);
 
 const validateDocumentFile = (file) => {
   if (!file) return 'Selecciona un archivo.';
@@ -1058,25 +1083,22 @@ const FlotaView = ({ usuario, initialBase }) => {
                       Revisión de Documentos del Conductor
                     </h4>
                     <div className="review-docs-grid">
-                      {[
-                        { key: 'comprobanteDomicilio', label: 'Comprobante de Domicilio' },
-                        { key: 'dniScaneado', label: 'DNI Escaneado' },
-                        { key: 'licenciaConducir', label: 'Licencia de Conducir' },
-                        { key: 'recordConductor', label: 'Récord de Conductor' },
-                        { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales' },
-                        { key: 'cv', label: 'Currículum Vitae' },
-                        { key: 'tarjetaPropiedad', label: 'Tarjeta de Propiedad' },
-                        { key: 'soat', label: 'SOAT' },
-                        { key: 'revisionTecnica', label: 'Revisión Técnica' },
-                      ].map((doc) => {
+                      {CARAS_REVISABLES.map((doc) => {
                         const fileData = conductorInfo.usuario.perfil_conductor?.[doc.key];
                         const rev = localRevisionDocs[doc.key];
                         const isLoading = reviewLoading[doc.key];
                         return (
-                          <div key={doc.key} className="review-doc-card">
+                          <DocumentDropZone
+                            key={doc.key}
+                            className="review-doc-card"
+                            label={doc.label}
+                            disabled={isLoading}
+                            onFile={(file) => handleAdminUploadDoc(doc.key, file)}
+                          >
                             <div className="review-doc-header">
                               <FileText size={15} style={{flexShrink:0, color:'var(--text-secondary)'}} />
                               <span className="review-doc-name">{doc.label}</span>
+                              {doc.opcional && <span className="rev-badge rev-optional">Opcional</span>}
                               {rev ? (
                                 rev.estado === 'aprobado'
                                   ? <span className="rev-badge rev-ok"><CheckCircle size={12} /> Aprobado</span>
@@ -1122,14 +1144,17 @@ const FlotaView = ({ usuario, initialBase }) => {
                             )}
                             {!fileData && (
                               <div className="review-doc-actions" style={{ justifyContent: 'space-between', marginTop: '10px' }}>
-                                <p className="review-doc-missing" style={{ margin: 0 }}>El conductor aún no ha subido este documento.</p>
+                                <p className="review-doc-missing" style={{ margin: 0 }}>
+                                  El conductor aún no ha subido este documento.
+                                  {' '}Arrastra el archivo aquí o usa el botón.
+                                </p>
                                 <label className="btn-view-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 10px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                                   <Upload size={13} /> Subir
                                   <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} style={{ display: 'none' }} onChange={(e) => handleAdminUploadDoc(doc.key, e.target.files[0])} />
                                 </label>
                               </div>
                             )}
-                          </div>
+                          </DocumentDropZone>
                         );
                       })}
                     </div>
