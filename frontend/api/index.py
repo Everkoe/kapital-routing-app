@@ -4615,8 +4615,15 @@ async def _persist_and_verify_fleet(
 
 @app.post("/api/flota")
 async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
+    # Autorizar ANTES de leer. `reload_db(force=True)` salta el caché y
+    # descarga el estado completo (~3,95 MB): hacerlo primero significaba que
+    # una petición sin sesión válida pagaba esa lectura entera para acabar
+    # rechazada con 401. El orden inverso existía porque validar una sesión
+    # exigía el blob de usuarios; el índice de sesiones del lote anterior
+    # eliminó esa dependencia, así que `require_admin_session` resuelve sin
+    # cookie en cero lecturas y con cookie contra el índice.
+    await require_admin_session(session_token)
     await reload_db(force=True)
-    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
     unit_id = flota.placa.strip()
     if not unit_id:
@@ -4643,10 +4650,11 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
 
 @app.put("/api/flota/{placa}")
 async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCookie = None):
+    # Autorizar antes de leer, por el motivo explicado en `add_flota`.
+    await require_admin_session(session_token)
     # A fresh provider read prevents a warm Vercel instance from overwriting a
     # newer fleet snapshot written by another instance.
     await reload_db(force=True)
-    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
@@ -4670,11 +4678,12 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
 
 @app.delete("/api/flota/{placa}")
 async def delete_flota(placa: str, session_token: SessionCookie = None):
-    # Removing a unit is irreversible, so it is gated exactly like POST/PUT and
-    # reloads first: a warm Vercel instance must not delete from a stale
-    # snapshot, nor drop a unit another instance just created.
+    # Autorizar antes de leer, por el motivo explicado en `add_flota`.
+    await require_admin_session(session_token)
+    # Removing a unit is irreversible, so it reloads before writing: a warm
+    # instance must not delete from a stale snapshot, nor drop a unit another
+    # instance just created.
     await reload_db(force=True)
-    require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     global conductores_db
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")

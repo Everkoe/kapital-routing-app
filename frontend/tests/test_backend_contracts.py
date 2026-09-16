@@ -1816,6 +1816,75 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.conductores_db["K-001"], original)
 
 
+    async def test_fleet_writes_reject_without_session_before_reading_the_database(self):
+        """Una escritura de flota sin sesión no debe costar ni una lectura.
+
+        `reload_db(force=True)` salta el caché TTL y descarga el estado completo
+        (~3,95 MB). Mientras corría antes del gate, cada petición anónima pagaba
+        esa lectura entera para acabar rechazada con 401: cien sondas eran
+        ~400 MB de egress tirados. Si alguien vuelve a poner el reload por
+        delante de la autorización, esta prueba falla.
+        """
+        backend.AUTH_ENFORCED = True
+        registro = backend.FlotaRegistro(
+            placa="KAP-999", capacidad=12, tipo="Sprinter", chofer="Nadie"
+        )
+        actualizacion = backend.FlotaUpdate(capacidad=14)
+
+        llamadas = [
+            ("POST", lambda: backend.add_flota(registro, session_token=None)),
+            ("PUT", lambda: backend.update_flota("KAP-999", actualizacion, session_token=None)),
+            ("DELETE", lambda: backend.delete_flota("KAP-999", session_token=None)),
+        ]
+
+        for verbo, llamada in llamadas:
+            with self.subTest(verbo=verbo):
+                reload_db = AsyncMock()
+                with patch.object(backend, "reload_db", new=reload_db):
+                    with self.assertRaises(HTTPException) as caught:
+                        await llamada()
+
+                self.assertEqual(caught.exception.status_code, 401)
+                reload_db.assert_not_awaited()
+
+    async def test_fleet_writes_still_reload_once_the_caller_is_authorized(self):
+        """El reload no se elimina, solo se mueve: la escritura lo necesita.
+
+        Una instancia caliente no debe escribir sobre un snapshot viejo, así que
+        tras autorizar se sigue releyendo con `force=True`.
+        """
+        backend.AUTH_ENFORCED = True
+        admin = {
+            "identifier": "admin@example.com",
+            "email": "admin@example.com",
+            "nombre": "Admin Flota",
+            "rol": "Administración",
+            "estado": "Activo",
+        }
+        backend.usuarios_db["admin@example.com"] = admin
+        token = backend.issue_session(admin)
+        backend.conductores_db.clear()
+
+        reload_db = AsyncMock()
+        with (
+            patch.object(backend, "reload_db", new=reload_db),
+            patch.object(
+                backend,
+                "_persist_and_verify_fleet",
+                new=AsyncMock(return_value={"capacidad": 12}),
+            ),
+        ):
+            await backend.add_flota(
+                backend.FlotaRegistro(
+                    placa="KAP-777", capacidad=12, tipo="Sprinter", chofer="Alguien"
+                ),
+                session_token=token,
+            )
+
+        reload_db.assert_awaited_once()
+        self.assertEqual(reload_db.await_args.kwargs.get("force"), True)
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 
@@ -2517,6 +2586,7 @@ class StorageConfigurationTestCase(unittest.TestCase):
         self.assertEqual(headers["apikey"], key)
         self.assertEqual(headers["Authorization"], f"Bearer {key}")
         self.assertEqual(headers["Content-Type"], "application/json")
+
 
 
 if __name__ == "__main__":
