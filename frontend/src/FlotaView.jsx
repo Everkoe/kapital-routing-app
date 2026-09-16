@@ -24,6 +24,16 @@ const announceAdminWebSocketState = (connected) => {
   window.dispatchEvent(new CustomEvent(ADMIN_WS_STATE_EVENT, { detail: { connected } }));
 };
 
+/**
+ * Tipos de unidad que la flota usa realmente.
+ *
+ * La lista anterior ofrecía «Sprinter», «Auto (Remisse)» y «Moto (Courier)»,
+ * que no aparecían en ninguna de las 109 unidades, mientras que AUTO, SUV y
+ * VAN —los tres mayoritarios— no estaban. La base operativa (Masivo, Remisse)
+ * es un campo aparte y no se duplica en el tipo.
+ */
+const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
+
 const validateDocumentFile = (file) => {
   if (!file) return 'Selecciona un archivo.';
   if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
@@ -475,7 +485,12 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
     const editableData = {
       capacidad: vehiculo.capacidad ?? 10,
-      tipo: vehiculo.tipo || 'Van', chofer: vehiculo.chofer || '', telefono: vehiculo.telefono || '',
+      tipo: vehiculo.tipo || 'AUTO',
+      chofer: vehiculo.chofer || '',
+      // El perfil del conductor ya trae su número: solo 1 de 109 unidades
+      // guarda `telefono` propio, mientras 108 tienen `celular` del perfil.
+      // Partir de un campo vacío obligaba a teclear un dato que ya existe.
+      telefono: vehiculo.telefono || vehiculo.celular || '',
       soat: vehiculo.soat || '', revision: vehiculo.revision || '', atu: vehiculo.atu || '', licencia: vehiculo.licencia || '',
     };
     setFormData(editableData);
@@ -486,7 +501,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   };
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setEditingUnitId('');
     setInitialEditData(null);
@@ -1146,11 +1161,18 @@ const FlotaView = ({ usuario, initialBase }) => {
               </div>
               <div className="form-row">
                 <label>Tipo</label>
+                {/* Los tipos salen de los que la flota usa de verdad. Los
+                    anteriores —Sprinter, Auto (Remisse), Moto (Courier)— no
+                    existían en ninguna unidad, así que editar una le cambiaba
+                    el tipo por un valor inventado. La base (Masivo/Remisse) es
+                    un campo propio y no se mezcla aquí. */}
                 <select value={formData.tipo} onChange={e => setFormData({...formData, tipo: e.target.value})}>
-                  <option>Sprinter</option>
-                  <option>Van</option>
-                  <option>Auto (Remisse)</option>
-                  <option>Moto (Courier)</option>
+                  {TIPOS_DE_UNIDAD.map(tipo => <option key={tipo}>{tipo}</option>)}
+                  {formData.tipo && !TIPOS_DE_UNIDAD.includes(formData.tipo) && (
+                    // Una unidad con un tipo fuera de la lista conserva el suyo
+                    // en vez de que abrir el formulario se lo cambie en silencio.
+                    <option>{formData.tipo}</option>
+                  )}
                 </select>
               </div>
               <div className="form-row">
