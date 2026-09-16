@@ -2,18 +2,21 @@ import { useState, useEffect } from 'react';
 import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
+import { countFleetDocumentStatuses, getDocumentStatus } from './utils/flotaDocumentStatus';
 import './App.css';
 
+/**
+ * Adaptador sobre la utilidad compartida.
+ *
+ * Este panel tenía su propia copia del cálculo, con un umbral de 30 días
+ * mientras la cabecera de flota usaba 15 y lo anunciaba como «Por Vencer
+ * (15d)». Dos pantallas llamaban «por vencer» a cosas distintas. Ahora ambas
+ * derivan del mismo sitio y solo se traduce la forma del resultado.
+ */
 const getDocStatus = (dateStr) => {
-  if (!dateStr || dateStr === 'N/A') return { status: 'missing', days: null };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr + 'T00:00:00');
-  if (isNaN(target.getTime())) return { status: 'missing', days: null };
-  const diffDays = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return { status: 'danger', days: diffDays };
-  if (diffDays <= 30) return { status: 'warning', days: diffDays };
-  return { status: 'ok', days: diffDays };
+  const { key, daysRemaining } = getDocumentStatus(dateStr);
+  const status = { valid: 'ok', expiring: 'warning', expired: 'danger', na: 'missing' }[key];
+  return { status, days: daysRemaining };
 };
 
 const getVehicleCategory = (v) => {
@@ -134,8 +137,15 @@ export default function AdminDashboard({ onNavigate, usuario }) {
   const totalFlota = flota.length;
   const pendingUsers = users.filter(u => (u.estado || '').toLowerCase().includes('pendiente')).length;
 
-  const docCounts = { vigente: 0, por_vencer: 0, vencido: 0, sin_documento: 0 };
-  flota.forEach(v => { docCounts[getVehicleCategory(v)]++; });
+  // Por documento, igual que la cabecera de Gestión de Flota: contar unidades
+  // clasificadas por su peor documento daba 2 «vigentes» donde flota mostraba
+  // 12, y las dos cifras parecían la misma sin serlo.
+  const docCounts = countFleetDocumentStatuses(flota);
+  const totalDocumentos = docCounts.valid + docCounts.expiring + docCounts.expired + docCounts.na;
+
+  // El recuento por unidad no se pierde: sigue siendo la lectura útil de
+  // «cuántas unidades tienen algo sin registrar», y va como nota al pie.
+  const unidadesSinDocumento = flota.filter(v => getVehicleCategory(v) === 'sin_documento').length;
 
   let expiredDocs = 0;
   let expiringDocs = 0;
@@ -176,10 +186,10 @@ export default function AdminDashboard({ onNavigate, usuario }) {
     .sort((a, b) => b.total - a.total);
 
   const docStats = [
-    { label: 'Vigentes',               count: docCounts.vigente,       color: '#10b981' },
-    { label: 'Por vencer (≤ 30 días)', count: docCounts.por_vencer,   color: '#f59e0b' },
-    { label: 'Vencidos',               count: docCounts.vencido,       color: '#ef4444' },
-    { label: 'Sin documento',          count: docCounts.sin_documento, color: '#9ca3af' },
+    { label: 'Vigentes',               count: docCounts.valid,    color: '#10b981' },
+    { label: 'Por vencer (≤ 15 días)', count: docCounts.expiring, color: '#f59e0b' },
+    { label: 'Vencidos',               count: docCounts.expired,  color: '#ef4444' },
+    { label: 'Sin documento',          count: docCounts.na,       color: '#9ca3af' },
   ];
 
   // Distribución de flota por base (Masivo / Remisse / Motorizado)
@@ -375,6 +385,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {baseStats.map(({ key, label, count, Icon, color }) => {
+              // «Flota por base» cuenta unidades, no documentos.
               const pct = totalFlota > 0 ? Math.round((count / totalFlota) * 100) : 0;
               return (
                 <div
@@ -427,11 +438,14 @@ export default function AdminDashboard({ onNavigate, usuario }) {
               <FileText size={18} color="var(--text-secondary)" />
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Estado de documentación</h3>
             </div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Total: {totalFlota} unidades</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Total: {totalDocumentos} documentos
+            </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {docStats.map(({ label, count, color }) => {
-              const pct = totalFlota > 0 ? Math.round((count / totalFlota) * 100) : 0;
+              // El porcentaje es sobre documentos, que es lo que cuentan las barras.
+              const pct = totalDocumentos > 0 ? Math.round((count / totalDocumentos) * 100) : 0;
               return (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: color, flexShrink: 0, display: 'inline-block' }} />
@@ -444,6 +458,9 @@ export default function AdminDashboard({ onNavigate, usuario }) {
                 </div>
               );
             })}
+            <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              {unidadesSinDocumento} de {totalFlota} unidades tienen algún documento sin registrar.
+            </p>
           </div>
         </div>
 
