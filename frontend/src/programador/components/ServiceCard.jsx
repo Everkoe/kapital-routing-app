@@ -1,5 +1,19 @@
-import { ArrowRightLeft, Building, ChevronDown, ChevronRight, MapPin, Truck } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Building,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  History,
+  MapPin,
+  Truck,
+  X,
+} from 'lucide-react';
+import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
+import PreviewAction from './PreviewAction.jsx';
 
 /**
  * Tarjeta de servicio y su detalle expandible.
@@ -7,7 +21,12 @@ import { ServiceStateBadge } from './estados.jsx';
  * La ocupación se muestra con el total real de la unidad. Cuando la flota no
  * declara capacidad para esa unidad se escribe «11 agentes» en vez de inventar
  * un denominador: el tablero anterior escribía `/15` para todas, mientras la
- * flota real tiene unidades de 10, 12 y 15.
+ * flota real tiene unidades de 10, 12, 15 — y de 4 en producción.
+ *
+ * El detalle muestra la forma completa de la revisión —origen, estado y
+ * acciones por agente, más aprobar/rechazar el servicio— aunque esos controles
+ * no estén operativos: sin motor no hay propuesta que revisar. Se marcan con
+ * `PreviewAction` para que se vean sin engañar.
  */
 
 /** El sentido viaja dentro del texto del horario; no existe campo propio. */
@@ -57,23 +76,50 @@ const AgentTable = ({ agentes }) => (
     <table className="pw-table">
       <thead>
         <tr>
-          <th scope="col">#</th>
+          {/* Número de fila, no secuencia de recogida: el backend todavía no
+              ordena las paradas. El orden llega con la entrega 3, y será
+              editable a mano. Ver docs/planning §1. */}
+          <th scope="col" title="Número de fila. El orden de recogida llega en la entrega 3.">#</th>
           <th scope="col">Agente</th>
           <th scope="col">Documento</th>
           <th scope="col">Dirección</th>
-          <th scope="col">Empresa</th>
+          <th scope="col">Origen</th>
+          <th scope="col">Estado</th>
+          <th scope="col">Acciones</th>
         </tr>
       </thead>
       <tbody>
-        {agentes.map((agente, index) => (
-          <tr key={`${agente?.id || 'sin-id'}-${index}`}>
-            {/* Número de fila, no secuencia de recogida: el backend todavía no
-                ordena las paradas. Ver docs/planning §1. */}
-            <td className="pw-mono">{String(index + 1).padStart(2, '0')}</td>
+        {markDuplicates(agentes).map((agente, index) => (
+          <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}>
+            <td className="pw-mono">
+              <span className="pw-row-grip">
+                <GripVertical size={13} aria-hidden="true" />
+                {String(index + 1).padStart(2, '0')}
+              </span>
+            </td>
             <td>{agente?.nombre || 'Sin nombre'}</td>
-            <td className="pw-mono">{agente?.id || '—'}</td>
+            <td className="pw-mono">
+              {agente?.id || '—'}
+              {agente.duplicado && (
+                <span className="pw-state" data-tone="warn" title="Este documento ya aparece en este mismo servicio.">
+                  <AlertTriangle size={12} aria-hidden="true" />Repetido
+                </span>
+              )}
+            </td>
             <td>{agente?.direccion || 'Sin dirección'}</td>
-            <td>{agente?.empresa || '—'}</td>
+            {/* Todo lo cargado hoy es original: no hay motor que agregue ni mueva. */}
+            <td><span className="pw-tag pw-tag-quiet">Original</span></td>
+            <td><ServiceStateBadge estado="programado" size={13} /></td>
+            <td>
+              <span className="pw-row-actions">
+                <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
+                  Aprobar
+                </PreviewAction>
+                <PreviewAction Icon={X} size="sm" entrega="Propuesta automática y revisión">
+                  Rechazar
+                </PreviewAction>
+              </span>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -145,7 +191,31 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
                   : `${service.capacity.used} agentes · sin capacidad declarada`}
               </dd>
             </div>
+            <div className="pw-detail-item">
+              <dt>Duración estimada</dt>
+              <dd className="pw-muted">Con el orden de recogida</dd>
+            </div>
+            <div className="pw-detail-item">
+              <dt>Llegada a destino</dt>
+              <dd className="pw-muted">Con el orden de recogida</dd>
+            </div>
           </dl>
+
+          <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
+
+          {distinctDocuments(service.agentes) < service.agentCount && (
+            <p className="pw-notice" data-tone="warn">
+              <AlertTriangle size={16} aria-hidden="true" />
+              {/* Un solo hijo de texto: `.pw-notice` es flex y cualquier elemento
+                  suelto se convertiría en columna propia. */}
+              <span>
+                La ocupación cuenta {service.agentCount} registros pero solo{' '}
+                {distinctDocuments(service.agentes)} documentos distintos: hay pasajeros
+                repetidos en los datos de origen, así que la capacidad mostrada está inflada.
+                La validación de la importación lo detectará como <code>DNI_DUPLICADO</code>.
+              </span>
+            </p>
+          )}
 
           {service.agentes.length > 0 ? (
             <AgentTable agentes={service.agentes} />
@@ -155,6 +225,21 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               Este servicio no tiene agentes asignados.
             </p>
           )}
+
+          <div className="pw-detail-footer">
+            <span className="pw-history-hint">
+              <History size={15} aria-hidden="true" />
+              El historial de cambios se registra desde la entrega 4.
+            </span>
+            <span className="pw-row-actions">
+              <PreviewAction Icon={X} entrega="Propuesta automática y revisión">
+                Rechazar propuesta
+              </PreviewAction>
+              <PreviewAction Icon={Check} variant="primary" entrega="Propuesta automática y revisión">
+                Aprobar cambios del servicio
+              </PreviewAction>
+            </span>
+          </div>
         </div>
       )}
     </article>

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { AlertTriangle, CheckCircle2, Info, MapPin, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, GripVertical, Info, MapPin, UserPlus } from 'lucide-react';
 import { NoveltyReasonBadge } from './estados.jsx';
+import PreviewAction from './PreviewAction.jsx';
 
 /**
  * Panel de novedades y pendientes.
@@ -44,7 +45,14 @@ const PendingPanel = ({ pending }) => {
     <section className="pw-panel" aria-labelledby="pw-pending-title">
       <div className="pw-panel-head">
         <h2 className="pw-panel-title" id="pw-pending-title">Novedades y pendientes</h2>
-        <span className="pw-panel-count">{counts.total} agentes</span>
+        <span className="pw-panel-tools">
+          <label className="pw-inline-field" htmlFor="pw-pending-sort">Ordenar por</label>
+          <select id="pw-pending-sort" className="pw-select pw-select-sm" disabled aria-disabled="true"
+            title="Disponible cuando el panel reciba las novedades importadas.">
+            <option>Hora solicitada</option>
+          </select>
+          <span className="pw-panel-count">{counts.total} agentes</span>
+        </span>
       </div>
 
       {counts.total > 0 && (
@@ -75,6 +83,9 @@ const PendingPanel = ({ pending }) => {
           <>
             {visible.map((agent) => (
               <article className="pw-agent-card" key={agent.id}>
+                <span className="pw-drag-handle" aria-hidden="true" title="El arrastre llega con la asignación manual.">
+                  <GripVertical size={14} />
+                </span>
                 <span className="pw-avatar" aria-hidden="true">{initials(agent.nombre, agent.agenteId)}</span>
                 <div className="pw-agent-body">
                   <div className="pw-agent-name pw-truncate">{agent.nombre || agent.agenteId || 'Sin nombre'}</div>
@@ -92,6 +103,9 @@ const PendingPanel = ({ pending }) => {
                       Documento duplicado
                     </span>
                   )}
+                  <PreviewAction size="sm" entrega="Asignación manual" className="pw-agent-assign">
+                    Asignar a servicio…
+                  </PreviewAction>
                 </div>
               </article>
             ))}
@@ -104,6 +118,14 @@ const PendingPanel = ({ pending }) => {
             )}
           </>
         )}
+      </div>
+
+      <div className="pw-dropzone" aria-hidden="true">
+        <UserPlus size={18} />
+        <span>
+          <strong>Arrastra agentes a un servicio compatible</strong>
+          Con la asignación manual se resaltarán los servicios con capacidad y cobertura.
+        </span>
       </div>
     </section>
   );

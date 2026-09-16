@@ -1,27 +1,34 @@
 import {
   AlertTriangle,
   Calendar,
+  ClipboardCheck,
   Clock,
   FileSpreadsheet,
   PieChart,
   RefreshCw,
+  Save,
   Truck,
+  Upload,
   UserPlus,
   Users,
 } from 'lucide-react';
+import PreviewAction from './PreviewAction.jsx';
 
 /**
  * Encabezado y tira de KPIs.
  *
  * Los KPIs son derivados, no declarados: salen de las rutas realmente cargadas.
- * `Capacidad libre` solo suma unidades que declaran capacidad y avisa aparte
+ * `Espacios libres` solo suma unidades que declaran capacidad y avisa aparte
  * cuántas quedaron fuera del cálculo, para que la cifra no se lea como un total
  * exacto cuando en realidad es parcial.
+ *
+ * `Importar archivos` y `Guardar` aparecen porque son la forma del producto y
+ * deben poder revisarse, pero están deshabilitados: ver `PreviewAction`.
  */
 
-const Kpi = ({ Icon, value, label, note }) => (
+const Kpi = ({ Icon, value, label, note, tone }) => (
   <div className="pw-kpi">
-    <span className="pw-kpi-icon"><Icon size={19} aria-hidden="true" /></span>
+    <span className="pw-kpi-icon" data-tone={tone}><Icon size={19} aria-hidden="true" /></span>
     <span>
       <strong className="pw-kpi-value">{value}</strong>
       <span className="pw-kpi-label">{label}</span>
@@ -30,7 +37,16 @@ const Kpi = ({ Icon, value, label, note }) => (
   </div>
 );
 
-const WorkbenchHeader = ({ kpis, operacion, fechaPlanificacion, ventanaOperativa, isLoading, onRefresh, onExport, canExport }) => (
+const WorkbenchHeader = ({
+  kpis,
+  operacion,
+  fechaPlanificacion,
+  ventanaOperativa,
+  isLoading,
+  onRefresh,
+  onExport,
+  canExport,
+}) => (
   <>
     <header className="pw-header">
       <div className="pw-header-titles">
@@ -41,6 +57,12 @@ const WorkbenchHeader = ({ kpis, operacion, fechaPlanificacion, ventanaOperativa
       </div>
 
       <div className="pw-actions">
+        <PreviewAction Icon={Upload} entrega="Importación de los dos Excel">
+          Importar archivos
+        </PreviewAction>
+        <PreviewAction Icon={Save} entrega="Guardado versionado">
+          Guardar
+        </PreviewAction>
         <button type="button" className="pw-btn" onClick={onRefresh} disabled={isLoading}>
           <RefreshCw size={16} aria-hidden="true" />
           {isLoading ? 'Actualizando…' : 'Actualizar'}
@@ -54,6 +76,12 @@ const WorkbenchHeader = ({ kpis, operacion, fechaPlanificacion, ventanaOperativa
 
     <div className="pw-kpis">
       <Kpi Icon={Truck} value={kpis.servicios} label="Servicios en el tablero" />
+      <Kpi
+        Icon={ClipboardCheck}
+        value={0}
+        label="Servicios por revisar"
+        note="Sin propuesta que revisar todavía"
+      />
       <Kpi Icon={Users} value={kpis.agentesAsignados} label="Agentes asignados" />
       <Kpi Icon={UserPlus} value={kpis.agentesSinAsignar} label="Agentes sin asignar" />
       <Kpi
@@ -70,6 +98,7 @@ const WorkbenchHeader = ({ kpis, operacion, fechaPlanificacion, ventanaOperativa
         Icon={AlertTriangle}
         value={kpis.excedidos}
         label="Servicios sobre capacidad"
+        tone={kpis.excedidos > 0 ? 'danger' : undefined}
       />
     </div>
   </>

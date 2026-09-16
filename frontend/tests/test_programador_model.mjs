@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   buildPendingAgents,
   buildServices,
+  distinctDocuments,
   indexFleet,
+  markDuplicates,
   resolveCapacity,
   UNASSIGNED,
 } from '../src/programador/model/serviceModel.js';
@@ -262,6 +264,30 @@ test('un documento repetido dentro del mismo servicio no colisiona', () => {
     [false, true, false],
     'el duplicado queda marcado para poder mostrarlo',
   );
+});
+
+test('marca los documentos repetidos de un servicio sin eliminarlos', () => {
+  // Caso real: K-027 figura «4/4 · Unidad completa» llevando dos personas,
+  // cada una repetida. Deduplicar sería una decisión de negocio que nadie ha
+  // tomado; borrar pasajeros por iniciativa propia es peor que señalarlos.
+  const agentes = [agente('78007498'), agente('77152526'), agente('78007498'), agente('77152526')];
+
+  const marcados = markDuplicates(agentes);
+
+  assert.equal(marcados.length, 4, 'no se elimina ninguno');
+  assert.deepEqual(marcados.map((a) => a.duplicado), [false, false, true, true]);
+  assert.equal(distinctDocuments(agentes), 2, 'dos personas reales en una unidad "llena"');
+});
+
+test('un documento vacío no se considera repetido de otro vacío', () => {
+  const marcados = markDuplicates([agente(''), agente('')]);
+
+  assert.deepEqual(
+    marcados.map((a) => a.duplicado),
+    [false, false],
+    'sin documento no hay identidad que comparar',
+  );
+  assert.equal(distinctDocuments([agente(''), agente('')]), 0);
 });
 
 test('ALL es un centinela que ningún dato real puede igualar por accidente', () => {

@@ -675,3 +675,154 @@
   line-height: 1.5;
   color: var(--kapital-text-secondary);
 }
+
+/* --- Controles presentes pero no operativos ------------------------------ */
+
+/**
+ * Se ven, se entienden y no se pueden pulsar. La opacidad los separa de un
+ * control activo sin esconderlos, y el candado lo dice sin depender del color.
+ */
+.pw-preview {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.pw-preview:disabled { opacity: 0.62; }
+
+.pw-preview-lock { opacity: 0.75; }
+
+.pw-btn-sm {
+  padding: 4px 9px;
+  font-size: 0.76rem;
+  gap: 5px;
+  border-radius: 6px;
+}
+
+.pw-row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pw-row-grip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-tag-quiet {
+  background: transparent;
+  border: 1px solid var(--kapital-border);
+  color: var(--kapital-text-secondary);
+}
+
+.pw-muted { color: var(--kapital-text-secondary); font-style: italic; }
+
+.pw-kpi-icon[data-tone='danger'] {
+  background: transparent;
+  border: 1px solid var(--kapital-accent-red);
+  color: var(--kapital-accent-red);
+}
+
+/* --- Detalle: encabezado, pie y historial -------------------------------- */
+
+.pw-detail-heading {
+  margin: 6px 0 10px;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--kapital-text-primary);
+}
+
+.pw-detail-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--kapital-border);
+}
+
+.pw-history-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  color: var(--kapital-text-secondary);
+}
+
+/* --- Panel de novedades: herramientas y zona de soltado ------------------- */
+
+.pw-panel-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pw-inline-field {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-select-sm {
+  width: auto;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.pw-drag-handle {
+  display: flex;
+  align-items: center;
+  padding-top: 8px;
+  flex-shrink: 0;
+  color: var(--kapital-text-secondary);
+  opacity: 0.5;
+  cursor: grab;
+}
+
+.pw-agent-assign { margin-top: 8px; }
+
+.pw-dropzone {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 12px 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--kapital-border);
+  background: var(--kapital-bg);
+  color: var(--kapital-text-secondary);
+}
+
+.pw-dropzone svg { flex-shrink: 0; margin-top: 2px; }
+
+.pw-dropzone span { display: flex; flex-direction: column; gap: 2px; }
+
+.pw-dropzone strong {
+  font-size: 0.84rem;
+  color: var(--kapital-text-primary);
+}
+
+.pw-dropzone span span,
+.pw-dropzone > span > :not(strong) { font-size: 0.78rem; }
+
+/* Una fila repetida se distingue por su marca «Repetido», no solo por el fondo. */
+.pw-table tr[data-duplicado='true'] td { background: var(--kapital-badge-bg); }
+
+.pw-table td .pw-state { margin-left: 6px; }
+
+.pw-notice code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 0.92em;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}

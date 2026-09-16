@@ -71,6 +71,27 @@ export const resolveCapacity = (conductor, used, fleetIndex = {}) => {
 };
 
 /**
+ * Marca los registros que repiten documento dentro de una misma lista.
+ *
+ * No deduplica: eso es una decisión de negocio que nadie ha tomado, y borrar
+ * pasajeros por iniciativa propia sería peor que mostrarlos. Solo señala, para
+ * que una unidad que figura llena de duplicados se pueda reconocer.
+ */
+export const markDuplicates = (agentes) => {
+  const seen = new Map();
+  return (agentes || []).map((agente) => {
+    const doc = norm(agente?.id);
+    const count = (seen.get(doc) ?? 0) + 1;
+    seen.set(doc, count);
+    return { ...agente, duplicado: Boolean(doc) && count > 1 };
+  });
+};
+
+/** Documentos distintos de una lista, para contrastar con la ocupación. */
+export const distinctDocuments = (agentes) =>
+  new Set((agentes || []).map((a) => norm(a?.id)).filter(Boolean)).size;
+
+/**
  * Estado del servicio derivable HOY.
  *
  * No existe motor de optimización ni flujo de aprobación, así que este modelo
