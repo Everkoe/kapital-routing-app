@@ -1,0 +1,551 @@
+/**
+ * Mesa del Programador de Rutas.
+ *
+ * Sin un solo color literal: todo sale de los tokens `--kapital-*` definidos en
+ * App.css, que ya traen su variante para modo claro y oscuro. Añadir un `#hex`
+ * aquí rompe uno de los dos temas y sube el contador del trinquete de calidad.
+ */
+
+.pw-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* --- Encabezado --- */
+
+.pw-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.pw-header-titles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pw-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--kapital-text-primary);
+}
+
+.pw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+.pw-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+  color: var(--kapital-text-primary);
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.pw-btn:hover:not(:disabled) { opacity: 0.82; }
+
+.pw-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pw-btn-primary {
+  background: var(--kapital-badge-text);
+  border-color: var(--kapital-badge-text);
+  color: var(--kapital-card-bg);
+}
+
+/* --- KPIs --- */
+
+.pw-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.pw-kpi {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+}
+
+.pw-kpi-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+.pw-kpi-value {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--kapital-text-primary);
+}
+
+.pw-kpi-label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-kpi-note {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 2px;
+  color: var(--kapital-accent-orange);
+}
+
+/* --- Filtros --- */
+
+.pw-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+}
+
+.pw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.pw-field-search {
+  flex: 1 1 240px;
+}
+
+.pw-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-input,
+.pw-select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-family: inherit;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+  color: var(--kapital-text-primary);
+}
+
+.pw-select { cursor: pointer; }
+
+.pw-input:focus-visible,
+.pw-select:focus-visible,
+.pw-btn:focus-visible,
+.pw-service:focus-visible {
+  outline: 2px solid var(--kapital-nav-link-active);
+  outline-offset: 2px;
+}
+
+/* --- Dos columnas: programación y novedades --- */
+
+.pw-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pw-panel {
+  border-radius: 12px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+  overflow: hidden;
+}
+
+.pw-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--kapital-border);
+}
+
+.pw-panel-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--kapital-text-primary);
+}
+
+.pw-panel-count {
+  font-size: 0.82rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+/**
+ * Sin esto, una columna flex con altura máxima encoge a sus hijos hasta
+ * aplastarlos: con 193 servicios cada tarjeta quedaba en 2 px de alto y el
+ * tablero se veía como un rayado vacío. El desbordamiento debe producir
+ * scroll, no compresión.
+ */
+.pw-panel-body > * { flex-shrink: 0; }
+
+/* --- Servicio --- */
+
+.pw-service {
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+  overflow: hidden;
+}
+
+.pw-service-summary {
+  display: grid;
+  grid-template-columns: 34px minmax(88px, auto) minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(130px, 0.9fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--kapital-text-primary);
+}
+
+.pw-service-summary:hover { background: var(--kapital-badge-bg); }
+
+.pw-service[data-open='true'] { border-color: var(--kapital-nav-link-active); }
+
+.pw-ordinal {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-time strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.pw-cell svg { flex-shrink: 0; color: var(--kapital-text-secondary); }
+
+.pw-cell-stack { display: flex; flex-direction: column; min-width: 0; }
+
+.pw-cell-stack small {
+  font-size: 0.76rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Ocupación --- */
+
+.pw-occupancy { display: flex; flex-direction: column; gap: 5px; }
+
+.pw-occupancy-label {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--kapital-border);
+}
+
+.pw-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--kapital-accent-green);
+}
+
+.pw-bar-fill[data-tone='full'] { background: var(--kapital-accent-orange); }
+.pw-bar-fill[data-tone='over'] { background: var(--kapital-accent-red); }
+
+/* --- Estados: icono + texto + color, nunca color solo --- */
+
+.pw-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.pw-state[data-tone='ok'] { color: var(--kapital-accent-green); }
+.pw-state[data-tone='warn'] { color: var(--kapital-accent-orange); }
+.pw-state[data-tone='danger'] { color: var(--kapital-accent-red); }
+.pw-state[data-tone='neutral'] { color: var(--kapital-text-secondary); }
+
+.pw-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+/* --- Detalle del servicio --- */
+
+.pw-detail {
+  padding: 4px 12px 14px;
+  border-top: 1px solid var(--kapital-border);
+}
+
+.pw-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.pw-detail-item { display: flex; flex-direction: column; gap: 2px; }
+
+.pw-detail-item dt {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-detail-item dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--kapital-text-primary);
+}
+
+.pw-table-scroll { overflow-x: auto; }
+
+.pw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.pw-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--kapital-border);
+  color: var(--kapital-text-secondary);
+}
+
+.pw-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--kapital-border);
+  color: var(--kapital-text-primary);
+}
+
+.pw-table tr:last-child td { border-bottom: none; }
+
+.pw-mono { font-variant-numeric: tabular-nums; }
+
+/* --- Panel de novedades --- */
+
+.pw-novelty-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--kapital-border);
+}
+
+.pw-novelty-count {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+}
+
+.pw-novelty-count strong {
+  display: block;
+  font-size: 1.2rem;
+  color: var(--kapital-text-primary);
+}
+
+.pw-novelty-count span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-agent-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+}
+
+.pw-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+.pw-agent-body { min-width: 0; flex: 1; }
+
+.pw-agent-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--kapital-text-primary);
+}
+
+.pw-agent-meta {
+  font-size: 0.76rem;
+  color: var(--kapital-text-secondary);
+}
+
+/* --- Estados vacíos, carga y error --- */
+
+.pw-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-placeholder h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--kapital-text-primary);
+}
+
+.pw-placeholder p { margin: 0; font-size: 0.86rem; max-width: 38ch; }
+
+.pw-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+  color: var(--kapital-text-secondary);
+}
+
+.pw-notice svg { flex-shrink: 0; }
+.pw-notice[data-tone='warn'] { color: var(--kapital-accent-orange); }
+.pw-notice[data-tone='danger'] { color: var(--kapital-accent-red); }
+
+/* --- Responsive: en tableta y móvil las columnas se apilan --- */
+
+@media (max-width: 1100px) {
+  .pw-columns { grid-template-columns: minmax(0, 1fr); }
+  .pw-panel-body { max-height: none; }
+}
+
+@media (max-width: 760px) {
+  .pw-service-summary {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 10px;
+  }
+  .pw-ordinal { display: none; }
+  .pw-title { font-size: 1.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-btn { transition: none; }
+}

@@ -34,6 +34,7 @@ const ClientPortal = React.lazy(() => import('./ClientPortal'));
 const AdminDashboard = React.lazy(() => import('./AdminDashboard'));
 const UsersManagementTab = React.lazy(() => import('./components/UsersManagementTab'));
 const VistaPerfil = React.lazy(() => import('./VistaPerfil'));
+const ProgramadorWorkbench = React.lazy(() => import('./programador/ProgramadorWorkbench'));
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -1273,6 +1274,16 @@ function App() {
         if (['Administración', 'Administrador'].includes(usuarioActual?.rol)) {
           return <AdminDashboard onNavigate={handleNavigate} usuario={usuarioActual} />;
         }
+        // El Programador estrena su propia mesa de trabajo. `DashboardView`
+        // sigue sirviendo al resto de roles administrativos hasta que la mesa
+        // cubra la generación de rutas (ver docs/planning §6).
+        if (usuarioActual?.rol === 'Programador de rutas') {
+          return (
+            <React.Suspense fallback={<GlobalLoader text="Cargando programación..." />}>
+              <ProgramadorWorkbench />
+            </React.Suspense>
+          );
+        }
         return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }
   };
@@ -1352,7 +1363,10 @@ function App() {
         <React.Suspense fallback={<GlobalLoader text="Cargando..." />}>
           {renderVista()}
         </React.Suspense>
-        <AuditLog logs={logs} />
+        {/* El registro de actividad pertenece al flujo de `DashboardView`: sus
+            entradas las escribe la generación de rutas. El Programador ya no usa
+            esa vista, así que la tarjeta dejaría de tener contenido propio. */}
+        {usuarioActual?.rol !== 'Programador de rutas' && <AuditLog logs={logs} />}
       </main>
     </div>
   );
