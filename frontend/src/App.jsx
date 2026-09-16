@@ -35,6 +35,9 @@ const AdminDashboard = React.lazy(() => import('./AdminDashboard'));
 const UsersManagementTab = React.lazy(() => import('./components/UsersManagementTab'));
 const VistaPerfil = React.lazy(() => import('./VistaPerfil'));
 const ProgramadorWorkbench = React.lazy(() => import('./programador/ProgramadorWorkbench'));
+const ProgramadorFlota = React.lazy(() => import('./programador/FlotaProgramador'));
+const ProgramadorAnalisis = React.lazy(() => import('./programador/AnalisisView'));
+const ProgramadorConfig = React.lazy(() => import('./programador/ConfiguracionView'));
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -284,8 +287,9 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         <div className="nav-links-desktop">
           {usuarioActual?.rol === 'Programador de rutas' && (
             <>
-              <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Tablero</a>
-              <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Reportes</a>
+              <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Operación</a>
+              <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Flota</a>
+              <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Análisis</a>
               <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
             </>
           )}
@@ -335,11 +339,15 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
           <>
             <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
               <LayoutDashboard size={20} />
-              <span>Tablero</span>
+              <span>Operación</span>
+            </a>
+            <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
+              <Truck size={20} />
+              <span>Flota</span>
             </a>
             <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>
               <FileText size={20} />
-              <span>Reportes</span>
+              <span>Análisis</span>
             </a>
             <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>
               <Settings size={20} />
@@ -1258,9 +1266,23 @@ function App() {
     }
 
     switch (vistaActual) {
-      case 'flota': return <FlotaView usuario={usuarioActual} initialBase={vistaParams?.base} />;
-      case 'reportes': return <VistaReportes />;
-      case 'configuracion': return <VistaConfiguracion />;
+      case 'flota':
+        // Para el Programador, la flota es consulta de capacidad. `FlotaView`
+        // resuelve otro problema —documentos, altas y bajas— y son operaciones
+        // que este rol no necesita ni debe poder ejecutar.
+        return usuarioActual?.rol === 'Programador de rutas'
+          ? <ProgramadorFlota />
+          : <FlotaView usuario={usuarioActual} initialBase={vistaParams?.base} />;
+      case 'reportes':
+        // El Programador ve Análisis: `VistaReportes` lee `/api/reportes`, que
+        // devuelve un historial vacío porque esa clave no se alimenta todavía.
+        return usuarioActual?.rol === 'Programador de rutas'
+          ? <ProgramadorAnalisis />
+          : <VistaReportes />;
+      case 'configuracion':
+        return usuarioActual?.rol === 'Programador de rutas'
+          ? <ProgramadorConfig />
+          : <VistaConfiguracion />;
       case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} initialTab={vistaParams?.tab || 'Todos'} />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':

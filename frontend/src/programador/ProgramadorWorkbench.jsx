@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, ClipboardList, Inbox } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { apiFetch } from '../utils/apiClient';
-import { buildPendingAgents, buildServices, indexFleet } from './model/serviceModel.js';
+import { buildPendingAgents } from './model/serviceModel.js';
+import { useBoardData } from './data/useBoardData.js';
 import {
   applyFilters,
   computeKpis,
@@ -56,61 +56,13 @@ const Placeholder = ({ Icon, title, children }) => (
 );
 
 const ProgramadorWorkbench = () => {
-  const [routes, setRoutes] = useState([]);
-  const [fleetIndex, setFleetIndex] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // Los datos los sirve el cargador compartido: las cuatro secciones del
+  // Programador leen el mismo tablero y volver a descargarlo en cada cambio de
+  // pestaña costaría ~493 KB de egress sin aportar nada.
+  const { services, isLoading, error, refresh } = useBoardData();
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
-  /**
-   * Carga el tablero. No toca `isLoading` al entrar a propósito: el estado
-   * inicial ya es `true` para el montaje, y el botón Actualizar lo enciende por
-   * su cuenta. Así la primera escritura de estado ocurre después de un `await`
-   * y el efecto no muta estado de forma síncrona.
-   */
-  const fetchBoard = useCallback(async (signal) => {
-    try {
-      // La flota es opcional: sin ella el tablero sigue siendo útil, solo que
-      // muestra la ocupación sin denominador. Por eso no aborta la carga.
-      const [routesData, fleetData] = await Promise.all([
-        apiFetch('/api/routes', { signal }),
-        apiFetch('/api/flota', { signal }).catch(() => null),
-      ]);
-      if (signal?.aborted) return;
-      setRoutes(Array.isArray(routesData) ? routesData : []);
-      setFleetIndex(indexFleet(fleetData));
-      setError(null);
-    } catch (err) {
-      // Una carga cancelada por desmontaje no es un fallo que mostrar.
-      if (signal?.aborted || err?.name === 'AbortError') return;
-      setError(err?.message || 'No se pudo cargar la programación.');
-    } finally {
-      if (!signal?.aborted) setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Cancelar al desmontar evita que una respuesta tardía escriba sobre un
-    // componente que ya no está, y descarta la respuesta vieja si se recarga.
-    const controller = new AbortController();
-    // Cargar al montar acaba escribiendo estado por definición, y el proyecto
-    // no usa todavía una librería de datos (TanStack Query, SWR) que lo saque
-    // fuera del efecto. Las dos trampas que la regla protege sí están cubiertas
-    // aquí: la petición se cancela al desmontar y la escritura ocurre tras el
-    // `await`, nunca de forma síncrona.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchBoard(controller.signal);
-    return () => controller.abort();
-  }, [fetchBoard]);
-
-  const handleRefresh = useCallback(() => {
-    setIsLoading(true);
-    setError(null);
-    fetchBoard();
-  }, [fetchBoard]);
-
-  const services = useMemo(() => buildServices(routes, fleetIndex), [routes, fleetIndex]);
   const kpis = useMemo(() => computeKpis(services), [services]);
   const options = useMemo(() => filterOptions(services), [services]);
 
@@ -165,7 +117,7 @@ const ProgramadorWorkbench = () => {
         fechaPlanificacion={formatToday()}
         ventanaOperativa={VENTANA_OPERATIVA}
         isLoading={isLoading}
-        onRefresh={handleRefresh}
+        onRefresh={refresh}
         onExport={handleExport}
         canExport={!isLoading && visibleServices.length > 0}
       />

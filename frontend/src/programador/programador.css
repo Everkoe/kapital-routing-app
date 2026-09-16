@@ -10,6 +10,9 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* La app centra el texto en su contenedor principal. Todo lo de esta sección
+     se lee en columna —tablas, listas, avisos— y debe ir a la izquierda. */
+  text-align: left;
 }
 
 /* --- Encabezado --- */
@@ -557,9 +560,6 @@
   border: 1px solid var(--kapital-border);
   background: var(--kapital-card-bg);
   overflow: hidden;
-  /* La app centra el texto en su contenedor principal; aquí es una lista que
-     se lee en columna y debe alinearse a la izquierda. */
-  text-align: left;
 }
 
 .pw-upcoming-head {
@@ -826,3 +826,87 @@
   background: var(--kapital-badge-bg);
   color: var(--kapital-badge-text);
 }
+
+/* --- Secciones de Análisis, Flota y Configuración ------------------------ */
+
+.pw-panel-inner { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+.pw-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.pw-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+}
+
+.pw-metric strong {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--kapital-text-primary);
+}
+
+.pw-metric > span { font-size: 0.82rem; color: var(--kapital-text-secondary); }
+
+.pw-metric small { font-size: 0.74rem; color: var(--kapital-text-secondary); opacity: 0.85; }
+
+/* El tono refuerza el texto; nunca lo sustituye. */
+.pw-metric[data-tone='warn'] { border-color: var(--kapital-accent-orange); }
+.pw-metric[data-tone='warn'] strong { color: var(--kapital-accent-orange); }
+.pw-metric[data-tone='danger'] { border-color: var(--kapital-accent-red); }
+.pw-metric[data-tone='danger'] strong { color: var(--kapital-accent-red); }
+.pw-metric[data-tone='ok'] strong { color: var(--kapital-accent-green); }
+
+.pw-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.79rem;
+  line-height: 1.5;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-footnote svg { flex-shrink: 0; margin-top: 2px; }
+
+.pw-input-sm {
+  width: auto;
+  min-width: 180px;
+  padding: 5px 9px;
+  font-size: 0.8rem;
+}
+
+.pw-decision-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-decision-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-bg);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--kapital-text-primary);
+}
+
+.pw-decision-list svg { flex-shrink: 0; margin-top: 3px; color: var(--kapital-text-secondary); }
+
+/* Una unidad con registros de más se reconoce por su marca, no por el fondo. */
+.pw-table tr[data-duplicado='true'] td:first-child { border-left: 2px solid var(--kapital-accent-orange); }
