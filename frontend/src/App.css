@@ -1202,3 +1202,63 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   border: 1px solid var(--kapital-border);
   color: var(--kapital-text-secondary);
 }
+
+/* --- Caras de un documento dentro de su tarjeta --------------------------- */
+
+/**
+ * Un documento de dos caras ocupaba dos tarjetas y el panel se convertía en una
+ * pared. Aquí las caras son filas dentro de la tarjeta del documento: se ve el
+ * estado de ambas sin abrir nada y sin duplicar encabezados.
+ */
+.doc-caras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-cara {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg, #f9fafb);
+}
+
+.doc-cara-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.doc-cara-nombre {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.doc-cara-acciones {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.doc-cara-subir {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+
+.doc-cara .review-doc-missing {
+  margin: 0;
+  font-size: 0.72rem;
+}
