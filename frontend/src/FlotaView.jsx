@@ -867,7 +867,16 @@ const FlotaView = ({ usuario, initialBase }) => {
                     )}
                   </span>
                 </td>
-                {!isCliente && <td>{vehiculo.tipo} ({vehiculo.capacidad} pax)</td>}
+                {/* Ni el tipo ni la capacidad se preguntan siempre en el alta.
+                    Sin respaldo la celda quedaba como « (15 pax)», con el tipo
+                    en blanco, que parecía un fallo de carga en vez de un dato
+                    que nadie ha rellenado todavía. */}
+                {!isCliente && (
+                  <td>
+                    {vehiculo.tipo || 'Sin tipo'}
+                    {' '}({vehiculo.capacidad ? `${vehiculo.capacidad} pax` : 'sin capacidad'})
+                  </td>
+                )}
                 <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
                 <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
                 <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>

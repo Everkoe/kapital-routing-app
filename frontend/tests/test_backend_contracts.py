@@ -5,6 +5,7 @@ import io
 import random
 import time
 import unittest
+from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -2127,6 +2128,57 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         # Con la exigencia desactivada no hay actor: se conserva el rollback.
         self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
+
+    def test_an_approved_driver_seeds_their_unit_with_what_they_declared(self):
+        """La flota leía `chofer` y la aprobación escribía `nombre`.
+
+        El resultado era una unidad sin nombre de chofer, con 15 plazas que
+        nadie declaró y con el tipo en blanco.
+        """
+        conductor = {
+            "nombre": "ANYELO BILL",
+            "rol": "Conductor",
+            "unidad_id": "KAP-TESTV3",
+            "perfil_conductor": {
+                "nombres": "ANYELO BILL",
+                "telefonoDirecto": " 906916715 ",
+                "vehiculoCapacidad": "12",
+            },
+        }
+        with mock.patch.dict(backend.conductores_db, {}, clear=True):
+            backend._sembrar_unidad("KAP-TESTV3", conductor)
+            unidad = backend.conductores_db["KAP-TESTV3"]
+
+        self.assertEqual(unidad["chofer"], "ANYELO BILL")
+        self.assertEqual(unidad["telefono"], "906916715")
+        self.assertEqual(unidad["capacidad"], 12)
+        # Nadie pregunta estos datos en el alta: inventarlos marcaba como
+        # vigente un SOAT que nadie había revisado.
+        for campo in backend._FLEET_EXPIRY_FIELDS:
+            self.assertNotIn(campo, unidad)
+        self.assertNotIn("tipo", unidad)
+
+    def test_seeding_a_unit_never_overwrites_what_administration_set(self):
+        conductor = {
+            "nombre": "ANYELO BILL",
+            "perfil_conductor": {"nombres": "ANYELO BILL", "vehiculoCapacidad": 12},
+        }
+        existente = {"KAP-009": {"chofer": "NOMBRE CORREGIDO A MANO", "capacidad": 20, "tipo": "Sprinter"}}
+        with mock.patch.dict(backend.conductores_db, existente, clear=True):
+            backend._sembrar_unidad("KAP-009", conductor)
+            unidad = backend.conductores_db["KAP-009"]
+
+        self.assertEqual(unidad["chofer"], "NOMBRE CORREGIDO A MANO")
+        self.assertEqual(unidad["capacidad"], 20)
+        self.assertEqual(unidad["tipo"], "Sprinter")
+
+    def test_seeding_a_unit_ignores_a_capacity_that_is_not_usable(self):
+        for declarada in ("", None, "cero", 0, -3):
+            with self.subTest(declarada=declarada):
+                conductor = {"nombre": "X", "perfil_conductor": {"vehiculoCapacidad": declarada}}
+                with mock.patch.dict(backend.conductores_db, {}, clear=True):
+                    backend._sembrar_unidad("KAP-010", conductor)
+                    self.assertNotIn("capacidad", backend.conductores_db["KAP-010"])
 
     def test_two_drivers_without_a_unit_do_not_share_a_folder(self):
         """El destino sale de la sesión, no de lo que mande el navegador.

@@ -3148,6 +3148,53 @@ class DriverProfilePayload(BaseModel):
     email: str
     perfilData: dict
 
+def _capacidad_declarada(valor: Any) -> Optional[int]:
+    """Capacidad como entero, o `None` si el conductor no declaró una usable."""
+    try:
+        capacidad = int(float(str(valor).strip()))
+    except (TypeError, ValueError):
+        return None
+    return capacidad if capacidad > 0 else None
+
+
+def _sembrar_unidad(unidad_id: str, usuario: Dict[str, Any]) -> None:
+    """Crea o completa la unidad de flota con lo que el conductor ya declaró.
+
+    Antes esta siembra escribía una forma distinta de la que lee la flota
+    —`nombre` en vez de `chofer`— y rellenaba el resto con constantes: 15
+    plazas, tipo «Sprinter» y cuatro vencimientos en 2027. El resultado era una
+    unidad sin nombre de chofer, con una capacidad que nadie había declarado y
+    con documentos marcados como vigentes sin que nadie los hubiera revisado.
+
+    Ahora se toma del perfil lo que el conductor sí rellenó y se deja fuera lo
+    que nadie preguntó: el tipo de unidad y los vencimientos no están en el
+    alta, así que quedan vacíos y la flota los muestra como pendientes, que es
+    lo que son. Los campos que ya tengan valor no se tocan: la unidad puede
+    existir porque Administración la creó antes a mano.
+    """
+    if not unidad_id:
+        return
+
+    perfil = usuario.get("perfil_conductor")
+    perfil = perfil if isinstance(perfil, dict) else {}
+
+    declarado: Dict[str, Any] = {}
+    nombre = str(perfil.get("nombres") or usuario.get("nombre") or "").strip()
+    if nombre:
+        declarado["chofer"] = nombre
+    telefono = str(perfil.get("telefonoDirecto") or usuario.get("telefono") or "").strip()
+    if telefono:
+        declarado["telefono"] = telefono
+    capacidad = _capacidad_declarada(perfil.get("vehiculoCapacidad"))
+    if capacidad is not None:
+        declarado["capacidad"] = capacidad
+
+    unidad = conductores_db.setdefault(unidad_id, {})
+    for campo, valor in declarado.items():
+        if not str(unidad.get(campo) or "").strip():
+            unidad[campo] = valor
+
+
 class BulkActionPayload(BaseModel):
     admin_email: str
     target_emails: List[str]
@@ -3246,11 +3293,7 @@ async def register_user(usuario: UsuarioRegistro):
     usuarios_db[identifier_clean] = nuevo_usuario
     
     if rol_solicitado == "Conductor" and usuario.unidad_id:
-        if usuario.unidad_id not in conductores_db:
-            conductores_db[usuario.unidad_id] = {
-                "capacidad": 15, "tipo": "Sprinter", "chofer": usuario.nombre,
-                "soat": "2027-01-01", "revision": "2027-01-01", "atu": "2027-01-01", "licencia": "2027-01-01"
-            }
+        _sembrar_unidad(usuario.unidad_id.strip(), nuevo_usuario)
             
     # Add notification for new registration
     if rol_solicitado == "Conductor":
@@ -3514,6 +3557,7 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
             if payload.action == "approve":
                 usuarios_db[target]["estado"] = "Activo"
                 refresh_session_index_for(usuarios_db[target])
+                _sembrar_unidad(str(usuarios_db[target].get("unidad_id") or "").strip(), usuarios_db[target])
             elif payload.action in ["reject", "deactivate"]:
                 usuarios_db[target]["estado"] = "Rechazado"
                 refresh_session_index_for(usuarios_db[target])
@@ -3545,16 +3589,7 @@ async def approve_user(
     # Si es conductor y el admin proporcionó un Padrón (unidad_id)
     if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
         usuarios_db[target_email]["unidad_id"] = unidad_id.strip()
-        # Initialize in conductores_db if not exists
-        if unidad_id.strip() not in conductores_db:
-            conductores_db[unidad_id.strip()] = {
-                "id": unidad_id.strip(),
-                "nombre": usuarios_db[target_email].get("nombre"),
-                "status": "Activo",
-                "ubicacion": "Base",
-                "capacidad": 15,
-                "turno": "08:00 AM"
-            }
+        _sembrar_unidad(unidad_id.strip(), usuarios_db[target_email])
 
     await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
@@ -3765,6 +3800,10 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
     elif len(revisiones) > 0 and all(v["estado"] == "aprobado" for v in revisiones.values()):
         conductor["estado"] = "Activo"
         refresh_session_index_for(conductor)
+        # Aprobar el último documento es lo que da de alta al conductor, así
+        # que es aquí donde su unidad tiene que recoger lo que él declaró. Sin
+        # esto quedaba en la flota sin nombre de chofer ni capacidad.
+        _sembrar_unidad(str(conductor.get("unidad_id") or "").strip(), conductor)
 
     await persist_users_only()
     return {
