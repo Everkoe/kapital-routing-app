@@ -211,9 +211,9 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               <span>
                 La ocupación cuenta {service.agentCount} registros pero solo{' '}
                 {distinctDocuments(service.agentes)} documentos distintos: hay pasajeros
-                repetidos, así que la capacidad mostrada está inflada. Los registros son idénticos
-                entre sí: apuntan a generaciones acumuladas sobre el mismo tablero, no a un fallo
-                de captura. Ver la sección Análisis.
+                repetidos, así que la capacidad mostrada está inflada. Son la misma persona en
+                días distintos: el Excel de origen cubre la semana completa y se cargó entera en
+                un solo tablero, sin conservar la fecha. Ver la sección Análisis.
               </span>
             </p>
           )}

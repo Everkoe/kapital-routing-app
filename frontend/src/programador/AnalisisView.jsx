@@ -82,8 +82,9 @@ const AnalisisView = () => {
                   <span>
                     El tablero cuenta <strong>{quality.registros.toLocaleString('es-PE')}</strong> registros
                     de pasajero, pero corresponden a <strong>{quality.personas.toLocaleString('es-PE')}</strong>{' '}
-                    personas distintas. La ocupación que ves está inflada, y con ella la sensación de
-                    que no queda sitio. <strong>El padrón real es el de personas.</strong>
+                    personas distintas. Cada persona aparece una vez por día de la semana, así que
+                    la ocupación que ves está inflada y con ella la sensación de que no queda
+                    sitio. <strong>El padrón real es el de personas.</strong>
                   </span>
                 </p>
               )}
@@ -93,19 +94,19 @@ const AnalisisView = () => {
                 <Metric value={quality.personas.toLocaleString('es-PE')} label="Personas distintas" />
                 <Metric
                   value={quality.registrosDuplicados.toLocaleString('es-PE')}
-                  label="Registros repetidos"
+                  label="Registros de la misma persona"
                   note={`${pct(quality.registrosDuplicados, quality.registros)}% del total`}
                   tone={quality.registrosDuplicados > 0 ? 'warn' : 'ok'}
                 />
                 <Metric
                   value={`${quality.serviciosConRepetidos} / ${quality.serviciosTotales}`}
-                  label="Servicios con repetidos"
+                  label="Servicios que los contienen"
                   tone={quality.serviciosConRepetidos > 0 ? 'warn' : 'ok'}
                 />
                 <Metric
                   value={quality.personasEnAmbosEstados}
                   label="Personas asignadas y pendientes a la vez"
-                  note={quality.personasEnAmbosEstados > 0 ? 'Contradicción del origen' : null}
+                  note={quality.personasEnAmbosEstados > 0 ? 'Viaja un día y espera otro' : null}
                   tone={quality.personasEnAmbosEstados > 0 ? 'danger' : 'ok'}
                 />
                 <Metric
@@ -145,13 +146,13 @@ const AnalisisView = () => {
               <p className="pw-footnote">
                 <Info size={14} aria-hidden="true" />
                 <span>
-                  <strong>Qué son estas repeticiones.</strong> No parecen errores del Excel de
-                  origen: los registros repetidos son idénticos campo a campo, la misma persona
-                  aparece en varias unidades a la vez y las rutas comparten un único horario. El
-                  patrón es el de un tablero sobre el que se acumularon varias generaciones sin
-                  limpiar, perdiendo por el camino la fecha y el turno. La concentración de
-                  ubicaciones apunta en la misma dirección: direcciones que nunca llegaron a
-                  geocodificarse.
+                  <strong>Qué son estas repeticiones.</strong> No son errores del Excel ni
+                  pasajeros duplicados: son <strong>la misma persona en días distintos</strong>.
+                  El Excel de origen registra la semana completa, una fila por pasajero y día, y
+                  se cargó entera en un solo tablero porque un filtro de fecha vacío coincide con
+                  todas las filas. La fecha no llegó a guardarse, así que los cinco días quedaron
+                  superpuestos y son indistinguibles. El horario que ves en las rutas tampoco es
+                  el de ningún pasajero: es el texto que había en la casilla del filtro.
                 </span>
               </p>
             </div>
