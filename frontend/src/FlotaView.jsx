@@ -8,6 +8,7 @@ import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from '.
 import { apiFetch, apiRequest } from './utils/apiClient';
 
 import DocumentReviewCard from './components/DocumentReviewCard';
+import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
 import DocumentViewer from './components/DocumentViewer';
 import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
 import './App.css';
@@ -495,10 +496,8 @@ const FlotaView = ({ usuario, initialBase }) => {
       capacidad: vehiculo.capacidad ?? 10,
       tipo: vehiculo.tipo || 'AUTO',
       chofer: vehiculo.chofer || '',
-      // El perfil del conductor ya trae su número: solo 1 de 109 unidades
-      // guarda `telefono` propio, mientras 108 tienen `celular` del perfil.
-      // Partir de un campo vacío obligaba a teclear un dato que ya existe.
-      telefono: vehiculo.telefono || vehiculo.celular || '',
+      // Mismo origen que el botón de WhatsApp, para que no discrepen.
+      telefono: telefonoDeUnidad(vehiculo),
       soat: vehiculo.soat || '', revision: vehiculo.revision || '', atu: vehiculo.atu || '', licencia: vehiculo.licencia || '',
     };
     setFormData(editableData);
@@ -876,8 +875,20 @@ const FlotaView = ({ usuario, initialBase }) => {
                 {!isCliente && (
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
-                    {vehiculo.telefono && (
-                      <a href={`https://wa.me/${vehiculo.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-icon" title="Contactar por WhatsApp" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><MessageCircle size={15} /></a>
+                    {/* El número casi siempre viene del perfil del conductor, no
+                        del registro de flota: mirar solo `telefono` escondía este
+                        botón en 108 de 109 unidades. */}
+                    {whatsappDeUnidad(vehiculo) && (
+                      <a
+                        href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-icon"
+                        title={`Contactar por WhatsApp (${telefonoDeUnidad(vehiculo)})`}
+                        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <MessageCircle size={15} />
+                      </a>
                     )}
                     <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} /></button>
                     <button className="btn-icon" onClick={() => handleDelete(getFleetUnitId(vehiculo))} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>

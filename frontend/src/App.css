@@ -1335,16 +1335,25 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   border-color: var(--kapital-text-secondary);
 }
 
+/**
+ * La franja de abajo está reservada siempre, tenga o no el cursor encima.
+ *
+ * Arriba competía con el nombre del documento y sus badges de estado, que es
+ * lo que se lee al revisar. Y si el aviso apareciera solo al pasar el ratón sin
+ * reservar el hueco, el contenido daría un salto cada vez.
+ */
+.review-doc-card.doc-dropzone { padding-bottom: 26px; }
+
 .doc-dropzone[data-pegable]::after {
   content: 'Ctrl+V para pegar';
   position: absolute;
-  top: 6px;
-  right: 10px;
+  bottom: 7px;
+  right: 12px;
   font-size: 0.65rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   pointer-events: none;
-  opacity: 0.55;
+  opacity: 0.6;
   color: var(--kapital-text-secondary);
 }
 
