@@ -290,6 +290,26 @@ test('un documento vacío no se considera repetido de otro vacío', () => {
   assert.equal(distinctDocuments([agente(''), agente('')]), 0);
 });
 
+test('un agente con ubicación de respaldo se trata como sin ubicación', () => {
+  // El backend marca `ubicacion_estimada` cuando la fila no traía coordenada
+  // legible. Sin honrar esa marca, el agente llegaba con coordenadas válidas
+  // —las del punto de respaldo— y pasaba por bien ubicado.
+  const services = buildServices(
+    [
+      ruta(UNASSIGNED, 'CALLAO', '00:00', [
+        agente('CON-GPS'),
+        { ...agente('RESPALDO'), ubicacion_estimada: true },
+      ]),
+    ],
+    indexFleet(FLOTA),
+  );
+
+  assert.deepEqual(
+    buildPendingAgents(services).map((p) => p.motivo),
+    ['sin_unidad', 'sin_ubicacion'],
+  );
+});
+
 test('ALL es un centinela que ningún dato real puede igualar por accidente', () => {
   assert.equal(emptyFilters().microZona, ALL);
   assert.ok(ALL.startsWith('__') && ALL.endsWith('__'));

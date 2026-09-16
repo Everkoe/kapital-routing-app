@@ -1885,6 +1885,95 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reload_db.await_args.kwargs.get("force"), True)
 
 
+    async def _generar_rutas(self, filas, *, fecha="13/09/2026", hora="08:00",
+                             sentido="INGRESO", sede="LIMA"):
+        """Ejecuta la generación con un Excel en memoria y devuelve las rutas."""
+        backend.AUTH_ENFORCED = False
+        backend.conductores_db.clear()
+        backend.conductores_db["K-001"] = {"capacidad": 10, "tipo": "Van", "chofer": "Chofer"}
+
+        dataframe = pd.DataFrame(filas)
+        stream = io.BytesIO()
+        dataframe.to_excel(stream, index=False)
+        stream.seek(0)
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist", new=AsyncMock()),
+            patch.object(backend, "persist_routes_summary", new=AsyncMock()),
+        ):
+            return await backend.assign_routes_from_excel(
+                UploadFile(filename="rutas.xlsx", file=stream),
+                fecha=fecha, hora=hora, sentido=sentido, sede=sede,
+            )
+
+    @staticmethod
+    def _fila(dni, coordenadas):
+        return {
+            "FECHA": "13/09/2026", "HORA": "08:00", "SENTIDO": "INGRESO", "SEDE": "LIMA",
+            "DISTRITO": "CALLAO", "DNI": dni, "NOMBRES": f"Agente {dni}",
+            "DIRECCION": "Calle 1", "EMPRESA": "KAPITAL", "COORDENADAS": coordenadas,
+        }
+
+    async def test_a_passenger_without_readable_coordinates_is_flagged_not_hidden(self):
+        """Una ubicación inventada que no se anuncia invalida el ruteo.
+
+        El respaldo al centro de Lima se conserva para que una celda sucia no
+        tumbe la generación, pero el agente queda marcado: en la base actual el
+        70 % del padrón cayó a ese punto sin que nadie pudiera verlo.
+        """
+        rutas = await self._generar_rutas([
+            self._fila("111", "-12.05,-77.10"),
+            self._fila("222", "basura"),
+            self._fila("333", ""),
+        ])
+
+        agentes = {a["id"]: a for r in rutas for a in r["agentes"]}
+        self.assertEqual(len(agentes), 3, "no se pierde ningún pasajero")
+
+        self.assertFalse(agentes["111"]["ubicacion_estimada"])
+        self.assertAlmostEqual(agentes["111"]["lat"], -12.05)
+
+        for dni in ("222", "333"):
+            self.assertTrue(
+                agentes[dni]["ubicacion_estimada"],
+                f"{dni} recibió la ubicación de respaldo y debe decirlo",
+            )
+            self.assertAlmostEqual(agentes[dni]["lat"], backend.COORD_RESPALDO_LAT)
+            self.assertAlmostEqual(agentes[dni]["lng"], backend.COORD_RESPALDO_LNG)
+
+    async def test_generated_routes_keep_the_shift_that_produced_them(self):
+        """Sin fecha ni sentido, dos generaciones son indistinguibles.
+
+        `fecha`, `sentido` y `sede` solo servían para filtrar el Excel y se
+        descartaban, así que un tablero no sabía de qué día era. Acumular varias
+        generaciones sobre el mismo tablero dejaba de ser detectable.
+        """
+        rutas = await self._generar_rutas(
+            [self._fila("111", "-12.05,-77.10")],
+            fecha="13/09/2026", sentido="INGRESO", sede="LIMA",
+        )
+
+        self.assertTrue(rutas)
+        for ruta in rutas:
+            self.assertEqual(ruta["fecha"], "13/09/2026")
+            self.assertEqual(ruta["sentido"], "INGRESO")
+            self.assertEqual(ruta["sede"], "LIMA")
+            self.assertEqual(ruta["horario"], "08:00")
+
+    async def test_empty_shift_fields_do_not_write_blank_keys(self):
+        """Un filtro vacío no debe ensuciar el snapshot con claves sin valor."""
+        rutas = await self._generar_rutas(
+            [self._fila("111", "-12.05,-77.10")],
+            fecha="13/09/2026", sentido="INGRESO", sede="",
+        )
+
+        self.assertTrue(rutas)
+        for ruta in rutas:
+            self.assertNotIn("sede", ruta)
+            self.assertEqual(ruta["fecha"], "13/09/2026")
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 

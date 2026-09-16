@@ -15,7 +15,6 @@ import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
-import UpcomingPanel from './components/UpcomingPanel.jsx';
 import './programador.css';
 
 /**
@@ -121,8 +120,6 @@ const ProgramadorWorkbench = () => {
         onExport={handleExport}
         canExport={!isLoading && visibleServices.length > 0}
       />
-
-      <UpcomingPanel />
 
       {error && (
         <p className="pw-notice" data-tone="danger" role="alert">

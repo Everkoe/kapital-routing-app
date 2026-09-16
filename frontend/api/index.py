@@ -4127,6 +4127,12 @@ async def export_flota(base: str = "MASIVO"):
         headers=headers,
     )
 
+# Ubicación de respaldo cuando una fila no trae coordenada legible. No es un
+# dato del pasajero: todo agente que la reciba va marcado `ubicacion_estimada`.
+COORD_RESPALDO_LAT = -12.046374
+COORD_RESPALDO_LNG = -77.042793
+
+
 def get_micro_zona(direccion: str) -> str:
     direccion = direccion.lower()
     if "comas" in direccion: return "Comas 1" if "universitaria" in direccion else "Comas 2"
@@ -4313,21 +4319,53 @@ async def assign_routes_from_excel(
             debug_info = f"Columnas: {list(df.columns)}. Fechas detectadas: {fechas_demo}. Horas detectadas: {horas_demo}. Sentidos detectadas: {sentidos_demo}. Sedes detectadas: {sedes_demo}."
             raise HTTPException(status_code=400, detail=f"No se encontraron pasajeros para estos filtros. INFO DEL EXCEL: {debug_info}")
             
-        # Parsear coordenadas de forma segura
+        # Parsear coordenadas de forma segura.
+        #
+        # El respaldo al centro de Lima se conserva para que una celda sucia no
+        # tumbe la generación entera, pero deja de ser silencioso: antes un
+        # `except: pass` se tragaba el motivo y el resultado era que el 70 % del
+        # padrón acababa en un mismo punto sin que nadie se enterara. Una
+        # ubicación inventada que no se anuncia invalida cualquier ruteo
+        # posterior y nadie puede corregir lo que no ve.
         c_coord = col_name("COORDENADAS")
+
         def parse_coord(val):
+            """Devuelve (lat, lng, estimada). `estimada` marca el respaldo."""
             try:
                 parts = str(val).split(',')
                 if len(parts) >= 2:
-                    return float(parts[0].strip()), float(parts[1].strip())
-            except:
+                    return float(parts[0].strip()), float(parts[1].strip()), False
+            except (ValueError, TypeError, AttributeError):
                 pass
-            return -12.046374, -77.042793 # Default to Lima Center if dirty data
+            return COORD_RESPALDO_LAT, COORD_RESPALDO_LNG, True
 
-        parsed = df_filtered[c_coord].apply(parse_coord)
-        df_filtered['lat'] = [p[0] for p in parsed]
-        df_filtered['lng'] = [p[1] for p in parsed]
+        parsed = df_filtered[c_coord].apply(parse_coord) if c_coord in df_filtered.columns else None
+        if parsed is None:
+            # Sin columna de coordenadas no hay nada que parsear: todo el lote
+            # queda estimado, y se dice.
+            df_filtered['lat'] = COORD_RESPALDO_LAT
+            df_filtered['lng'] = COORD_RESPALDO_LNG
+            df_filtered['ubicacion_estimada'] = True
+        else:
+            df_filtered['lat'] = [p[0] for p in parsed]
+            df_filtered['lng'] = [p[1] for p in parsed]
+            df_filtered['ubicacion_estimada'] = [p[2] for p in parsed]
+
+        estimadas = int(df_filtered['ubicacion_estimada'].sum())
+        if estimadas:
+            print(
+                f"[Kapital] {estimadas} de {len(df_filtered)} pasajeros sin coordenada legible: "
+                f"se les asignó la ubicación de respaldo y quedan marcados como estimados."
+            )
         
+        # Contexto del turno que se adjunta a cada ruta generada. Se omiten los
+        # campos vacíos para no escribir claves sin valor en el snapshot.
+        _contexto_turno = {
+            clave: valor.strip()
+            for clave, valor in (("fecha", fecha), ("sentido", sentido), ("sede", sede))
+            if valor and valor.strip()
+        }
+
         rutas_generadas = []
         c_distrito = col_name("DISTRITO")
         c_dni = col_name("DNI")
@@ -4372,6 +4410,7 @@ async def assign_routes_from_excel(
                                     "direccion": str(ag.get(c_dir, "")),
                                     "lat": float(ag['lat']),
                                     "lng": float(ag['lng']),
+                                    "ubicacion_estimada": bool(ag.get('ubicacion_estimada', False)),
                                     "empresa": str(ag.get(c_emp, "KAPITAL"))
                                 })
 
@@ -4379,7 +4418,20 @@ async def assign_routes_from_excel(
                             if ruta_existente:
                                 ruta_existente["agentes"].extend(agentes_format)
                             else:
-                                rutas_generadas.append({"conductor": conductor_id, "micro_zona": distrito, "horario": hora, "agentes": agentes_format})
+                                rutas_generadas.append({
+                                    "conductor": conductor_id,
+                                    "micro_zona": distrito,
+                                    "horario": hora,
+                                    # La ruta conserva el turno que la originó.
+                                    # Antes `fecha`, `sentido` y `sede` solo
+                                    # servían para filtrar el Excel y se
+                                    # tiraban, así que un tablero no sabía de
+                                    # qué día ni de qué sentido era, y dos
+                                    # generaciones distintas se volvían
+                                    # indistinguibles al acumularse.
+                                    **_contexto_turno,
+                                    "agentes": agentes_format,
+                                })
                                 
                             disponibilidad_conductores[conductor_id].append(hora)
                             agentes_grupo = agentes_grupo[len(agentes_a_asignar):]
@@ -4396,9 +4448,16 @@ async def assign_routes_from_excel(
                                 "direccion": str(ag.get(c_dir, "")),
                                 "lat": float(ag['lat']),
                                 "lng": float(ag['lng']),
+                                "ubicacion_estimada": bool(ag.get('ubicacion_estimada', False)),
                                 "empresa": str(ag.get(c_emp, "KAPITAL"))
                             })
-                        rutas_generadas.append({"conductor": "SIN ASIGNAR", "micro_zona": distrito, "horario": hora, "agentes": agentes_format})
+                        rutas_generadas.append({
+                            "conductor": "SIN ASIGNAR",
+                            "micro_zona": distrito,
+                            "horario": hora,
+                            **_contexto_turno,
+                            "agentes": agentes_format,
+                        })
                         break
                         
         rutas_estado_actual = rutas_generadas

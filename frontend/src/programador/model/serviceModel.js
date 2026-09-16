@@ -188,7 +188,12 @@ export const buildPendingAgents = (services) => {
         horario: service.horario,
         empresa: norm(agente?.empresa),
         // Categoría derivable del propio dato, sin motor de validación.
-        motivo: !hasCoordinate(agente?.lat) || !hasCoordinate(agente?.lng)
+        // `ubicacion_estimada` la pone el backend cuando la fila no traía una
+        // coordenada legible y recibió la de respaldo. Sin esa marca, un agente
+        // sin ubicación real era indistinguible de uno bien ubicado.
+        motivo: agente?.ubicacion_estimada
+          || !hasCoordinate(agente?.lat)
+          || !hasCoordinate(agente?.lng)
           ? 'sin_ubicacion'
           : !norm(agente?.direccion)
             ? 'direccion_incompleta'
