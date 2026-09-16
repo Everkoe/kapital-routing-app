@@ -24,8 +24,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   (`rutas_estado_actual`, `usuarios_db`, `conductores_db`, `historial_rutas`, `board_lock`, `routes_summary`,
   `notifications_db`). En un entorno serverless (Vercel) esa memoria **no persiste entre cold starts** —
   tenerlo en cuenta al debuggear "datos que desaparecen".
-- **Gemini AI**: integrado vía REST puro (sin SDK, "para ahorrar espacio en Vercel") como "Kapital Copilot",
-  un asistente conversacional para el Programador de rutas (`CopilotChat.jsx` + `SYSTEM_PROMPT` en `api/index.py`).
+- **Gemini AI — descartado como producto, vivo como endpoint**: se construyó "Kapital Copilot", un asistente
+  conversacional para el Programador de rutas, vía REST puro (sin SDK, "para ahorrar espacio en Vercel").
+  **Ya no forma parte de la aplicación**: `frontend/src/CopilotChat.jsx` existe (268 líneas) pero **ningún
+  componente lo importa ni lo renderiza** — es código muerto pendiente de retirar. El backend sí conserva
+  `POST /api/chat` y su `SYSTEM_PROMPT` en `api/index.py`, gateado con sesión porque consume cuota de pago.
+  No asumir que el Copilot es una función disponible al rediseñar el portal del Programador.
 - **Migración de configuración en curso**: `SUPABASE_URL`/`SUPABASE_KEY` ya priorizan variables de entorno,
   pero conservan valores fallback temporalmente para no interrumpir Vercel. El fallback se retirará después de
   verificar las variables del despliegue. `JSON_PE_TOKEN` y `GEMINI_API_KEY` también están documentados en `.env.example`.

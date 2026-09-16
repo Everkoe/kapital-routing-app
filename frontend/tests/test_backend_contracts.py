@@ -1816,6 +1816,164 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.conductores_db["K-001"], original)
 
 
+    async def test_fleet_writes_reject_without_session_before_reading_the_database(self):
+        """Una escritura de flota sin sesión no debe costar ni una lectura.
+
+        `reload_db(force=True)` salta el caché TTL y descarga el estado completo
+        (~3,95 MB). Mientras corría antes del gate, cada petición anónima pagaba
+        esa lectura entera para acabar rechazada con 401: cien sondas eran
+        ~400 MB de egress tirados. Si alguien vuelve a poner el reload por
+        delante de la autorización, esta prueba falla.
+        """
+        backend.AUTH_ENFORCED = True
+        registro = backend.FlotaRegistro(
+            placa="KAP-999", capacidad=12, tipo="Sprinter", chofer="Nadie"
+        )
+        actualizacion = backend.FlotaUpdate(capacidad=14)
+
+        llamadas = [
+            ("POST", lambda: backend.add_flota(registro, session_token=None)),
+            ("PUT", lambda: backend.update_flota("KAP-999", actualizacion, session_token=None)),
+            ("DELETE", lambda: backend.delete_flota("KAP-999", session_token=None)),
+        ]
+
+        for verbo, llamada in llamadas:
+            with self.subTest(verbo=verbo):
+                reload_db = AsyncMock()
+                with patch.object(backend, "reload_db", new=reload_db):
+                    with self.assertRaises(HTTPException) as caught:
+                        await llamada()
+
+                self.assertEqual(caught.exception.status_code, 401)
+                reload_db.assert_not_awaited()
+
+    async def test_fleet_writes_still_reload_once_the_caller_is_authorized(self):
+        """El reload no se elimina, solo se mueve: la escritura lo necesita.
+
+        Una instancia caliente no debe escribir sobre un snapshot viejo, así que
+        tras autorizar se sigue releyendo con `force=True`.
+        """
+        backend.AUTH_ENFORCED = True
+        admin = {
+            "identifier": "admin@example.com",
+            "email": "admin@example.com",
+            "nombre": "Admin Flota",
+            "rol": "Administración",
+            "estado": "Activo",
+        }
+        backend.usuarios_db["admin@example.com"] = admin
+        token = backend.issue_session(admin)
+        backend.conductores_db.clear()
+
+        reload_db = AsyncMock()
+        with (
+            patch.object(backend, "reload_db", new=reload_db),
+            patch.object(
+                backend,
+                "_persist_and_verify_fleet",
+                new=AsyncMock(return_value={"capacidad": 12}),
+            ),
+        ):
+            await backend.add_flota(
+                backend.FlotaRegistro(
+                    placa="KAP-777", capacidad=12, tipo="Sprinter", chofer="Alguien"
+                ),
+                session_token=token,
+            )
+
+        reload_db.assert_awaited_once()
+        self.assertEqual(reload_db.await_args.kwargs.get("force"), True)
+
+
+    async def _generar_rutas(self, filas, *, fecha="13/09/2026", hora="08:00",
+                             sentido="INGRESO", sede="LIMA"):
+        """Ejecuta la generación con un Excel en memoria y devuelve las rutas."""
+        backend.AUTH_ENFORCED = False
+        backend.conductores_db.clear()
+        backend.conductores_db["K-001"] = {"capacidad": 10, "tipo": "Van", "chofer": "Chofer"}
+
+        dataframe = pd.DataFrame(filas)
+        stream = io.BytesIO()
+        dataframe.to_excel(stream, index=False)
+        stream.seek(0)
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist", new=AsyncMock()),
+            patch.object(backend, "persist_routes_summary", new=AsyncMock()),
+        ):
+            return await backend.assign_routes_from_excel(
+                UploadFile(filename="rutas.xlsx", file=stream),
+                fecha=fecha, hora=hora, sentido=sentido, sede=sede,
+            )
+
+    @staticmethod
+    def _fila(dni, coordenadas):
+        return {
+            "FECHA": "13/09/2026", "HORA": "08:00", "SENTIDO": "INGRESO", "SEDE": "LIMA",
+            "DISTRITO": "CALLAO", "DNI": dni, "NOMBRES": f"Agente {dni}",
+            "DIRECCION": "Calle 1", "EMPRESA": "KAPITAL", "COORDENADAS": coordenadas,
+        }
+
+    async def test_a_passenger_without_readable_coordinates_is_flagged_not_hidden(self):
+        """Una ubicación inventada que no se anuncia invalida el ruteo.
+
+        El respaldo al centro de Lima se conserva para que una celda sucia no
+        tumbe la generación, pero el agente queda marcado: en la base actual el
+        70 % del padrón cayó a ese punto sin que nadie pudiera verlo.
+        """
+        rutas = await self._generar_rutas([
+            self._fila("111", "-12.05,-77.10"),
+            self._fila("222", "basura"),
+            self._fila("333", ""),
+        ])
+
+        agentes = {a["id"]: a for r in rutas for a in r["agentes"]}
+        self.assertEqual(len(agentes), 3, "no se pierde ningún pasajero")
+
+        self.assertFalse(agentes["111"]["ubicacion_estimada"])
+        self.assertAlmostEqual(agentes["111"]["lat"], -12.05)
+
+        for dni in ("222", "333"):
+            self.assertTrue(
+                agentes[dni]["ubicacion_estimada"],
+                f"{dni} recibió la ubicación de respaldo y debe decirlo",
+            )
+            self.assertAlmostEqual(agentes[dni]["lat"], backend.COORD_RESPALDO_LAT)
+            self.assertAlmostEqual(agentes[dni]["lng"], backend.COORD_RESPALDO_LNG)
+
+    async def test_generated_routes_keep_the_shift_that_produced_them(self):
+        """Sin fecha ni sentido, dos generaciones son indistinguibles.
+
+        `fecha`, `sentido` y `sede` solo servían para filtrar el Excel y se
+        descartaban, así que un tablero no sabía de qué día era. Acumular varias
+        generaciones sobre el mismo tablero dejaba de ser detectable.
+        """
+        rutas = await self._generar_rutas(
+            [self._fila("111", "-12.05,-77.10")],
+            fecha="13/09/2026", sentido="INGRESO", sede="LIMA",
+        )
+
+        self.assertTrue(rutas)
+        for ruta in rutas:
+            self.assertEqual(ruta["fecha"], "13/09/2026")
+            self.assertEqual(ruta["sentido"], "INGRESO")
+            self.assertEqual(ruta["sede"], "LIMA")
+            self.assertEqual(ruta["horario"], "08:00")
+
+    async def test_empty_shift_fields_do_not_write_blank_keys(self):
+        """Un filtro vacío no debe ensuciar el snapshot con claves sin valor."""
+        rutas = await self._generar_rutas(
+            [self._fila("111", "-12.05,-77.10")],
+            fecha="13/09/2026", sentido="INGRESO", sede="",
+        )
+
+        self.assertTrue(rutas)
+        for ruta in rutas:
+            self.assertNotIn("sede", ruta)
+            self.assertEqual(ruta["fecha"], "13/09/2026")
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 
@@ -2517,6 +2675,7 @@ class StorageConfigurationTestCase(unittest.TestCase):
         self.assertEqual(headers["apikey"], key)
         self.assertEqual(headers["Authorization"], f"Bearer {key}")
         self.assertEqual(headers["Content-Type"], "application/json")
+
 
 
 if __name__ == "__main__":
