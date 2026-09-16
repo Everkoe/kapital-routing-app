@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { CheckCircle, Clock, Eye, Upload, XCircle } from 'lucide-react';
 import DocumentDropZone from './DocumentDropZone';
 import {
-  CARA_DELANTE,
-  CARA_DETRAS,
+  CARA_COMPLETO,
   admiteReverso,
   caraDestinoParaArrastre,
-  claveReverso,
+  carasDeDocumento,
 } from '../constants/documentosConductor';
 
 /**
@@ -54,6 +53,24 @@ const estadoDocumento = (caras, revisiones) => {
   return ESTADOS.pendiente;
 };
 
+/**
+ * Qué caras hay, en una línea.
+ *
+ * Un archivo con ambas caras juntas basta por sí solo: no tiene sentido pedir
+ * el reverso a quien ya escaneó el documento entero en una hoja.
+ */
+const resumenDeCaras = (caras) => {
+  const completo = caras.find((cara) => cara.nombre === CARA_COMPLETO)?.tieneArchivo;
+  if (completo) return 'Documento completo en un solo archivo';
+
+  const porSeparado = caras.filter((cara) => cara.nombre !== CARA_COMPLETO);
+  const faltan = porSeparado.filter((cara) => !cara.tieneArchivo);
+  if (faltan.length === 0) return 'Delante y detrás subidos';
+
+  const subidas = porSeparado.filter((cara) => cara.tieneArchivo);
+  return `Solo ${subidas.map((c) => c.nombre.toLowerCase()).join(' y ')} · falta ${faltan.map((c) => c.nombre.toLowerCase()).join(' y ')}`;
+};
+
 const DocumentReviewCard = ({
   documento,
   perfil,
@@ -67,14 +84,11 @@ const DocumentReviewCard = ({
   const [subiendo, setSubiendo] = useState(false);
   const dosCaras = admiteReverso(documento);
 
-  const caras = (dosCaras
-    ? [
-        { campo: documento.key, nombre: CARA_DELANTE },
-        // La cara de detrás siempre es opcional: un PDF puede traer ambas.
-        { campo: claveReverso(documento.key), nombre: CARA_DETRAS, opcional: true },
-      ]
-    : [{ campo: documento.key, nombre: documento.label }]
-  ).map((cara) => ({ ...cara, archivo: perfil?.[cara.campo], tieneArchivo: Boolean(perfil?.[cara.campo]) }));
+  const caras = carasDeDocumento(documento).map((cara) => ({
+    ...cara,
+    archivo: perfil?.[cara.campo],
+    tieneArchivo: Boolean(perfil?.[cara.campo]),
+  }));
 
   const conArchivo = caras.filter((cara) => cara.tieneArchivo);
   const estado = estadoDocumento(caras, revisiones);
@@ -104,11 +118,7 @@ const DocumentReviewCard = ({
       </div>
 
       {dosCaras && conArchivo.length > 0 && (
-        <p className="doc-caras-resumen">
-          {conArchivo.length === caras.length
-            ? 'Delante y detrás subidos'
-            : `Solo ${conArchivo[0].nombre.toLowerCase()} · falta ${caras.find((c) => !c.tieneArchivo).nombre.toLowerCase()}`}
-        </p>
+        <p className="doc-caras-resumen">{resumenDeCaras(caras)}</p>
       )}
 
       <div className="review-doc-actions">
@@ -180,7 +190,12 @@ const DocumentReviewCard = ({
             <label key={cara.campo} className="btn-view-doc doc-subir-label">
               <Upload size={13} />
               {cara.tieneArchivo ? `Reemplazar ${cara.nombre.toLowerCase()}` : `Subir ${cara.nombre.toLowerCase()}`}
-              {cara.opcional && !cara.tieneArchivo && <span className="doc-cara-opcional">opcional</span>}
+              {cara.nombre === CARA_COMPLETO && !cara.tieneArchivo && (
+                <span className="doc-cara-opcional">ambas caras en una</span>
+              )}
+              {cara.opcional && cara.nombre !== CARA_COMPLETO && !cara.tieneArchivo && (
+                <span className="doc-cara-opcional">opcional</span>
+              )}
               <input
                 type="file"
                 accept={accept}

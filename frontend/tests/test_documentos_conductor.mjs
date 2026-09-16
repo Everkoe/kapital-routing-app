@@ -7,7 +7,10 @@ import {
   TIPO_PAPEL,
   TIPO_TARJETA,
   admiteReverso,
+  CARA_COMPLETO,
   caraDestinoParaArrastre,
+  carasDeDocumento,
+  claveCompleto,
   claveReverso,
   documentosPorDueno,
   etiquetaCara,
@@ -130,4 +133,35 @@ test('un documento de una sola cara siempre recibe en ella', () => {
   assert.equal(caraDestinoParaArrastre([{ campo: 'cv', tieneArchivo: true }]), 'cv');
   assert.equal(caraDestinoParaArrastre([]), null, 'sin caras no hay destino');
   assert.equal(caraDestinoParaArrastre(null), null);
+});
+
+test('un documento de tarjeta ofrece tres caras, completo la última', () => {
+  // «Completo» es la alternativa para quien escanea ambas caras en una hoja:
+  // va al final porque no se usa junto a las otras dos, sino en su lugar.
+  const dni = DOCUMENTOS_CONDUCTOR.find((d) => d.key === 'dniScaneado');
+  const caras = carasDeDocumento(dni);
+
+  assert.deepEqual(caras.map((c) => c.campo), [
+    'dniScaneado', 'dniScaneadoReverso', 'dniScaneadoCompleto',
+  ]);
+  assert.equal(caras.at(-1).nombre, CARA_COMPLETO);
+  assert.equal(caras[0].opcional, undefined, 'la cara de delante no es opcional');
+});
+
+test('un documento de papel sigue teniendo una sola cara', () => {
+  const cv = DOCUMENTOS_CONDUCTOR.find((d) => d.key === 'cv');
+  const caras = carasDeDocumento(cv);
+
+  assert.equal(caras.length, 1);
+  assert.equal(caras[0].campo, 'cv');
+  assert.equal(caras[0].nombre, 'Currículum Vitae', 'se nombra por el documento, no por una cara');
+});
+
+test('la clave del archivo completo no choca con ninguna otra', () => {
+  const claves = todasLasClaves();
+
+  assert.equal(new Set(claves).size, claves.length);
+  assert.ok(claves.includes(claveCompleto('dniScaneado')));
+  assert.equal(claveCompleto('dniScaneado'), 'dniScaneadoCompleto');
+  assert.notEqual(claveCompleto('dniScaneado'), claveReverso('dniScaneado'));
 });

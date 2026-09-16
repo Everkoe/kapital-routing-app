@@ -3,12 +3,7 @@ import { AlertTriangle, ArrowRight, Loader, Hourglass, CheckCircle2, ShieldCheck
 import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
-import {
-  DOCUMENTOS_CONDUCTOR,
-  admiteReverso,
-  claveReverso,
-  etiquetaCara,
-} from '../constants/documentosConductor';
+import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
 
 const REQUEST_TIMEOUT_MS = 12000;
 const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
@@ -24,12 +19,10 @@ const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
  */
 const DOC_LABELS = Object.fromEntries(
   DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
-    admiteReverso(documento)
-      ? [
-          [documento.key, etiquetaCara(documento, 'anverso')],
-          [claveReverso(documento.key), etiquetaCara(documento, 'reverso')],
-        ]
-      : [[documento.key, documento.label]],
+    carasDeDocumento(documento).map((cara) => [
+      cara.campo,
+      cara.nombre === documento.label ? documento.label : `${documento.label} · ${cara.nombre}`,
+    ]),
   ),
 );
 

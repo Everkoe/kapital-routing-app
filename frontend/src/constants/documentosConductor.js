@@ -35,9 +35,20 @@ export const DUENO_VEHICULO = 'vehiculo';
  */
 export const SUFIJO_REVERSO = 'Reverso';
 
+/**
+ * Sufijo del campo que guarda ambas caras en un solo archivo.
+ *
+ * Es habitual escanear delante y detrás en la misma hoja. Ese archivo no es
+ * «la cara de delante», así que guardarlo en el campo principal haría creer que
+ * falta el reverso. Con campo propio, la interfaz sabe qué tiene delante y no
+ * pide de más.
+ */
+export const SUFIJO_COMPLETO = 'Completo';
+
 /** Nombres visibles de cada cara. */
 export const CARA_DELANTE = 'Delante';
 export const CARA_DETRAS = 'Detrás';
+export const CARA_COMPLETO = 'Completo';
 
 export const DOCUMENTOS_CONDUCTOR = [
   // --- Personales ---
@@ -67,6 +78,9 @@ export const DOCUMENTOS_CONDUCTOR = [
 /** Campo hermano donde vive la segunda cara de un documento de tarjeta. */
 export const claveReverso = (key) => `${key}${SUFIJO_REVERSO}`;
 
+/** Campo hermano donde vive el archivo con ambas caras juntas. */
+export const claveCompleto = (key) => `${key}${SUFIJO_COMPLETO}`;
+
 /** Un documento de dos caras admite reverso; uno de papel, no. */
 export const admiteReverso = (documento) => documento?.tipo === TIPO_TARJETA;
 
@@ -76,17 +90,40 @@ export const documentosPorDueno = (dueno) =>
 /** Todas las claves que puede ocupar un documento, reversos incluidos. */
 export const todasLasClaves = () =>
   DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
-    admiteReverso(documento) ? [documento.key, claveReverso(documento.key)] : [documento.key],
+    admiteReverso(documento)
+      ? [documento.key, claveReverso(documento.key), claveCompleto(documento.key)]
+      : [documento.key],
   );
 
 /**
  * Etiqueta de una cara concreta. El anverso solo se nombra como tal cuando el
  * documento tiene dos: para un documento de papel, decir «anverso» sobraría.
  */
+const NOMBRE_DE_CARA = {
+  reverso: CARA_DETRAS,
+  completo: CARA_COMPLETO,
+};
+
 export const etiquetaCara = (documento, cara) => {
   if (!admiteReverso(documento)) return documento.label;
-  return `${documento.label} · ${cara === 'reverso' ? CARA_DETRAS : CARA_DELANTE}`;
+  return `${documento.label} · ${NOMBRE_DE_CARA[cara] || CARA_DELANTE}`;
 };
+
+/**
+ * Caras posibles de un documento, en el orden en que se ofrecen.
+ *
+ * «Completo» va al final porque es la alternativa: quien tiene las dos caras
+ * por separado usa las dos primeras, y quien las tiene en una sola hoja usa
+ * esta y no necesita las otras.
+ */
+export const carasDeDocumento = (documento) =>
+  admiteReverso(documento)
+    ? [
+        { campo: documento.key, nombre: CARA_DELANTE },
+        { campo: claveReverso(documento.key), nombre: CARA_DETRAS, opcional: true },
+        { campo: claveCompleto(documento.key), nombre: CARA_COMPLETO, opcional: true },
+      ]
+    : [{ campo: documento.key, nombre: documento.label }];
 
 /**
  * Cara a la que va un archivo soltado sobre la tarjeta del documento.
