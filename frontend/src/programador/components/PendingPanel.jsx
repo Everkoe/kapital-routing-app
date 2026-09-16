@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { CheckCircle2, Info, MapPin, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, MapPin, UserPlus } from 'lucide-react';
 import { NoveltyReasonBadge } from './estados.jsx';
 
 /**
@@ -83,6 +83,15 @@ const PendingPanel = ({ pending }) => {
                   </div>
                   <div className="pw-agent-meta pw-truncate">{agent.direccion || 'Sin dirección'}</div>
                   <NoveltyReasonBadge motivo={agent.motivo} />
+                  {/* El documento se repite dentro del mismo servicio. Es un
+                      problema de los datos de origen, y el Programador debe
+                      verlo aquí en vez de descubrirlo al exportar. */}
+                  {agent.duplicado && (
+                    <span className="pw-state" data-tone="warn">
+                      <AlertTriangle size={13} aria-hidden="true" />
+                      Documento duplicado
+                    </span>
+                  )}
                 </div>
               </article>
             ))}

@@ -141,12 +141,25 @@ const hasCoordinate = (value) =>
  * No son una invención del diseño: el backend agrupa en rutas con conductor
  * `SIN ASIGNAR` a todo pasajero que no cupo en ninguna unidad.
  */
-export const buildPendingAgents = (services) =>
-  (services || [])
+export const buildPendingAgents = (services) => {
+  // El documento del agente no es único ni siquiera dentro de un mismo
+  // servicio: los datos reales traen DNIs repetidos, y dos entradas con la
+  // misma clave hacen que React omita filas en silencio. Se desambigua con un
+  // ordinal, igual que en `buildServices`, en vez de usar la posición del
+  // array como identidad.
+  const seen = new Map();
+
+  return (services || [])
     .filter((service) => !service.asignado)
     .flatMap((service) =>
-      service.agentes.map((agente) => ({
-        id: `${service.id}|${norm(agente?.id)}`,
+      service.agentes.map((agente) => {
+        const key = `${service.id}|${norm(agente?.id)}`;
+        const ordinal = (seen.get(key) ?? 0) + 1;
+        seen.set(key, ordinal);
+
+        return {
+        id: ordinal === 1 ? key : `${key}#${ordinal}`,
+        duplicado: ordinal > 1,
         agenteId: norm(agente?.id),
         nombre: norm(agente?.nombre),
         direccion: norm(agente?.direccion),
@@ -159,5 +172,7 @@ export const buildPendingAgents = (services) =>
           : !norm(agente?.direccion)
             ? 'direccion_incompleta'
             : 'sin_unidad',
-      })),
+        };
+      }),
     );
+};

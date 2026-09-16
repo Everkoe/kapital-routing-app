@@ -238,6 +238,32 @@ test('el orden es cronológico y deja lo no asignado al final', () => {
   );
 });
 
+test('un documento repetido dentro del mismo servicio no colisiona', () => {
+  // Los datos reales traen DNIs duplicados. Dos entradas con la misma clave
+  // hacen que React omita filas sin avisar al usuario.
+  const services = buildServices(
+    [
+      ruta(UNASSIGNED, 'LA MOLINA', '00:00', [
+        agente('79626052'),
+        agente('79626052'),
+        agente('77700962'),
+      ]),
+    ],
+    indexFleet(FLOTA),
+  );
+
+  const pendientes = buildPendingAgents(services);
+  const ids = pendientes.map((p) => p.id);
+
+  assert.equal(pendientes.length, 3, 'ninguna entrada se pierde');
+  assert.equal(new Set(ids).size, 3, 'y ninguna clave se repite');
+  assert.deepEqual(
+    pendientes.map((p) => p.duplicado),
+    [false, true, false],
+    'el duplicado queda marcado para poder mostrarlo',
+  );
+});
+
 test('ALL es un centinela que ningún dato real puede igualar por accidente', () => {
   assert.equal(emptyFilters().microZona, ALL);
   assert.ok(ALL.startsWith('__') && ALL.endsWith('__'));
