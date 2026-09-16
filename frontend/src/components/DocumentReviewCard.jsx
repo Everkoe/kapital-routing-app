@@ -212,7 +212,8 @@ const DocumentReviewCard = ({
 
       {conArchivo.length === 0 && (
         <p className="review-doc-missing">
-          El conductor aún no ha subido este documento. Arrastra el archivo aquí o usa el botón.
+          El conductor aún no ha subido este documento. Arrastra el archivo aquí,
+          pégalo con Ctrl+V o usa el botón.
         </p>
       )}
     </DocumentDropZone>
