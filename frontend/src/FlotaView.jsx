@@ -9,6 +9,7 @@ import { apiFetch, apiRequest } from './utils/apiClient';
 
 import DocumentReviewCard from './components/DocumentReviewCard';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
+import { subirDocumento } from './utils/documentoStorage';
 import { documentoABase64 } from './utils/imageUtils';
 import DocumentViewer from './components/DocumentViewer';
 import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
@@ -288,10 +289,13 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
     setReviewLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      // Comprime si es imagen: guardar el original llevaba un perfil completo
-      // a 2 MB, y como todo vive en una sola fila el envío superaba el límite
-      // de tiempo de la función serverless.
-      const fileObj = await documentoABase64(file);
+      // El archivo va a Storage y el perfil solo guarda su ruta. Guardarlo
+      // dentro llevaba la fila a casi diez megas y la escritura por encima del
+      // límite de tiempo de la función.
+      const fileObj = await subirDocumento(file, {
+        unidadId: conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || '',
+        campo,
+      });
 
       const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
       

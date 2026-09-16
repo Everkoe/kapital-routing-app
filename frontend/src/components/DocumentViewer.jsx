@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, FileText, X } from 'lucide-react';
 import { carasDe, esPdf, tieneContenido } from '../utils/documentoArchivo';
+import { urlFirmada } from '../utils/documentoStorage';
 
 /**
  * Visor de un documento, con sus caras dentro.
@@ -19,13 +20,28 @@ const DocumentViewer = ({ documento, onClose }) => {
   // visor le pasa un `key` por documento, así React lo remonta al abrir otro.
   // Reiniciarlo con un efecto sería el antipatrón que la regla de hooks señala.
   const [indice, setIndice] = useState(0);
+  // Las URLs firmadas caducan en minutos, así que se piden al abrir la cara y
+  // se guardan solo mientras el visor está en pantalla.
+  const [firmadas, setFirmadas] = useState({});
+
+  const caraActiva = carasDe(documento)[indice];
+  const rutaActiva = caraActiva?.path;
+
+  useEffect(() => {
+    if (!rutaActiva || firmadas[rutaActiva]) return undefined;
+    let vigente = true;
+    urlFirmada(rutaActiva)
+      .then(url => { if (vigente) setFirmadas(prev => ({ ...prev, [rutaActiva]: url })); })
+      .catch(() => {});
+    return () => { vigente = false; };
+  }, [rutaActiva, firmadas]);
 
   if (!documento) return null;
 
   const caras = carasDe(documento);
 
   const cara = caras[Math.min(indice, caras.length - 1)];
-  const src = cara?.src || '';
+  const src = firmadas[cara?.path] || cara?.src || '';
   const pdf = esPdf(src);
   const disponible = tieneContenido(src);
   const titulo = cara?.nombre ? `${documento.name} · ${cara.nombre}` : documento.name;

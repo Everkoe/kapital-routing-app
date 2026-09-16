@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote
 import base64
+import re
 import hashlib
 import hmac
 import secrets
@@ -2821,6 +2822,90 @@ async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
         print(f"[Supabase] storage upload failed error={type(e).__name__}")
         return ""
 
+# --- Documentos del conductor en Supabase Storage -------------------------
+#
+# Guardarlos como base64 dentro de `app_state` hacía que cada envío de perfil
+# reescribiera la fila entera: 9,8 MB que tardaban 18,7 s en subir, por encima
+# del límite de 10 s de una función serverless. El envío fallaba sin decir por
+# qué. Con los archivos fuera, el perfil guarda rutas de unos pocos bytes.
+#
+# El bucket es **privado**: son DNI, licencias y antecedentes. El acceso se da
+# con URLs firmadas de vida corta, emitidas solo a quien ya tiene sesión.
+
+DOCUMENTS_BUCKET = "documentos"
+DOCUMENT_URL_TTL_SECONDS = 300
+
+_documents_bucket_ready = False
+
+
+def _storage_base_url() -> str:
+    return SUPABASE_URL.replace("/rest/v1", "") + "/storage/v1"
+
+
+async def ensure_documents_bucket() -> None:
+    """Crea el bucket privado la primera vez. Idempotente."""
+    global _documents_bucket_ready
+    if _documents_bucket_ready:
+        return
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        existe = await client.get(f"{_storage_base_url()}/bucket/{DOCUMENTS_BUCKET}", headers=hdrs)
+        if existe.status_code == 200:
+            _documents_bucket_ready = True
+            return
+        creado = await client.post(
+            f"{_storage_base_url()}/bucket",
+            headers=hdrs,
+            json={"name": DOCUMENTS_BUCKET, "id": DOCUMENTS_BUCKET, "public": False},
+        )
+        # 409 significa que ya existía: otra instancia se adelantó.
+        if creado.status_code in (200, 201, 409):
+            _documents_bucket_ready = True
+            return
+        _raise_database_unavailable(
+            "storage_bucket", detail=DATABASE_WRITE_UNAVAILABLE_DETAIL
+        )
+
+
+async def upload_document_to_storage(base64_str: str, path: str, content_type: str) -> str:
+    """Sube un documento y devuelve su ruta dentro del bucket."""
+    _ensure_storage_ready("document_upload", write=True, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    await ensure_documents_bucket()
+
+    if "," in base64_str:
+        _, base64_str = base64_str.split(",", 1)
+    contenido = base64.b64decode(base64_str)
+
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key, content_type=content_type or "application/octet-stream")
+    # `upsert` permite reemplazar un documento sin tener que borrarlo antes.
+    hdrs["x-upsert"] = "true"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(
+            f"{_storage_base_url()}/object/{DOCUMENTS_BUCKET}/{path}", headers=hdrs, content=contenido
+        )
+    if res.status_code not in (200, 201):
+        print(f"[Supabase] document upload failed status={res.status_code}")
+        _raise_database_unavailable("document_upload", detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    return path
+
+
+async def signed_document_url(path: str, ttl: int = DOCUMENT_URL_TTL_SECONDS) -> Optional[str]:
+    """URL temporal para ver un documento. `None` si la ruta ya no existe."""
+    _ensure_storage_ready("document_sign", write=False)
+    hdrs = _build_supabase_headers(STORAGE_CONFIG.key)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.post(
+            f"{_storage_base_url()}/object/sign/{DOCUMENTS_BUCKET}/{path}",
+            headers=hdrs,
+            json={"expiresIn": ttl},
+        )
+    if res.status_code != 200:
+        return None
+    firmada = res.json().get("signedURL") or res.json().get("signedUrl")
+    return f"{_storage_base_url()}{firmada}".replace("/storage/v1/storage/v1", "/storage/v1") if firmada else None
+
+
 async def persist():
     payload = {
         "id": 1,
@@ -3734,6 +3819,74 @@ async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCook
     })
 
     return {"message": "Aviso enviado al conductor exitosamente.", "notif_id": notif_id}
+
+class DocumentoSubida(BaseModel):
+    unidad_id: str
+    campo: str
+    nombre: str
+    tipo: str
+    base64: str
+
+
+def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
+    """Ruta dentro del bucket, agrupada por unidad.
+
+    El nombre original se descarta salvo su extensión: viene del dispositivo
+    del usuario y puede traer acentos, espacios o rutas. El campo ya identifica
+    de qué documento se trata.
+    """
+    unidad = re.sub(r"[^A-Za-z0-9_-]", "", unidad_id or "sin-unidad") or "sin-unidad"
+    campo_limpio = re.sub(r"[^A-Za-z0-9_-]", "", campo or "documento") or "documento"
+    extension = ""
+    if "." in (nombre or ""):
+        cruda = nombre.rsplit(".", 1)[-1].lower()
+        if 1 <= len(cruda) <= 5 and cruda.isalnum():
+            extension = f".{cruda}"
+    return f"{unidad}/{campo_limpio}{extension}"
+
+
+def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
+    """Administración ve cualquier unidad; un conductor, solo la suya."""
+    if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
+        return True
+    if actor.get("rol") in _ADMIN_ROLES:
+        return True
+    return _owner_key(actor.get("unidad_id")) == _owner_key(unidad_id)
+
+
+@app.post("/api/documentos/subir")
+async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie = None):
+    """Guarda un documento en Storage y devuelve su ruta.
+
+    El perfil pasa a almacenar esa ruta en vez del base64 completo, que es lo
+    que hacía que cada envío reescribiera una fila de casi diez megas.
+    """
+    actor = await require_any_session(session_token)
+    if not _puede_ver_unidad(actor, datos.unidad_id):
+        raise HTTPException(status_code=403, detail="No puedes subir documentos de otra unidad.")
+
+    ruta = _ruta_de_documento(datos.unidad_id, datos.campo, datos.nombre)
+    await upload_document_to_storage(datos.base64, ruta, datos.tipo)
+    return {"path": ruta, "name": datos.nombre, "type": datos.tipo}
+
+
+@app.get("/api/documentos/url")
+async def url_de_documento(path: str, session_token: SessionCookie = None):
+    """URL temporal para ver un documento guardado en Storage.
+
+    Se emite solo a quien tiene sesión y sobre la unidad que le corresponde:
+    sin esto, conocer o adivinar una ruta bastaría para ver el DNI de otro.
+    """
+    actor = await require_any_session(session_token)
+    unidad = (path or "").split("/", 1)[0]
+    if not _puede_ver_unidad(actor, unidad):
+        raise HTTPException(status_code=403, detail="No puedes ver documentos de otra unidad.")
+
+    url = await signed_document_url(path)
+    if not url:
+        raise HTTPException(status_code=404, detail="El documento ya no está disponible.")
+    return {"url": url}
+
 
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):

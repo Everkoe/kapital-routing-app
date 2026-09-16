@@ -2088,6 +2088,47 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conductor["unidad_id"], "K-001", "el conductor vuelve a su unidad")
 
 
+    def test_document_paths_never_escape_their_unit_folder(self):
+        """El nombre del archivo lo elige el usuario: no puede decidir la ruta.
+
+        Sin saneado, un nombre con barras o puntos permitiría escribir fuera de
+        la carpeta de la unidad, o pisar el documento de otro conductor.
+        """
+        casos = [
+            ("K-027", "dniScaneado", "foto.png", "K-027/dniScaneado.png"),
+            # Intento de salir del directorio.
+            ("../../otro", "dni", "x.png", "otro/dni.png"),
+            ("K-027", "../licencia", "a.png", "K-027/licencia.png"),
+            # Nombre con ruta dentro.
+            ("K-027", "dni", "/etc/passwd", "K-027/dni"),
+            # Acentos y espacios no llegan al almacenamiento.
+            ("K-027", "dni", "mi documento ñ.JPG", "K-027/dni.jpg"),
+            # Sin unidad no se queda en la raíz del bucket.
+            ("", "dni", "a.png", "sin-unidad/dni.png"),
+        ]
+        for unidad, campo, nombre, esperado in casos:
+            with self.subTest(nombre=nombre):
+                ruta = backend._ruta_de_documento(unidad, campo, nombre)
+                self.assertEqual(ruta, esperado)
+                self.assertNotIn("..", ruta)
+                self.assertEqual(ruta.count("/"), 1, "siempre unidad/archivo")
+
+    def test_a_driver_can_only_reach_their_own_unit_documents(self):
+        """Conocer una ruta no puede bastar para ver el DNI de otro."""
+        conductor = {"rol": "Conductor", "unidad_id": "K-027"}
+        admin = {"rol": "Administración"}
+
+        self.assertTrue(backend._puede_ver_unidad(conductor, "K-027"))
+        self.assertTrue(backend._puede_ver_unidad(conductor, "k-027"), "el padrón no distingue mayúsculas")
+        self.assertFalse(backend._puede_ver_unidad(conductor, "K-142"))
+
+        # Administración revisa cualquier unidad: es su trabajo.
+        self.assertTrue(backend._puede_ver_unidad(admin, "K-142"))
+
+        # Con la exigencia desactivada no hay actor: se conserva el rollback.
+        self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 
