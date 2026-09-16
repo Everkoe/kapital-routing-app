@@ -1974,6 +1974,120 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ruta["fecha"], "13/09/2026")
 
 
+    async def _preparar_renombrado(self):
+        """Deja una unidad con su conductor asociado y una sesión abierta."""
+        backend.AUTH_ENFORCED = True
+        backend.conductores_db.clear()
+        backend.conductores_db["K-001"] = {"capacidad": 4, "tipo": "AUTO", "chofer": "Chofer Uno"}
+
+        admin = {
+            "identifier": "admin@example.com", "email": "admin@example.com",
+            "nombre": "Admin", "rol": "Administración", "estado": "Activo",
+        }
+        conductor = {
+            "identifier": "driver-001", "email": None, "nombre": "Chofer Uno",
+            "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001",
+        }
+        backend.usuarios_db.update({"admin@example.com": admin, "driver-001": conductor})
+        return admin, conductor, backend.issue_session(admin), backend.issue_session(conductor)
+
+    async def test_renaming_a_unit_keeps_its_driver_able_to_see_their_routes(self):
+        """El padrón es la clave con la que se autoriza al conductor.
+
+        Migrar solo la flota dejaría al conductor apuntando a una unidad
+        inexistente, y su sesión abierta conservaría el padrón viejo: perdería
+        el acceso a sus propias rutas sin que nada lo explicara.
+        """
+        _admin, conductor, admin_token, driver_token = await self._preparar_renombrado()
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_and_verify_fleet", new=AsyncMock(return_value={})),
+        ):
+            resultado = await backend.rename_flota(
+                "K-001", backend.FlotaRenombrar(nuevo_id="K-999"), session_token=admin_token,
+            )
+
+        self.assertEqual(resultado["unidad_id"], "K-999")
+        self.assertEqual(resultado["usuarios_actualizados"], 1)
+        self.assertIn("K-999", backend.conductores_db)
+        self.assertNotIn("K-001", backend.conductores_db)
+        self.assertEqual(conductor["unidad_id"], "K-999")
+
+        # Lo esencial: la INSTANTÁNEA del índice también migra.
+        #
+        # No vale comprobarlo con `session_actor_from_index` teniendo los
+        # usuarios cargados: esa función devuelve el usuario real cuando lo
+        # está, y pasaría igual sin refrescar. El índice importa justo cuando
+        # no lo están —el arranque en frío de Vercel—, así que se mira la
+        # entrada directamente.
+        token_hash = hashlib.sha256(driver_token.encode("utf-8")).hexdigest()
+        entrada = backend.session_index[token_hash]
+        self.assertEqual(entrada.get("unidad_id"), "K-999",
+                         "sin refrescar el índice, el conductor pierde su unidad en frío")
+
+        # Y con los usuarios descargados, la autorización sigue resolviendo bien.
+        backend.usuarios_db.clear()
+        actor = backend.session_actor_from_index(driver_token)
+        self.assertEqual(actor.get("unidad_id"), "K-999")
+
+    async def test_only_administration_may_rename_a_unit(self):
+        """`_ADMIN_ROLES` incluye Gerente y Programador; renombrar no es para ellos."""
+        await self._preparar_renombrado()
+
+        for rol in ("Gerente de Operaciones", "Programador de rutas", "Conductor"):
+            with self.subTest(rol=rol):
+                otro = {
+                    "identifier": f"{rol}@example.com", "email": f"{rol}@example.com",
+                    "nombre": rol, "rol": rol, "estado": "Activo",
+                }
+                backend.usuarios_db[otro["identifier"]] = otro
+                token = backend.issue_session(otro)
+
+                reload_db = AsyncMock()
+                with patch.object(backend, "reload_db", new=reload_db):
+                    with self.assertRaises(HTTPException) as caught:
+                        await backend.rename_flota(
+                            "K-001", backend.FlotaRenombrar(nuevo_id="K-999"), session_token=token,
+                        )
+
+                self.assertEqual(caught.exception.status_code, 403)
+                reload_db.assert_not_awaited()
+
+    async def test_renaming_onto_an_existing_padron_is_rejected(self):
+        """Aceptarlo fusionaría dos unidades y perdería una sin aviso."""
+        _admin, _conductor, admin_token, _ = await self._preparar_renombrado()
+        backend.conductores_db["K-002"] = {"capacidad": 10, "tipo": "VAN", "chofer": "Otro"}
+
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.rename_flota(
+                    "K-001", backend.FlotaRenombrar(nuevo_id="K-002"), session_token=admin_token,
+                )
+
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("K-001", backend.conductores_db, "no se toca nada al rechazar")
+        self.assertEqual(backend.conductores_db["K-002"]["chofer"], "Otro")
+
+    async def test_a_failed_rename_leaves_everything_as_it_was(self):
+        """Si la escritura no se confirma, no puede quedar a medias."""
+        _admin, conductor, admin_token, _ = await self._preparar_renombrado()
+        fallo = HTTPException(status_code=503, detail="sin base")
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_and_verify_fleet", new=AsyncMock(side_effect=fallo)),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.rename_flota(
+                    "K-001", backend.FlotaRenombrar(nuevo_id="K-999"), session_token=admin_token,
+                )
+
+        self.assertIn("K-001", backend.conductores_db)
+        self.assertNotIn("K-999", backend.conductores_db)
+        self.assertEqual(conductor["unidad_id"], "K-001", "el conductor vuelve a su unidad")
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 

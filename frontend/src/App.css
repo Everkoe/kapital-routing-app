@@ -1314,3 +1314,12 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .doc-viewer-error h4 { margin: 0 0 10px; color: var(--kapital-accent-red); }
 .doc-viewer-error p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }
+
+/* Aviso bajo un campo cuyo cambio arrastra más de lo que aparenta. */
+.form-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--kapital-text-secondary);
+}

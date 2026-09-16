@@ -34,6 +34,9 @@ const announceAdminWebSocketState = (connected) => {
  */
 const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 
+/** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
+const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
+
 const validateDocumentFile = (file) => {
   if (!file) return 'Selecciona un archivo.';
   if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
@@ -65,6 +68,10 @@ const _resolveInitialBase = (raw) => {
 
 const FlotaView = ({ usuario, initialBase }) => {
   const isCliente = usuario?.rol === 'Cliente';
+  // Renombrar migra la clave que relaciona unidad, conductor y sesión, así que
+  // se reserva a Administración. El backend lo exige igual; esto solo evita
+  // ofrecer un control que iba a devolver 403.
+  const puedeRenombrar = ROLES_QUE_RENOMBRAN.has(usuario?.rol);
   const [flota, setFlota] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -484,6 +491,7 @@ const FlotaView = ({ usuario, initialBase }) => {
       return;
     }
     const editableData = {
+      placa: unitId,
       capacidad: vehiculo.capacidad ?? 10,
       tipo: vehiculo.tipo || 'AUTO',
       chofer: vehiculo.chofer || '',
@@ -559,16 +567,37 @@ const FlotaView = ({ usuario, initialBase }) => {
       chofer: formData.chofer, telefono: formData.telefono || '',
       soat: formData.soat || '', revision: formData.revision || '', atu: formData.atu || '', licencia: formData.licencia || '',
     };
-    if (isEditing && initialEditData && JSON.stringify(editPayload) === JSON.stringify(initialEditData)) {
+    // El padrón viaja por su propio endpoint, así que se compara aparte de los
+    // campos que edita el PUT.
+    const padronIntacto = !isEditing || (formData.placa || '').trim() === editingUnitId;
+    const camposIntactos = initialEditData
+      && Object.keys(editPayload).every(clave => editPayload[clave] === initialEditData[clave]);
+
+    if (isEditing && padronIntacto && camposIntactos) {
       setShowModal(false);
       toast('No hay cambios para guardar.');
       return;
     }
 
+    const nuevoPadron = (formData.placa || '').trim();
+    const renombra = isEditing && puedeRenombrar && nuevoPadron && nuevoPadron !== editingUnitId;
+
     setIsSaving(true);
     try {
+      // El renombrado va primero para que la edición de los demás campos
+      // apunte ya a la clave nueva; si falla, no se toca nada más.
+      let unidadDestino = editingUnitId;
+      if (renombra) {
+        await apiFetch(`/api/flota/${encodeURIComponent(editingUnitId)}/renombrar`, {
+          method: 'POST',
+          json: { nuevo_id: nuevoPadron },
+        });
+        unidadDestino = nuevoPadron;
+        setEditingUnitId(nuevoPadron);
+      }
+
       const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/flota/${encodeURIComponent(editingUnitId)}` : '/api/flota';
+      const url = isEditing ? `/api/flota/${encodeURIComponent(unidadDestino)}` : '/api/flota';
       await apiFetch(url, { method, json: isEditing ? editPayload : formData });
       setShowModal(false);
       await fetchFlota();
@@ -1149,7 +1178,18 @@ const FlotaView = ({ usuario, initialBase }) => {
               <div className="form-section-title">Datos del conductor / unidad</div>
               <div className="form-row">
                 <label>{isEditing ? 'Padrón / ID de unidad' : 'Placa/ID'}</label>
-                <input required disabled={isEditing} value={isEditing ? editingUnitId : formData.placa} onChange={e => setFormData({...formData, placa: e.target.value})} placeholder="Ej. KAP-008" />
+                <input
+                  required
+                  disabled={isEditing && !puedeRenombrar}
+                  value={isEditing ? (formData.placa ?? editingUnitId) : formData.placa}
+                  onChange={e => setFormData({ ...formData, placa: e.target.value })}
+                  placeholder="Ej. KAP-008"
+                />
+                {isEditing && puedeRenombrar && (
+                  <small className="form-hint">
+                    Cambiarlo migra también al conductor asociado y su sesión abierta.
+                  </small>
+                )}
               </div>
               <div className="form-row">
                 <label>Nombre Chofer</label>
