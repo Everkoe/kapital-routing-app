@@ -3331,6 +3331,83 @@ def get_user_by_identifier(identifier: str):
             return v
     return None
 
+# Un correo se guarda como dato de contacto, no como clave de la cuenta: los 108
+# conductores importados del Excel tienen por clave un correo inventado
+# (`apellido@kapital.com`) y `identifier` a nulo. Renombrar esa clave sería
+# migrar la cuenta entera; guardar el correo real al lado no rompe nada y
+# `get_user_by_identifier` lo reconoce igual para iniciar sesión.
+_FORMATO_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def correo_normalizado(correo: Any) -> str:
+    """Correo en minúsculas y sin espacios, o cadena vacía si no lo parece."""
+    limpio = str(correo or "").strip().lower()
+    return limpio if _FORMATO_CORREO.match(limpio) else ""
+
+
+def _cuenta_con_correo(correo: str, excepto: Dict[str, Any]) -> Optional[str]:
+    """Clave de otra cuenta que ya responde a ese correo, si la hay."""
+    buscado = correo.strip().lower()
+    for clave, otro in usuarios_db.items():
+        if not isinstance(otro, dict) or otro is excepto:
+            continue
+        candidatos = [clave, otro.get("identifier"), otro.get("email"), otro.get("login_identifier")]
+        if any(str(valor or "").strip().lower() == buscado for valor in candidatos):
+            return clave
+    return None
+
+
+def asignar_correo(user: Dict[str, Any], correo: Any) -> bool:
+    """Guarda el correo real del usuario. Devuelve si cambió algo.
+
+    El correo entra también en la instantánea de sesión, así que hay que
+    refrescar el índice o la autorización seguiría viendo el anterior.
+    """
+    limpio = correo_normalizado(correo)
+    if not limpio:
+        raise HTTPException(status_code=400, detail="El correo no tiene un formato válido.")
+
+    ocupado = _cuenta_con_correo(limpio, excepto=user)
+    if ocupado:
+        raise HTTPException(status_code=409, detail="Ese correo ya pertenece a otra cuenta.")
+
+    perfil = user.get("perfil_conductor")
+    cambio = str(user.get("email") or "").strip().lower() != limpio
+    user["email"] = limpio
+    if isinstance(perfil, dict):
+        cambio = cambio or str(perfil.get("correo") or "").strip().lower() != limpio
+        perfil["correo"] = limpio
+    refresh_session_index_for(user)
+    return cambio
+
+
+class CorreoConductorPayload(BaseModel):
+    identificador: str
+    correo: str
+
+
+@app.put("/api/conductor/correo")
+async def actualizar_correo_conductor(payload: CorreoConductorPayload, session_token: SessionCookie = None):
+    """Corrige el correo de un conductor.
+
+    Lo puede hacer Administración —los correos del Excel eran inventados y hay
+    que sustituirlos por los reales— y el propio conductor sobre el suyo.
+    """
+    await _load_compat_users()
+    user = get_user_by_identifier(payload.identificador)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ADMIN_ROLES:
+        if not _owner_matches(actor, _IDENTITY_FIELDS, payload.identificador):
+            raise HTTPException(status_code=403, detail="No puedes cambiar el correo de otra cuenta.")
+
+    asignar_correo(user, payload.correo)
+    await persist_users_only()
+    return {"email": user.get("email")}
+
+
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin, response: Response):
     if _is_normalized_storage() and not _full_cache_is_fresh():
@@ -3996,6 +4073,12 @@ async def driver_onboarding(payload: DriverProfilePayload):
     
     if payload.perfilData.get("nombres"):
         user["nombre"] = payload.perfilData.get("nombres")
+
+    # El conductor ya puede escribir su correo en el alta. Se guarda también
+    # como correo de la cuenta para que Administración vea el real y no el
+    # `apellido@kapital.com` que traía la importación del Excel.
+    if str(payload.perfilData.get("correo") or "").strip():
+        asignar_correo(user, payload.perfilData["correo"])
     
     await persist_users_only()
     return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}

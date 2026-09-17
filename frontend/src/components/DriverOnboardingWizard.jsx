@@ -92,7 +92,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     direccion: '',
     telefonoDirecto: '',
     telefonoEmergencia: '',
-    correo: usuario?.email || '',
+    correo: usuario?.perfil_conductor?.correo || usuario?.email || '',
     
     // Archivos (Files)
     comprobanteDomicilio: null,
@@ -357,7 +357,15 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
             <div className="form-group full-width">
               <label>Correo Electrónico</label>
-              <input type="email" name="correo" value={formData.correo} readOnly className="readonly-input" />
+              {/* Estaba en solo lectura con el correo que inventó la importación
+                  del Excel. El conductor es quien sabe cuál es el suyo. */}
+              <input
+                type="email"
+                name="correo"
+                value={formData.correo}
+                onChange={handleChange}
+                placeholder="Ej. juan.perez@gmail.com"
+              />
             </div>
           </div>
 

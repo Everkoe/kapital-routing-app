@@ -1370,3 +1370,54 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 
 .doc-viewer-cargando p { margin: 0; font-size: 0.9rem; }
+
+/* Correo del conductor, editable donde se lee (ver CorreoEditable.jsx). */
+.correo-editable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 4px 0 12px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.correo-editable input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  background: var(--kapital-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.correo-editable .correo-vacio {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.btn-icon-sutil {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.btn-icon-sutil:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(125, 125, 125, 0.15);
+}
+
+.btn-icon-sutil:disabled {
+  cursor: default;
+  opacity: 0.4;
+}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldCheck, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
+import CorreoEditable from './components/CorreoEditable';
 import DocumentVerification from './components/DocumentVerification';
 import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
@@ -997,7 +998,14 @@ const FlotaView = ({ usuario, initialBase }) => {
                   </div>
                   <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
                   <h3 className="driver-name">{conductorInfo.usuario.nombre?.toUpperCase()}</h3>
-                  <p style={{fontSize:'0.78rem', color:'var(--text-secondary)', margin:'4px 0 12px'}}>{conductorInfo.usuario.email}</p>
+                  <CorreoEditable
+                    identificador={conductorInfo.usuario.identifier || conductorInfo.usuario.email}
+                    correo={conductorInfo.usuario.email}
+                    onGuardado={(email) => setConductorInfo(previo => ({
+                      ...previo,
+                      usuario: { ...previo.usuario, email },
+                    }))}
+                  />
 
                   {/* Vehicle photo from profile */}
                   {conductorInfo.usuario.perfil_conductor?.fotoVehiculo ? (
