@@ -421,9 +421,6 @@ body, #root {
 .emergency-form { display: flex; gap: 15px; align-items: center; }
 .form-input, .form-select { padding: 12px 16px; border: 1px solid var(--kapital-border); border-radius: 10px; flex: 1; background-color: var(--kapital-bg) !important; color: var(--kapital-text-primary) !important; font-size: 0.95rem; transition: border-color 0.3s; }
 .form-input:focus, .form-select:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,0.1); }
-.audit-log-container { background-color: var(--kapital-bg); color: var(--kapital-text-primary); font-family: 'Fira Code', 'Courier New', Courier, monospace; padding: 20px; border-radius: 12px; max-height: 200px; overflow-y: auto; border: 1px solid var(--kapital-border); }
-.log-entry { margin: 0 0 8px 0; font-size: 0.9rem; color: #10B981; text-shadow: 0 0 5px rgba(16,185,129,0.3); }
-.log-entry:first-child { font-weight: bold; color: #38bdf8; text-shadow: 0 0 5px rgba(56,189,248,0.3); }
 .loading-indicator, .error-message { text-align: center; padding: 40px; font-weight: 500; border-radius: 12px; }
 .loading-indicator { background-color: var(--kapital-badge-bg); color: var(--kapital-badge-text); border: 1px solid rgba(56,189,248,0.2); }
 .error-message { background-color: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
@@ -2033,3 +2030,276 @@ select.campo-pendiente {
 .info-grid {
   align-items: start;
 }
+
+/* ---------------------------------------------------------------
+   Historial de actividad. Reutiliza los tokens y el aspecto de las
+   tablas de Flota y Accesos: no es una segunda identidad visual.
+   --------------------------------------------------------------- */
+.historial-actividad {
+  /* La aplicación centra el texto; una pantalla de tabla y filtros se lee por
+     columnas y necesita el borde izquierdo como referencia. */
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.historial-cabecera h1 { margin: 0 0 4px 0; font-size: 1.5rem; color: var(--text-primary); }
+.historial-cabecera p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }
+
+.historial-indicadores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+.historial-indicador {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+.historial-indicador strong { display: block; font-size: 1.5rem; line-height: 1.1; color: var(--text-primary); }
+.historial-indicador span:last-child { font-size: 0.8rem; color: var(--text-secondary); }
+.historial-indicador-icono {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0;
+  color: var(--primary-color); background: var(--accent-bg); border-radius: 10px;
+}
+
+.historial-filtros {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+.historial-busqueda {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1 1 240px; min-width: 0; padding: 0 10px;
+  color: var(--text-secondary); background: var(--bg);
+  border: 1px solid var(--border-color); border-radius: 8px;
+}
+.historial-busqueda input {
+  flex: 1; min-width: 0; padding: 9px 0;
+  color: var(--text-primary); background: transparent; border: none; outline: none;
+}
+.historial-filtros select,
+.historial-filtros input[type="date"] {
+  padding: 9px 10px; font-size: 0.85rem;
+  color: var(--text-primary); background: var(--bg);
+  border: 1px solid var(--border-color); border-radius: 8px;
+}
+
+.historial-tabla-caja {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.historial-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.historial-tabla th {
+  padding: 12px 16px; font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.05em; text-align: left; text-transform: uppercase;
+  color: var(--text-secondary); background: var(--bg-hover);
+}
+.historial-tabla td {
+  padding: 12px 16px; color: var(--text-primary);
+  border-top: 1px solid var(--border-color); vertical-align: middle;
+}
+.historial-actividad-nombre { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.historial-ver {
+  padding: 0; font-size: 0.82rem; color: var(--primary-color);
+  background: none; border: none; cursor: pointer;
+}
+.historial-ver:hover { text-decoration: underline; }
+
+.historial-paginacion {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 16px; font-size: 0.8rem;
+  color: var(--text-secondary); border-top: 1px solid var(--border-color);
+}
+.historial-paginacion > div { display: flex; align-items: center; gap: 10px; }
+.historial-paginacion button:disabled { cursor: default; opacity: 0.45; }
+.historial-pagina-actual { font-weight: 600; color: var(--text-primary); }
+
+.historial-estado {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 48px 24px; text-align: center; color: var(--text-secondary);
+}
+.historial-estado h4 { margin: 0; font-size: 0.95rem; color: var(--text-primary); }
+.historial-estado p { max-width: 420px; margin: 0; font-size: 0.85rem; }
+
+/* Los esqueletos mantienen la pagina en pie mientras llega la respuesta, en
+   vez de sustituirla entera por una rueda girando. */
+.act-skeleton {
+  display: inline-block; border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-hover) 25%, var(--border-color) 50%, var(--bg-hover) 75%);
+  background-size: 200% 100%;
+  animation: act-brillo 1.3s ease-in-out infinite;
+}
+@keyframes act-brillo { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Estados: el color acompana, pero cada uno lleva su palabra al lado. */
+.act-badge {
+  display: inline-flex; align-items: center; padding: 3px 9px;
+  font-size: 0.72rem; font-weight: 600; border-radius: 999px;
+}
+.act-info { color: var(--primary-color); }
+.act-badge.act-info { background: var(--accent-bg); }
+.act-exito { color: #10b981; }
+.act-badge.act-exito { background: rgba(16, 185, 129, 0.12); }
+.act-aviso { color: var(--kapital-accent-orange); }
+.act-badge.act-aviso { background: rgba(245, 158, 11, 0.14); }
+.act-error { color: #ef4444; }
+.act-badge.act-error { background: rgba(239, 68, 68, 0.12); }
+
+/* --- Panel lateral (DrawerLateral.jsx) --- */
+.drawer-fondo {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(2px);
+}
+.drawer-panel {
+  /* La aplicación centra el texto y eso se hereda hasta aquí. En un panel de
+     pares etiqueta/valor, centrado no hay columna que seguir con la vista. */
+  text-align: left;
+  display: flex; flex-direction: column;
+  width: 40%; min-width: 340px; max-width: 560px; height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
+  animation: drawer-entra 0.22s ease-out;
+}
+@keyframes drawer-entra { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.drawer-cabecera {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 18px 22px; border-bottom: 1px solid var(--border-color);
+}
+.drawer-cabecera h3 { margin: 0; font-size: 1.05rem; color: var(--text-primary); }
+.drawer-cuerpo { flex: 1; padding: 20px 22px; overflow-y: auto; }
+.drawer-titular { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.drawer-titular h4 { margin: 0 0 6px 0; font-size: 1.05rem; color: var(--text-primary); }
+.drawer-bloque {
+  margin-bottom: 18px; padding: 16px 18px;
+  background: var(--bg); border: 1px solid var(--border-color); border-radius: 12px;
+}
+.drawer-bloque h5 { margin: 0 0 12px 0; font-size: 0.9rem; color: var(--text-primary); }
+.drawer-bloque dl {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px 16px;
+  margin: 0; font-size: 0.85rem;
+}
+.drawer-bloque dt { color: var(--text-secondary); }
+.drawer-bloque dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.drawer-id { font-family: var(--mono, monospace); font-size: 0.78rem; }
+
+.drawer-cambios { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.drawer-cambios th {
+  padding: 6px 8px; font-size: 0.72rem; font-weight: 600;
+  text-align: left; color: var(--text-secondary);
+}
+.drawer-cambios td { padding: 7px 8px; color: var(--text-primary); border-top: 1px solid var(--border-color); }
+.valor-anterior, .valor-nuevo {
+  display: inline-block; padding: 2px 8px; font-size: 0.76rem; border-radius: 6px;
+}
+.valor-anterior { color: #ef4444; background: rgba(239, 68, 68, 0.1); text-decoration: line-through; }
+.valor-nuevo { color: #10b981; background: rgba(16, 185, 129, 0.12); }
+
+@media (max-width: 1024px) {
+  .drawer-panel { width: 65%; max-width: none; }
+}
+@media (max-width: 768px) {
+  .drawer-panel { width: 100%; min-width: 0; }
+  .historial-filtros > * { flex: 1 1 100%; }
+  .historial-tabla-caja { overflow-x: auto; }
+  .historial-tabla { min-width: 620px; }
+}
+
+/* Filas del detalle: icono, etiqueta encima y valor debajo. Sustituyen a la
+   rejilla de dos columnas, que apretaba los valores largos contra el borde. */
+.drawer-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.drawer-datos li { display: flex; align-items: flex-start; gap: 12px; }
+.drawer-dato-icono {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex-shrink: 0;
+  color: var(--primary-color); background: var(--accent-bg); border-radius: 8px;
+}
+.drawer-dato-etiqueta {
+  display: block; margin-bottom: 2px;
+  font-size: 0.76rem; color: var(--text-secondary);
+}
+.drawer-dato-valor {
+  display: block; font-size: 0.88rem; font-weight: 500;
+  color: var(--text-primary); overflow-wrap: anywhere;
+}
+
+.drawer-titular .historial-indicador-icono { width: 46px; height: 46px; border-radius: 12px; }
+
+.drawer-pie {
+  display: flex; justify-content: flex-end;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color);
+}
+.drawer-pie button { padding: 9px 22px; }
+
+/* Icono de cada fila en su cuadro de color tenue, como en la referencia: el
+   tipo de evento se reconoce antes de leer el texto. */
+.historial-icono-fila {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px;
+}
+.historial-icono-fila.act-info { background: var(--accent-bg); }
+.historial-icono-fila.act-exito { background: rgba(16, 185, 129, 0.12); }
+.historial-icono-fila.act-aviso { background: rgba(245, 158, 11, 0.14); }
+.historial-icono-fila.act-error { background: rgba(239, 68, 68, 0.12); }
+.historial-actividad-nombre { gap: 10px; color: var(--text-primary); }
+.historial-tabla tbody tr:hover { background: var(--bg-hover); }
+
+/* Cada filtro lleva su icono dentro, igual que la caja de busqueda. */
+.historial-campo {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 10px;
+  color: var(--text-secondary); background: var(--bg);
+  border: 1px solid var(--border-color); border-radius: 8px;
+}
+.historial-campo select,
+.historial-campo input {
+  padding: 9px 0; font-size: 0.85rem;
+  color: var(--text-primary); background: transparent;
+  border: none; outline: none;
+}
+.historial-filtros select,
+.historial-filtros input[type="date"] { border: none; background: transparent; padding: 9px 0; }
+
+.historial-exportar {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-left: auto; padding: 10px 18px;
+  font-size: 0.85rem; font-weight: 600;
+  color: #ffffff; background: var(--primary-color);
+  border: none; border-radius: 8px; cursor: pointer;
+}
+.historial-exportar:hover { opacity: 0.9; }
+
+/* Paginacion con numeros, como la referencia. */
+.historial-paginas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.historial-pagina {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 34px; height: 34px; padding: 0 10px;
+  justify-content: center;
+  font-size: 0.82rem; color: var(--text-primary);
+  background: var(--bg); border: 1px solid var(--border-color);
+  border-radius: 8px; cursor: pointer;
+}
+.historial-pagina:hover:not(:disabled):not(.activa) { background: var(--bg-hover); }
+.historial-pagina.activa {
+  color: #ffffff; background: var(--primary-color); border-color: var(--primary-color);
+  font-weight: 600; cursor: default;
+}
+.historial-pagina:disabled { cursor: default; opacity: 0.45; }
+.historial-salto { padding: 0 4px; color: var(--text-secondary); }

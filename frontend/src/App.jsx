@@ -1,9 +1,8 @@
 // App.jsx - Trigger Vercel Deploy 
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { documentosRequeridos } from './constants/camposOnboarding';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
+import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
@@ -34,6 +33,7 @@ const VistaReportes = React.lazy(() => import('./VistaReportes'));
 const ClientPortal = React.lazy(() => import('./ClientPortal'));
 const AdminDashboard = React.lazy(() => import('./AdminDashboard'));
 const UsersManagementTab = React.lazy(() => import('./components/UsersManagementTab'));
+const HistorialActividad = React.lazy(() => import('./HistorialActividad'));
 const VistaPerfil = React.lazy(() => import('./VistaPerfil'));
 const ProgramadorWorkbench = React.lazy(() => import('./programador/ProgramadorWorkbench'));
 const ProgramadorFlota = React.lazy(() => import('./programador/FlotaProgramador'));
@@ -310,6 +310,9 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
               <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
                 <Shield size={18} /> Accesos
               </a>
+              <a onClick={() => handleNav('historial')} className={vistaActual === 'historial' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'}>
+                <History size={18} /> Historial
+              </a>
             </>
           )}
           <span className="nav-separator">|</span>
@@ -384,6 +387,10 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={vistaActual === 'usuarios' ? {color: '#38BDF8'} : {}}>
               <Shield size={20} />
               <span>Accesos B2B</span>
+            </a>
+            <a onClick={() => handleNav('historial')} className={vistaActual === 'historial' ? 'nav-link active' : 'nav-link'}>
+              <History size={20} />
+              <span>Historial</span>
             </a>
           </>
         )}
@@ -533,8 +540,7 @@ const DriverCard = ({ route, routeIndex, onManualAssign, onDragStart, onDrop }) 
   ); 
 };
 const EmergencyCenter = ({ onEmergencyAction, isLoading }) => { const [conductorId, setConductorId] = useState(''); const [tipoEmergencia, setTipoEmergencia] = useState('Baja Total (Siniestro)'); const [horario, setHorario] = useState('Todos los turnos'); const handleActionClick = () => { if (conductorId) onEmergencyAction({ conductor_id: conductorId, tipo_emergencia: tipoEmergencia, horario }); }; const isSos = tipoEmergencia === 'Retraso por Tráfico'; const buttonClass = isSos ? 'btn-sos' : 'btn-danger'; const buttonText = isSos ? 'Enviar SOS por WhatsApp' : 'Reasignar Emergencia'; return ( <div className="card"><div className="card-header"><h2>Centro de Control de Incidentes</h2></div><div className="emergency-form"><input className="form-input" type="text" placeholder="ID Conductor Afectado" value={conductorId} onChange={(e) => setConductorId(e.target.value)} /><select className="form-select" value={tipoEmergencia} onChange={(e) => setTipoEmergencia(e.target.value)}><option>Baja Total (Siniestro)</option><option>Falla Temporal (Reasignar Turno)</option><option>Retraso por Tráfico</option></select><select className="form-select" value={horario} onChange={(e) => setHorario(e.target.value)} disabled={isSos}><option>Todos los turnos</option><option>08:00 AM</option><option>10:00 AM</option><option>06:00 PM</option></select><button className={buttonClass} onClick={handleActionClick} disabled={isLoading || !conductorId}>{buttonText}</button></div></div> ); };
-const AuditLog = ({ logs }) => ( <div className="card"><div className="card-header"><h2>Registro de Actividad (Audit Log)</h2></div><div className="audit-log-container">{logs.map((log, index) => <p key={index} className="log-entry">{log}</p>)}</div></div> );
-const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved, onSaveSession, onUnsaveSession, onSessionDirty }) => {
+const DashboardView = ({ routes, setRoutes, usuarioActual, sessionSaved, onSaveSession, onUnsaveSession, onSessionDirty }) => {
   const syncToBackend = async (newRoutes) => {
     try {
       await apiFetch('/api/routes', {
@@ -586,7 +592,6 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
       syncToBackend(newRoutes);
       return newRoutes;
     });
-    addLog(`Pasajero ${agenteId} reasignado manualmente por Drag & Drop.`);
   };
 
   const handleFileChange = (event) => { 
@@ -616,14 +621,13 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
       const result = await apiFetch('/api/assign-routes/', { method: 'POST', body: formData });
       setRoutes(result);
       if (onSessionDirty) onSessionDirty(); // Mark session as unsaved after new generation
-      addLog(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos usando Smart Routing.`);
+      toast.success(`Rutas generadas para ${new Set(result.map(r => r.conductor)).size} vehículos.`);
     } catch (err) {
       const detail = err?.payload?.detail;
       const message = typeof detail === 'object'
         ? JSON.stringify(detail).replace(/[\[\]"{}]+/g, ' ')
         : (err.message || 'Ocurrió un error interno en el servidor.');
       setError(message);
-      addLog(`ERROR al generar rutas: ${message}`);
     } finally {
       setIsLoading(false);
 
@@ -634,8 +638,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     const { conductor_id, tipo_emergencia, horario } = emergencyData;
     if (tipo_emergencia === 'Retraso por Tráfico') {
       const message = `ALERTA DE TRÁFICO: La ruta de ${conductor_id} presenta retrasos.`;
-      toast.info(message);
-      addLog(message);
+      toast(message);
       return;
     }
     setIsLoading(true);
@@ -644,7 +647,6 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
       const data = await apiFetch('/api/emergency-reassign/', { method: 'POST', json: emergencyData });
       toast.success(data.message);
       setRoutes(data.rutas_actualizadas);
-      addLog(`🚨 URGENTE: Ruta de ${conductor_id} (${horario}) reasignada a ${data.rescatista_id}.`);
     } catch (err) {
       toast.error(`Error: ${err.message}`);
       setError(err.message);
@@ -657,7 +659,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     const newDriverId = prompt(`Ingrese el ID de la unidad (ej. TAXI-001) para la zona ${routeToAssign.micro_zona}:`);
     if (newDriverId) {
       setRoutes(prevRoutes => prevRoutes.map(route => route === routeToAssign ? { ...route, conductor: newDriverId } : route));
-      addLog(`✅ Ruta en ${routeToAssign.micro_zona} asignada a unidad ${newDriverId}.`);
+      toast.success(`Ruta en ${routeToAssign.micro_zona} asignada a la unidad ${newDriverId}.`);
     }
   };
 
@@ -668,7 +670,7 @@ const DashboardView = ({ routes, addLog, setRoutes, usuarioActual, sessionSaved,
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Rutas");
     XLSX.writeFile(workbook, "Rutas_Export.xlsx");
-    addLog("Exportación a Excel generada.");
+    toast.success('Exportación a Excel generada.');
   };
 
   const handleClearBoard = async () => {
@@ -872,10 +874,6 @@ function App() {
     return [];
   });
   const [sessionSaved, setSessionSaved] = useState(() => !!localStorage.getItem('kapital_saved_session'));
-  const [logs, setLogs] = useState(() => {
-    const savedLogs = localStorage.getItem('kapital_audit_logs');
-    return savedLogs ? JSON.parse(savedLogs) : [];
-  });
   const [theme, setTheme] = useState(localStorage.getItem('kapital_theme') || 'dark');
 
   useEffect(() => {
@@ -889,24 +887,24 @@ function App() {
     if (routes.length === 0) return;
     localStorage.setItem('kapital_saved_session', JSON.stringify(routes));
     setSessionSaved(true);
-    addLog('Sesión guardada. Publicando al Gerente de Operaciones...');
+    const publicando = toast.loading('Publicando al Gerente de Operaciones…');
     try {
       const data = await apiFetch('/api/routes/publish', {
         method: 'POST',
         json: routes,
       });
-      addLog(`✅ ${data.message || 'Datos publicados al Gerente.'}`);
+      toast.success(data.message || 'Datos publicados al Gerente.', { id: publicando });
     } catch (e) {
-      addLog(e?.status
-        ? '⚠️ Sesión guardada localmente. Error al publicar al Gerente.'
-        : '⚠️ Sesión guardada localmente (sin conexión al servidor).');
+      toast.error(e?.status
+        ? 'Sesión guardada localmente. Error al publicar al Gerente.'
+        : 'Sesión guardada localmente (sin conexión al servidor).', { id: publicando });
     }
   };
 
   const handleUnsaveSession = () => {
     localStorage.removeItem('kapital_saved_session');
     setSessionSaved(false);
-    addLog('Sesión desbloqueada. El tablero no persistirá al recargar.');
+    toast('Sesión desbloqueada. El tablero no persistirá al recargar.');
   };
 
   const toggleTheme = () => {
@@ -1072,14 +1070,6 @@ function App() {
   };
 
 
-  const addLog = (message) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLogs(prevLogs => {
-      const newLogs = [`[${timestamp}] - ${message}`, ...prevLogs].slice(0, 50);
-      localStorage.setItem('kapital_audit_logs', JSON.stringify(newLogs));
-      return newLogs;
-    });
-  };
 
   const lastNotifIdRef = React.useRef(null);
   const adminPollTimerRef = React.useRef(null);
@@ -1275,6 +1265,12 @@ function App() {
           ? <ProgramadorConfig />
           : <VistaConfiguracion />;
       case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} initialTab={vistaParams?.tab || 'Todos'} />;
+      case 'historial':
+        // La auditoría es de Administración. Quien no lo sea cae en su propia
+        // pantalla en vez de recibir un 403 del backend con la vista vacía.
+        return ['Administración', 'Administrador'].includes(usuarioActual?.rol)
+          ? <HistorialActividad />
+          : <AdminDashboard onNavigate={handleNavigate} usuario={usuarioActual} />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
@@ -1297,7 +1293,7 @@ function App() {
             </React.Suspense>
           );
         }
-        return <DashboardView routes={routes} addLog={addLog} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
+        return <DashboardView routes={routes} setRoutes={setRoutes} usuarioActual={usuarioActual} sessionSaved={sessionSaved} onSaveSession={handleSaveSession} onUnsaveSession={handleUnsaveSession} onSessionDirty={() => setSessionSaved(false)} />;
     }
   };
 
@@ -1376,10 +1372,6 @@ function App() {
         <React.Suspense fallback={<GlobalLoader text="Cargando..." />}>
           {renderVista()}
         </React.Suspense>
-        {/* El registro de actividad pertenece al flujo de `DashboardView`: sus
-            entradas las escribe la generación de rutas. El Programador ya no usa
-            esa vista, así que la tarjeta dejaría de tener contenido propio. */}
-        {usuarioActual?.rol !== 'Programador de rutas' && <AuditLog logs={logs} />}
       </main>
     </div>
   );
