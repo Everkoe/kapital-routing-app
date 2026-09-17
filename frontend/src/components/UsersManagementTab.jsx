@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, CheckSquare, X, Eye, FileText, Download, Truck, Shield, Search, User, Trash2, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, Truck, Shield, Search, User, Trash2, RotateCcw } from 'lucide-react';
 import { GlobalLoader } from './GlobalLoader';
-import DocumentVerification from './DocumentVerification';
 import { apiFetch } from '../utils/apiClient';
+import RevisionDocumentosConductor from './RevisionDocumentosConductor';
 
 const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
   if (!isOpen) return null;
@@ -132,7 +132,6 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
   const [padronModal, setPadronModal] = useState({ isOpen: false, email: null, padron: '' });
-  const [adminDocViewer, setAdminDocViewer] = useState(null); // { name, src }
 
   // CRM Features
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -333,28 +332,6 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     executeReview(email, 'approve', padronModal.padron);
   };
 
-  const openAdminDoc = (label, docObj) => {
-    const src = typeof docObj === 'string' ? docObj : docObj?.url || docObj?.base64 || docObj?.data || null;
-    if (!src) return;
-    setAdminDocViewer({ name: label, src, raw: docObj });
-  };
-
-  const renderDocRow = (label, docObj) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {label}: {docObj ? <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><CheckSquare size={16} color="#10b981" /> Subido</span> : <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><X size={16} color="#ef4444" strokeWidth={3} /> Falta</span>}
-      </span>
-      {docObj && (
-        <button
-          onClick={() => openAdminDoc(label, docObj)}
-          style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', color: '#38BDF8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <Eye size={14} color="#38BDF8" /> Ver Archivo
-        </button>
-      )}
-    </div>
-  );
-
   if (loading) {
     return (
       <div className="card" style={{ padding: '60px', textAlign: 'center' }}>
@@ -368,41 +345,44 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
       {driverModal.isOpen && driverModal.user && (
         <div onClick={closeDriverModal} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '600px', width: '90%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '980px', width: '92%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
             <h3 style={{ marginTop: 0, borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>Revisión de Perfil: {driverModal.user.nombre}</h3>
 
-            <div style={{ marginTop: '20px' }}>
-              <p><strong>DNI/Documento:</strong> {driverModal.user.perfil_conductor?.tipoDoc} {driverModal.user.perfil_conductor?.numDoc}</p>
-              <p><strong>Fecha de Nacimiento:</strong> {driverModal.user.perfil_conductor?.fechaNacimiento} ({driverModal.user.perfil_conductor?.edad} años)</p>
-              <p><strong>Dirección:</strong> {driverModal.user.perfil_conductor?.direccion}</p>
-              <p><strong>Teléfonos:</strong> {driverModal.user.perfil_conductor?.telefonoDirecto} / {driverModal.user.perfil_conductor?.telefonoEmergencia}</p>
-
-              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)' }}>Datos Vehiculares</h4>
-              <p><strong>Marca y Modelo:</strong> {driverModal.user.perfil_conductor?.vehiculoMarca} {driverModal.user.perfil_conductor?.vehiculoModelo}</p>
-              <p><strong>Año y Color:</strong> {driverModal.user.perfil_conductor?.vehiculoAnio} / {driverModal.user.perfil_conductor?.vehiculoColor}</p>
-              <p><strong>Placa:</strong> {driverModal.user.perfil_conductor?.vehiculoPlaca}</p>
-              <p><strong>Capacidad:</strong> {driverModal.user.perfil_conductor?.vehiculoCapacidad} pasajeros</p>
-
-              <h4 style={{ marginTop: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '5px' }}>Documentos</h4>
-              <div style={{ marginTop: '10px' }}>
-                {renderDocRow('Comprobante de domicilio', driverModal.user.perfil_conductor?.comprobanteDomicilio)}
-                {renderDocRow('Licencia de Conducir', driverModal.user.perfil_conductor?.licenciaConducir)}
-                {renderDocRow('Récord de Conductor', driverModal.user.perfil_conductor?.recordConductor)}
-                {renderDocRow('Antecedentes', driverModal.user.perfil_conductor?.antecedentesPenales)}
-                {renderDocRow('Tarjeta de Propiedad', driverModal.user.perfil_conductor?.tarjetaPropiedad)}
-                {renderDocRow('SOAT', driverModal.user.perfil_conductor?.soat)}
-                {renderDocRow('Revisión Técnica', driverModal.user.perfil_conductor?.revisionTecnica)}
+            <div className="perfil-acceso">
+              <div className="perfil-acceso-datos">
+                <section className="info-section">
+                  <h4>Información del conductor</h4>
+                  <p><strong>DNI/Documento:</strong> {driverModal.user.perfil_conductor?.tipoDoc || 'DNI'} {driverModal.user.perfil_conductor?.numDoc || '—'}</p>
+                  <p><strong>Nacimiento:</strong> {driverModal.user.perfil_conductor?.fechaNacimiento || '—'}{driverModal.user.perfil_conductor?.edad ? ` (${driverModal.user.perfil_conductor.edad} años)` : ''}</p>
+                  <p><strong>Dirección:</strong> {driverModal.user.perfil_conductor?.direccion || '—'}</p>
+                  <p><strong>Teléfonos:</strong> {driverModal.user.perfil_conductor?.telefonoDirecto || '—'} / {driverModal.user.perfil_conductor?.telefonoEmergencia || '—'}</p>
+                </section>
+                <section className="info-section">
+                  <h4>Información del vehículo</h4>
+                  <p><strong>Marca/Modelo:</strong> {driverModal.user.perfil_conductor?.vehiculoMarca || '—'} {driverModal.user.perfil_conductor?.vehiculoModelo || ''}</p>
+                  <p><strong>Año / Color:</strong> {driverModal.user.perfil_conductor?.vehiculoAnio || '—'} / {driverModal.user.perfil_conductor?.vehiculoColor || '—'}</p>
+                  <p><strong>Placa:</strong> {driverModal.user.perfil_conductor?.vehiculoPlaca || '—'}</p>
+                  <p><strong>Capacidad:</strong> {driverModal.user.perfil_conductor?.vehiculoCapacidad || '—'} pasajeros</p>
+                </section>
               </div>
 
-              {/* <DocumentVerification
-                doc={driverModal.user?.perfil_conductor?.numDoc || driverModal.user?.nombre}
-                placa={driverModal.user?.perfil_conductor?.vehiculoPlaca}
-                cachedResults={{
-                  soat: driverModal.user?.perfil_conductor?.validacion_soat,
-                  citv: driverModal.user?.perfil_conductor?.validacion_citv,
-                  licencia: driverModal.user?.perfil_conductor?.validacion_licencia
-                }}
-              /> */}
+              {/* El mismo componente que usa Gestión de Flota: antes aquí había
+                  siete filas escritas a mano que ya no coincidían con el
+                  catálogo —faltaba el DNI y el campo de antecedentes estaba mal
+                  escrito— y cuyo «Ver Archivo» no sabía leer las rutas de
+                  Storage, así que no abría nada. */}
+              <RevisionDocumentosConductor
+                conductor={driverModal.user}
+                unidadId={driverModal.user.unidad_id || ''}
+                adminEmail={usuarioActual?.email || usuarioActual?.identifier || ''}
+                onDocumentoSubido={(campo, documento) => setDriverModal(previo => ({
+                  ...previo,
+                  user: {
+                    ...previo.user,
+                    perfil_conductor: { ...previo.user.perfil_conductor, [campo]: documento },
+                  },
+                }))}
+              />
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '30px', justifyContent: 'flex-end' }}>
@@ -446,53 +426,6 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
           </div>
         </div>
       )}
-
-      {/* Admin Document Viewer Modal - image only */}
-      {adminDocViewer && (() => {
-        const src = adminDocViewer.src || '';
-        const hasData = src.startsWith('data:') || src.startsWith('http');
-        const isPdf = src.toLowerCase().includes('.pdf') || src.startsWith('data:application/pdf');
-        const downloadDoc = () => {
-          if (!hasData) return;
-          const a = document.createElement('a');
-          a.href = src;
-          a.download = adminDocViewer.name;
-          a.click();
-        };
-        return (
-          <div onClick={() => setAdminDocViewer(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: isPdf ? '600px' : '900px', height: isPdf ? 'auto' : '80vh', minHeight: isPdf ? '300px' : 'auto', background: 'var(--bg-secondary, #1a1d2e)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>{adminDocViewer.name}</h3>
-                <button onClick={() => setAdminDocViewer(null)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px' }}><X size={22} /></button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '40px 30px' }}>
-                {hasData ? (
-                  isPdf ? (
-                    <div style={{ padding: '20px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-                        <FileText size={72} color="#38BDF8" />
-                      </div>
-                      <h3 style={{ color: 'var(--text-primary)', marginBottom: '30px', fontSize: '1.4rem' }}>Archivo PDF</h3>
-                      <button onClick={downloadDoc} style={{ padding: '12px 24px', background: 'var(--primary, #38BDF8)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
-                        <Download size={20} /> Descargar para visualizar
-                      </button>
-                    </div>
-                  ) : (
-                    <img src={src} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' }} alt={adminDocViewer.name} />
-                  )
-                ) : (
-                  <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📄</div>
-                    <h3 style={{ color: 'var(--text-primary, #fff)', marginBottom: '8px' }}>{adminDocViewer.name}</h3>
-                    <p style={{ color: '#aaa' }}>No hay archivo disponible para previsualizar.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
 

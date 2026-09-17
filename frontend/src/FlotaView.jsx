@@ -1,25 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldCheck, ShieldAlert, ChevronDown } from 'lucide-react';
+import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
-import DocumentVerification from './components/DocumentVerification';
 import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
+import { validarArchivoDocumento } from './utils/validacionDocumento';
 
-import DocumentReviewCard from './components/DocumentReviewCard';
+import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
-import { subirDocumento } from './utils/documentoStorage';
 import { documentoABase64 } from './utils/imageUtils';
-import DocumentViewer from './components/DocumentViewer';
-import { DOCUMENTOS_CONDUCTOR } from './constants/documentosConductor';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
 const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
 const DEFAULT_DOCUMENT_ACCEPT = FileUploadZone.DEFAULT_DOCUMENT_ACCEPT;
-const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
 const DOCUMENT_ACCEPT_ATTRIBUTE = Object.keys(DEFAULT_DOCUMENT_ACCEPT).join(',');
 
 const announceAdminWebSocketState = (connected) => {
@@ -41,23 +37,6 @@ const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 /** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
 const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
 
-const validateDocumentFile = (file) => {
-  if (!file) return 'Selecciona un archivo.';
-  if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
-    return `El archivo supera el límite de ${(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0)} MB.`;
-  }
-  const acceptedTypes = Object.keys(DEFAULT_DOCUMENT_ACCEPT);
-  const extension = `.${file.name?.split('.').pop()?.toLowerCase() || ''}`;
-  const hasAcceptedType = acceptedTypes.some(type => {
-    if (type.endsWith('/*')) return file.type?.startsWith(type.slice(0, -1));
-    return file.type === type;
-  });
-  const hasAcceptedExtension = Object.values(DEFAULT_DOCUMENT_ACCEPT).flat().includes(extension);
-  if (!hasAcceptedType && !hasAcceptedExtension) {
-    return 'Formato no permitido. Usa PNG, JPG, WebP o PDF.';
-  }
-  return '';
-};
 
 
 // Traduce el shortcut recibido desde el dashboard al valor exacto usado en BASE_OPTIONS.
@@ -127,14 +106,11 @@ const FlotaView = ({ usuario, initialBase }) => {
   const [conductorInfo, setConductorInfo] = useState(null);
   const [isLoadingConductor, setIsLoadingConductor] = useState(false);
 
-  const [reviewLoading, setReviewLoading] = useState({});
   const [resolveLoading, setResolveLoading] = useState({});
   const [notifyMsg, setNotifyMsg] = useState('');
   const [isSendingNotify, setIsSendingNotify] = useState(false);
-  const [localRevisionDocs, setLocalRevisionDocs] = useState({});
   
   // Doc Viewer State
-  const [viewingDoc, setViewingDoc] = useState(null);
 
   // --- Admin WebSocket: notificaciones de conductores en tiempo real ---
   const [adminNotifs, setAdminNotifs] = useState([]);
@@ -251,83 +227,6 @@ const FlotaView = ({ usuario, initialBase }) => {
       closeAdminWS();
     };
   }, [canReceiveAdminNotifications, connectAdminWS, closeAdminWS]);
-
-  // Sync localRevisionDocs when conductorInfo loads
-  useEffect(() => {
-    if (conductorInfo) {
-      setLocalRevisionDocs(conductorInfo.usuario?.perfil_conductor?.revision_docs || {});
-    }
-  }, [conductorInfo]);
-
-  const handleDocReview = async (campo, estado) => {
-    if (!conductorInfo || !usuario) return;
-    setReviewLoading(prev => ({ ...prev, [campo]: true }));
-    try {
-      const data = await apiFetch('/api/admin/driver/review', {
-        method: 'POST',
-        json: {
-          admin_email: usuario?.email || usuario?.identifier || '',
-          conductor_email: conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '',
-          campo,
-          estado,
-        },
-      });
-      setLocalRevisionDocs(data.revision_docs || {});
-      toast.success(`Documento marcado como ${estado === 'aprobado' ? '✅ Aprobado' : '❌ Rechazado'}`);
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setReviewLoading(prev => ({ ...prev, [campo]: false }));
-    }
-  };
-
-  const handleAdminUploadDoc = async (campo, file) => {
-    if (!file || !conductorInfo || !usuario) return;
-    const validationError = validateDocumentFile(file);
-    if (validationError) {
-      toast.error(validationError);
-      return;
-    }
-    setReviewLoading(prev => ({ ...prev, [campo]: true }));
-    try {
-      // El archivo va a Storage y el perfil solo guarda su ruta. Guardarlo
-      // dentro llevaba la fila a casi diez megas y la escritura por encima del
-      // límite de tiempo de la función.
-      const fileObj = await subirDocumento(file, {
-        unidadId: conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || '',
-        campo,
-      });
-
-      const driverEmail = conductorInfo?.usuario?.email || conductorInfo?.usuario?.identifier || conductorInfo?.flota?.conductor || '';
-      
-      const res = await fetch('/api/conductor/resubmit-docs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: driverEmail, docs: { [campo]: fileObj }, uploaded_by: 'admin' })
-      });
-      if (!res.ok) throw new Error('Error al subir documento');
-      
-      const updatedConductorInfo = { ...conductorInfo };
-      if (updatedConductorInfo.usuario && !updatedConductorInfo.usuario.perfil_conductor) {
-        updatedConductorInfo.usuario.perfil_conductor = {};
-      }
-      if (updatedConductorInfo.usuario) {
-        updatedConductorInfo.usuario.perfil_conductor[campo] = fileObj;
-      }
-      setConductorInfo(updatedConductorInfo);
-      
-      setLocalRevisionDocs(prev => ({
-        ...prev,
-        [campo]: { estado: 'pendiente' }
-      }));
-
-      toast.success('Documento subido por el administrador.');
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setReviewLoading(prev => ({ ...prev, [campo]: false }));
-    }
-  };
 
   const handleResolveDataRequest = async (campo, action) => {
     if (!conductorInfo || !usuario) return;
@@ -522,7 +421,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   const handleFileUpload = (e, field) => {
     const file = e.target.files[0];
     if (!file) return;
-    const validationError = validateDocumentFile(file);
+    const validationError = validarArchivoDocumento(file);
     if (validationError) {
       toast.error(validationError);
       e.target.value = '';
@@ -1126,27 +1025,21 @@ const FlotaView = ({ usuario, initialBase }) => {
                     </div>
                   )}
 
-                  {/* DOCUMENT REVIEW PANEL */}
+                  {/* La misma revisión que muestra Accesos: un solo
+                      componente para las dos pantallas. */}
                   <div className="docs-section">
-                    <h4 style={{display:'flex', alignItems:'center', gap:'8px'}}>
-                      <ShieldCheck size={18} color="#38bdf8" />
-                      Revisión de Documentos del Conductor
-                    </h4>
-                    <div className="review-docs-grid">
-                      {DOCUMENTOS_CONDUCTOR.map((documento) => (
-                        <DocumentReviewCard
-                          key={documento.key}
-                          documento={documento}
-                          perfil={conductorInfo.usuario.perfil_conductor}
-                          revisiones={localRevisionDocs}
-                          cargando={reviewLoading}
-                          accept={DOCUMENT_ACCEPT_ATTRIBUTE}
-                          onUpload={handleAdminUploadDoc}
-                          onReview={handleDocReview}
-                          onView={setViewingDoc}
-                        />
-                      ))}
-                    </div>
+                    <RevisionDocumentosConductor
+                      conductor={conductorInfo.usuario}
+                      unidadId={conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || ''}
+                      adminEmail={usuario?.email || usuario?.identifier || ''}
+                      onDocumentoSubido={(campo, documento) => setConductorInfo(previo => ({
+                        ...previo,
+                        usuario: {
+                          ...previo.usuario,
+                          perfil_conductor: { ...previo.usuario?.perfil_conductor, [campo]: documento },
+                        },
+                      }))}
+                    />
                   </div>
 
                   {/* API VERIFICATION */}
@@ -1309,345 +1202,6 @@ const FlotaView = ({ usuario, initialBase }) => {
           </div>
         </div>
       )}
-      <style>{`
-        /* Modal Profile CSS */
-        .conductor-profile {
-          background: var(--bg-secondary, #ffffff); border-radius: 16px; padding: 24px;
-          width: 95%; max-width: 1100px; max-height: 90vh; overflow-y: auto;
-          position: relative; color: var(--text-primary);
-          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-          border: 1px solid var(--border-color);
-        }
-        .close-btn {
-          position: absolute; top: 16px; right: 16px;
-          background: var(--bg-secondary, #ffffff); border: 1px solid var(--border-color); 
-          color: var(--text-secondary); cursor: pointer;
-          transition: all 0.2s; padding: 6px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        .close-btn:hover { color: var(--primary-color); transform: scale(1.1); border-color: var(--primary-color); }
-        
-        .profile-layout {
-          display: flex; gap: 24px; margin-top: 5px;
-        }
-        @media (max-width: 768px) {
-          .profile-layout { flex-direction: column; }
-        }
-        .profile-left {
-          flex: 0 0 240px; text-align: center;
-        }
-        .driver-photo {
-          width: 100%; aspect-ratio: 1/1; background: var(--bg, #f1f5f9); border-radius: 12px;
-          display: flex; align-items: center; justify-content: center; overflow: hidden;
-          margin-bottom: 16px; border: 1px solid var(--border-color);
-        }
-        .driver-photo img { width: 100%; height: 100%; object-fit: cover; }
-        .avatar-placeholder { opacity: 0.5; color: var(--text-muted); }
-        .driver-id { font-size: 1.1rem; margin: 0 0 4px 0; color: var(--primary-color, #38bdf8); font-weight: 600; letter-spacing: 1px; }
-        .driver-name { font-size: 1.25rem; margin: 0; color: var(--text-primary); opacity: 0.9; }
-        
-        .profile-right {
-          flex: 1; display: flex; flex-direction: column; gap: 16px;
-        }
-        .vehicle-photo {
-          width: 100%; aspect-ratio: 21/9; background: var(--bg, #f1f5f9); border-radius: 12px;
-          display: flex; align-items: center; justify-content: center; overflow: hidden;
-          border: 1px solid var(--border-color);
-        }
-        .vehicle-placeholder { text-align: center; font-size: 20px; opacity: 0.5; color: var(--text-muted); }
-        
-        .info-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-        }
-        @media (max-width: 600px) {
-          .info-grid { grid-template-columns: 1fr; }
-        }
-        .info-section {
-          background: var(--bg, #f9fafb); padding: 20px; border-radius: 12px;
-          border: 1px solid var(--border-color);
-        }
-        .info-section h4 {
-          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-secondary);
-        }
-        .info-section p { margin: 8px 0; font-size: 0.9rem; color: var(--text-secondary); }
-        .info-section strong { color: var(--text-primary); font-weight: 600; }
-        
-        .docs-section {
-          background: var(--bg, #f9fafb); padding: 20px; border-radius: 12px;
-          border: 1px solid var(--border-color);
-        }
-        .docs-section h4 {
-          font-size: 1.1rem; margin: 0 0 15px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-secondary);
-        }
-        .docs-grid {
-          display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
-        }
-        @media (max-width: 900px) {
-          .docs-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 600px) {
-          .docs-grid { grid-template-columns: 1fr; }
-        }
-        .doc-item {
-          display: flex; justify-content: space-between; align-items: center;
-          background: var(--bg-secondary, #ffffff); padding: 10px 14px; border-radius: 8px;
-          font-size: 0.85rem; border: 1px solid var(--border-color);
-          color: var(--text-primary); transition: border-color 0.2s;
-        }
-        .doc-item:hover { border-color: var(--primary-color); }
-        .text-green { color: #10b981; font-weight: 600; margin-left: 5px; }
-        .btn-view-doc {
-          background: var(--accent-bg, rgba(56,189,248,0.1)); 
-          border: 1px solid var(--accent-border, rgba(56,189,248,0.3)); 
-          color: var(--primary-color, #38bdf8);
-          padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; 
-          transition: all 0.2s; display: flex; align-items: center; gap: 6px; font-weight: 600;
-        }
-        .btn-view-doc:hover {
-          background: var(--primary-color);
-          color: #ffffff;
-        }
-
-        /* Review doc cards */
-        .review-docs-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;
-        }
-        .review-doc-card {
-          background: var(--bg-secondary, #fff); border: 1px solid var(--border-color);
-          border-radius: 10px; padding: 12px 14px;
-          display: flex; flex-direction: column; gap: 10px;
-          transition: border-color 0.2s;
-        }
-        .review-doc-card:hover { border-color: rgba(56,189,248,0.4); }
-        .review-doc-header {
-          display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-        }
-        .review-doc-name {
-          flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--text-primary);
-        }
-        .rev-badge {
-          display: inline-flex; align-items: center; gap: 4px;
-          font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 20px;
-          white-space: nowrap;
-        }
-        .rev-ok { background: rgba(34,197,94,0.12); color: #22c55e; }
-        .rev-no { background: rgba(239,68,68,0.12); color: #ef4444; }
-        .rev-pending { background: rgba(245,158,11,0.12); color: #f59e0b; }
-        .rev-missing { background: rgba(100,116,139,0.1); color: var(--text-secondary); }
-        .review-doc-actions {
-          display: flex; gap: 6px; flex-wrap: wrap;
-        }
-        .btn-approve-doc {
-          display: flex; align-items: center; gap: 4px;
-          background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3);
-          color: #22c55e; padding: 5px 10px; border-radius: 6px;
-          font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
-        }
-        .btn-approve-doc:hover:not(:disabled) { background: #22c55e; color: #fff; }
-        .btn-approve-doc:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-reject-doc {
-          display: flex; align-items: center; gap: 4px;
-          background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
-          color: #ef4444; padding: 5px 10px; border-radius: 6px;
-          font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
-        }
-        .btn-reject-doc:hover:not(:disabled) { background: #ef4444; color: #fff; }
-        .btn-reject-doc:disabled { opacity: 0.4; cursor: not-allowed; }
-        .review-doc-missing {
-          font-size: 0.75rem; color: var(--text-secondary); margin: 0;
-          font-style: italic;
-        }
-
-        /* Notify section */
-        .notify-section {
-          background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);
-          border-radius: 12px; padding: 20px;
-        }
-        .notify-textarea {
-          width: 100%; padding: 10px 12px; border-radius: 8px;
-          border: 1px solid var(--border-color); background: var(--bg-secondary);
-          color: var(--text-primary); font-size: 0.88rem; resize: vertical;
-          outline: none; transition: border-color 0.2s; font-family: inherit;
-          box-sizing: border-box;
-        }
-        .notify-textarea:focus { border-color: #f59e0b; }
-
-        .btn-icon {
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          font-size: 1.1rem;
-          opacity: 0.7;
-          transition: 0.2s;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 30px;
-          height: 30px;
-          border-radius: 6px;
-          padding: 0;
-          color: var(--text-secondary);
-          flex-shrink: 0;
-        }
-        .btn-icon:hover {
-          opacity: 1;
-          transform: scale(1.1);
-        }
-        .modal-overlay {
-          position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(0,0,0,0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(4px);
-        }
-        .modal-content {
-          background: var(--kapital-card-bg);
-          padding: 30px;
-          border-radius: 12px;
-          width: 90%;
-          max-width: 500px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-          border: 1px solid var(--kapital-border);
-          display: flex;
-          flex-direction: column;
-        }
-        .form-scroll-area {
-          max-height: 60vh;
-          overflow-y: auto;
-          padding-right: 15px;
-          margin-bottom: 20px;
-        }
-        .form-scroll-area::-webkit-scrollbar {
-          width: 6px;
-        }
-        .form-scroll-area::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .form-scroll-area::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 4px;
-        }
-        .form-scroll-area::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
-        .custom-file-upload {
-          display: inline-block;
-          padding: 8px 12px;
-          border-radius: 6px;
-          border: 1px dashed var(--kapital-border);
-          background: #f8fafc;
-          color: var(--text-secondary);
-          cursor: pointer;
-          font-size: 0.85rem;
-          font-weight: 500;
-          transition: all 0.2s;
-        }
-        .custom-file-upload:hover {
-          background: var(--kapital-light-blue);
-          color: var(--kapital-blue-deep);
-          border-color: var(--kapital-blue-deep);
-        }
-        .modal-content h3 {
-          margin-top: 0;
-          color: var(--kapital-text-primary);
-          font-weight: 700;
-        }
-        .flota-form {
-          display: flex;
-          flex-direction: column;
-          gap: 15px;
-          margin-top: 20px;
-        }
-        .form-section-title {
-          margin: 18px 0 12px;
-          padding-bottom: 8px;
-          border-bottom: 1px solid var(--kapital-border);
-          color: var(--kapital-text-primary);
-          font-size: 0.8rem;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-        }
-        .form-section-title:first-child { margin-top: 0; }
-        .form-row {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .form-row label {
-          font-size: 0.9rem;
-          font-weight: 600;
-          color: var(--kapital-text-secondary);
-        }
-        .form-row input, .form-row select {
-          padding: 10px 12px;
-          border-radius: 8px;
-          border: 1px solid var(--kapital-border);
-          background: var(--kapital-bg);
-          color: var(--kapital-text-primary);
-          font-size: 0.95rem;
-          outline: none;
-          transition: border-color 0.2s;
-        }
-        .form-row input:focus, .form-row select:focus {
-          border-color: var(--kapital-nav-link-active);
-        }
-        .modal-actions {
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          margin-top: 25px;
-        }
-
-        /* DOC VIEWER MODAL */
-        .doc-viewer-overlay {
-          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
-          display: flex; align-items: center; justify-content: center;
-          z-index: 9999; padding: 20px;
-        }
-        .doc-viewer-content {
-          background: var(--bg-secondary); border-radius: 12px; width: 100%; max-width: 900px;
-          display: flex; flex-direction: column; overflow: hidden;
-          box-shadow: 0 10px 40px rgba(0,0,0,0.4); border: 1px solid var(--border-color);
-        }
-        .doc-viewer-header {
-          display: flex; justify-content: space-between; align-items: center;
-          padding: 15px 20px; border-bottom: 1px solid var(--border-color);
-        }
-        .doc-viewer-header h3 {
-          margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);
-        }
-        .close-btn-inline {
-          background: transparent; border: none; color: var(--text-secondary);
-          cursor: pointer; padding: 4px; border-radius: 4px; display: flex;
-          align-items: center; justify-content: center; transition: all 0.2s;
-        }
-        .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .doc-viewer-body {
-          padding: 0; background: var(--kapital-bg, #e2e8f0); display: flex; align-items: center; justify-content: center;
-          height: 80vh; max-height: 800px;
-        }
-        .doc-iframe {
-          width: 100%; height: 100%; border: none;
-        }
-        .doc-image {
-          max-width: 100%; max-height: 100%; object-fit: contain;
-        }
-      `}</style>
-
-      {/* DOCUMENT VIEWER MODAL - image only */}
-      {/* `key` por documento: remonta el visor y con él vuelve a la primera
-          cara, sin necesidad de un efecto que reinicie el estado. */}
-      <DocumentViewer
-        key={viewingDoc?.name}
-        documento={viewingDoc}
-        onClose={() => setViewingDoc(null)}
-      />
 
 
     </div>
