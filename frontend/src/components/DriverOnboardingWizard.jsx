@@ -273,8 +273,11 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     soat: 'Debe estar vigente.',
   };
 
-  const tarjetaDocumento = (clave) => (
-    <div className="form-group" key={clave}>
+  // `completa` la extiende a toda la fila. Se usa cuando la tarjeta cae entre
+  // campos de texto: en media columna quedaba como un bloque alto y estrecho
+  // que empujaba hacia abajo el campo de al lado.
+  const tarjetaDocumento = (clave, { completa = false } = {}) => (
+    <div className={`form-group${completa ? ' full-width' : ''}`} key={clave}>
       <DocumentoMultiCara
         documento={documentoPorClave(clave)}
         archivos={formData}
@@ -408,7 +411,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               {avisoDe('direccion')}
             </div>
 
-            {tarjetaDocumento('comprobanteDomicilio')}
+            {tarjetaDocumento('comprobanteDomicilio', { completa: true })}
 
             <div className="form-group">
               <label>Teléfono Directo</label>

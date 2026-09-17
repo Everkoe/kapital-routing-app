@@ -1549,3 +1549,10 @@ select.campo-pendiente {
   align-items: center;
   justify-content: center;
 }
+
+/* Una tarjeta a fila completa no necesita una zona de arrastre tan alta:
+   el ancho ya la hace visible, y estirarla dejaría un hueco enorme. */
+.form-group.full-width .documento-card .dropzone-area {
+  min-height: 0;
+  padding: 18px;
+}
