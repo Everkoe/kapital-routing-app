@@ -4298,7 +4298,11 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
 
 
 @app.get("/api/flota")
-async def get_flota_status():
+async def get_flota_status(session_token: SessionCookie = None):
+    # La respuesta enriquece cada unidad con datos personales del conductor
+    # —DNI, dirección, fecha de nacimiento, celular— para la exportación al
+    # formato oficial. Servía todo eso sin pedir sesión: bastaba conocer la URL.
+    await require_any_session(session_token)
     if _is_compat_storage() and not _full_cache_is_fresh():
         # Fleet is already materialized under the reserved compatibility key;
         # avoid downloading the users and routes JSONB columns just to render
