@@ -1529,8 +1529,23 @@ select.campo-pendiente {
 }
 
 /* La zona de arrastre vive dentro de la tarjeta: sin margen propio y
-   ocupando el alto que sobra, para que dos tarjetas contiguas se alineen. */
+   ocupando el alto que sobra, para que dos tarjetas contiguas se alineen.
+   El hueco lo absorbe la zona en sí, no el espacio bajo ella: si no, la
+   tarjeta más baja de la fila quedaba con un claro entre zona y pista. */
 .documento-card .file-upload-wrapper {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   margin: 0;
+}
+
+.documento-card .file-upload-wrapper > *:last-child {
+  flex: 1;
+}
+
+.documento-card .dropzone-area {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
 }

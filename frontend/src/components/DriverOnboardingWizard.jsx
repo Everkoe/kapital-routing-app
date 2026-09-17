@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide-react';
-import FileUploadZone from './FileUploadZone';
 import DocumentoMultiCara from './DocumentoMultiCara';
 import { documentoPorClave } from '../constants/documentosConductor';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
@@ -12,6 +11,7 @@ import {
   ayudaDeCampo,
   camposPendientes,
   estadoDeCampo,
+  esRequerido,
   progresoDe,
   seccionCompleta,
 } from '../constants/camposOnboarding';
@@ -264,6 +264,29 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     className: debeAvisar(campo) ? 'campo-pendiente' : undefined,
   });
 
+  // Detalle que antes vivía entre paréntesis en la etiqueta. Fuera del título
+  // no alarga la tarjeta ni descuadra la rejilla.
+  const PISTAS = {
+    comprobanteDomicilio: 'Recibo de agua o luz a tu nombre.',
+    recordConductor: 'El historial que emite el MTC.',
+    cv: 'Tu currículum actualizado.',
+    soat: 'Debe estar vigente.',
+  };
+
+  const tarjetaDocumento = (clave) => (
+    <div className="form-group" key={clave}>
+      <DocumentoMultiCara
+        documento={documentoPorClave(clave)}
+        archivos={formData}
+        onArchivo={handleFileChange}
+        opcional={!esRequerido(clave)}
+        pista={PISTAS[clave] || ''}
+        pendiente={debeAvisar(clave)}
+        aviso={ayudaDeCampo(clave, datosDelAlta)}
+      />
+    </div>
+  );
+
   const avisoDe = (campo) => (debeAvisar(campo) ? (
     <small className="campo-aviso">
       <AlertCircle size={13} aria-hidden="true" /> {ayudaDeCampo(campo, datosDelAlta)}
@@ -385,15 +408,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               {avisoDe('direccion')}
             </div>
 
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Comprobante de Domicilio (Agua/Luz)" 
-                file={formData.comprobanteDomicilio} 
-                onFileSelect={(f) => handleFileChange('comprobanteDomicilio', f)} 
-                pendiente={debeAvisar('comprobanteDomicilio')}
-                aviso={ayudaDeCampo('comprobanteDomicilio', datosDelAlta)}
-              />
-            </div>
+            {tarjetaDocumento('comprobanteDomicilio')}
 
             <div className="form-group">
               <label>Teléfono Directo</label>
@@ -427,37 +442,11 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           </div>
           
           <div className="form-grid">
-            {/* Las tres caras son el mismo documento: una tarjeta con selector
-                en vez de tres zonas de arrastre sueltas. */}
-            {['dniScaneado', 'licenciaConducir', 'lunasPolarizadas'].map((clave) => (
-              <div className="form-group" key={clave}>
-                <DocumentoMultiCara
-                  documento={documentoPorClave(clave)}
-                  archivos={formData}
-                  onArchivo={handleFileChange}
-                  pendiente={debeAvisar(clave)}
-                  aviso={ayudaDeCampo(clave, datosDelAlta)}
-                />
-              </div>
-            ))}
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Récord o Historial del Conductor (MTC)" 
-                file={formData.recordConductor} 
-                onFileSelect={(f) => handleFileChange('recordConductor', f)} 
-                pendiente={debeAvisar('recordConductor')}
-                aviso={ayudaDeCampo('recordConductor', datosDelAlta)}
-              />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Certificado de Antecedentes Policiales" 
-                file={formData.antecedentesPoliciales} 
-                onFileSelect={(f) => handleFileChange('antecedentesPoliciales', f)} 
-                pendiente={debeAvisar('antecedentesPoliciales')}
-                aviso={ayudaDeCampo('antecedentesPoliciales', datosDelAlta)}
-              />
-            </div>
+            {/* Todos los documentos son la misma tarjeta. Los de dos caras
+                traen selector; los de papel, no. Mezclar tarjetas con zonas de
+                arrastre sueltas era lo que rompía la rejilla. */}
+            {['dniScaneado', 'licenciaConducir', 'lunasPolarizadas',
+              'recordConductor', 'antecedentesPoliciales'].map(tarjetaDocumento)}
           </div>
 
           <div className="section-divider">
@@ -465,27 +454,9 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           </div>
 
           <div className="form-grid">
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Curriculum Vitae (CV) Actualizado (Opcional)" 
-                file={formData.cv} 
-                onFileSelect={(f) => handleFileChange('cv', f)} 
-              />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Certificados de Trabajo (Opcional)" 
-                file={formData.certificadosTrabajo} 
-                onFileSelect={(f) => handleFileChange('certificadosTrabajo', f)} 
-              />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone 
-                label="Referencias Laborales (Opcional)" 
-                file={formData.referenciasLaborales} 
-                onFileSelect={(f) => handleFileChange('referenciasLaborales', f)} 
-              />
-            </div>
+            {tarjetaDocumento('cv')}
+            {tarjetaDocumento('certificadosTrabajo')}
+            {tarjetaDocumento('referenciasLaborales')}
           </div>
           
           <div className="wizard-actions">
@@ -537,12 +508,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 aviso={ayudaDeCampo('tarjetaPropiedad', datosDelAlta)}
               />
             </div>
-            <div className="form-group full-width">
-              <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)}pendiente={debeAvisar('soat')} aviso={ayudaDeCampo('soat', datosDelAlta)} />
-            </div>
-            <div className="form-group full-width">
-              <FileUploadZone label="Revisión Técnica (Opcional)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
-            </div>
+            {tarjetaDocumento('soat')}
+            {tarjetaDocumento('revisionTecnica')}
           </div>
           <div className="wizard-actions">
             <button className="btn-secondary" onClick={() => toggleSection('manejo')}>Siguiente Sección</button>

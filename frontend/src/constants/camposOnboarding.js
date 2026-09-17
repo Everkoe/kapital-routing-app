@@ -100,6 +100,18 @@ export const CAMPOS_ONBOARDING = [
 /** Reglas que cuentan para el porcentaje: solo las obligatorias. */
 const obligatorias = () => CAMPOS_ONBOARDING.filter((regla) => regla.requerido !== false);
 
+/**
+ * Si el alta exige este campo.
+ *
+ * Es distinto de `opcional` del catálogo de documentos: allí se describe el
+ * documento en general, y aquí qué hace falta para enviar el perfil. El CV, por
+ * ejemplo, no se pide en el alta aunque sea un documento con su propia ficha.
+ */
+export const esRequerido = (campo) => {
+  const regla = CAMPOS_ONBOARDING.find((r) => r.campo === campo);
+  return Boolean(regla) && regla.requerido !== false;
+};
+
 export const reglaDe = (campo) => CAMPOS_ONBOARDING.find((regla) => regla.campo === campo) || null;
 
 export const estadoDeCampo = (campo, datos) => {

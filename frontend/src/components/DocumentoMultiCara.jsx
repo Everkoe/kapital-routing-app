@@ -37,7 +37,19 @@ const tieneArchivo = (valor) => {
   return Boolean(valor.name || valor.path || valor.base64 || valor.size);
 };
 
-const DocumentoMultiCara = ({ documento, archivos, onArchivo, pendiente = false, aviso = '' }) => {
+const DocumentoMultiCara = ({
+  documento,
+  archivos,
+  onArchivo,
+  pendiente = false,
+  aviso = '',
+  // Si el alta lo exige. No se deduce del catálogo: allí `opcional` describe
+  // el documento en general, no lo que hace falta para enviar el perfil.
+  opcional = false,
+  // Detalle que antes iba entre paréntesis en la etiqueta —«(Agua/Luz)»,
+  // «(MTC)»—, donde alargaba el título y descuadraba la rejilla.
+  pista = '',
+}) => {
   const caras = carasDeDocumento(documento).map((cara) => ({
     ...cara,
     tieneArchivo: tieneArchivo(archivos?.[cara.campo]),
@@ -53,7 +65,7 @@ const DocumentoMultiCara = ({ documento, archivos, onArchivo, pendiente = false,
     <div className={`documento-card${pendiente ? ' campo-pendiente' : ''}`}>
       <div className="documento-card-titulo">
         <span>{documento.label}</span>
-        {documento.opcional && <small className="documento-opcional">Opcional</small>}
+        {opcional && <small className="documento-opcional">Opcional</small>}
       </div>
 
       {pendiente && aviso && (
@@ -88,9 +100,9 @@ const DocumentoMultiCara = ({ documento, archivos, onArchivo, pendiente = false,
         onFileSelect={(archivo) => onArchivo(cara.campo, archivo)}
       />
 
-      {variasCaras && (
+      {(variasCaras || pista) && (
         <small className="documento-pista">
-          {PISTA_POR_CARA[cara.nombre] || PISTA_DELANTE}
+          {variasCaras ? (PISTA_POR_CARA[cara.nombre] || PISTA_DELANTE) : pista}
         </small>
       )}
     </div>
