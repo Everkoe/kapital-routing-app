@@ -6,8 +6,10 @@ import { apiFetch } from './utils/apiClient';
 import DrawerLateral from './components/DrawerLateral';
 import {
   ICONO_POR_TIPO,
+  SALTO_DE_PAGINAS,
   estadoDeActividad,
   fechaLegible,
+  paginasVisibles,
 } from './constants/tiposDeActividad';
 import './App.css';
 
@@ -171,36 +173,48 @@ const HistorialActividad = () => {
           />
         </label>
 
-        <select
-          value={filtros.tipo}
-          aria-label="Filtrar por tipo de evento"
-          onChange={(e) => { setFiltros({ ...filtros, tipo: e.target.value }); setPagina(1); }}
-        >
-          <option value="">Todos los eventos</option>
-          {(datos?.tipos || []).map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
-        </select>
+        <label className="historial-campo">
+          <Iconos.ListFilter size={15} aria-hidden="true" />
+          <select
+            value={filtros.tipo}
+            aria-label="Filtrar por tipo de evento"
+            onChange={(e) => { setFiltros({ ...filtros, tipo: e.target.value }); setPagina(1); }}
+          >
+            <option value="">Todos los eventos</option>
+            {(datos?.tipos || []).map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
+          </select>
+        </label>
 
-        <select
-          value={filtros.actor}
-          aria-label="Filtrar por responsable"
-          onChange={(e) => { setFiltros({ ...filtros, actor: e.target.value }); setPagina(1); }}
-        >
-          <option value="">Todos los responsables</option>
-          {(datos?.responsables || []).map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <label className="historial-campo">
+          <Iconos.User size={15} aria-hidden="true" />
+          <select
+            value={filtros.actor}
+            aria-label="Filtrar por responsable"
+            onChange={(e) => { setFiltros({ ...filtros, actor: e.target.value }); setPagina(1); }}
+          >
+            <option value="">Todos los responsables</option>
+            {(datos?.responsables || []).map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </label>
 
-        <input
-          type="date"
-          value={filtros.desde}
-          aria-label="Desde la fecha"
-          onChange={(e) => { setFiltros({ ...filtros, desde: e.target.value }); setPagina(1); }}
-        />
-        <input
-          type="date"
-          value={filtros.hasta}
-          aria-label="Hasta la fecha"
-          onChange={(e) => { setFiltros({ ...filtros, hasta: e.target.value }); setPagina(1); }}
-        />
+        <label className="historial-campo">
+          <Calendar size={15} aria-hidden="true" />
+          <input
+            type="date"
+            value={filtros.desde}
+            aria-label="Desde la fecha"
+            onChange={(e) => { setFiltros({ ...filtros, desde: e.target.value }); setPagina(1); }}
+          />
+        </label>
+        <label className="historial-campo">
+          <Calendar size={15} aria-hidden="true" />
+          <input
+            type="date"
+            value={filtros.hasta}
+            aria-label="Hasta la fecha"
+            onChange={(e) => { setFiltros({ ...filtros, hasta: e.target.value }); setPagina(1); }}
+          />
+        </label>
 
         {hayFiltros && (
           <button type="button" className="btn-view-doc" onClick={limpiar}>
@@ -208,8 +222,8 @@ const HistorialActividad = () => {
           </button>
         )}
         {eventos.length > 0 && (
-          <button type="button" className="btn-approve-doc" onClick={exportar}>
-            <Iconos.Download size={14} /> Exportar
+          <button type="button" className="historial-exportar" onClick={exportar}>
+            <Iconos.Download size={15} /> Exportar
           </button>
         )}
       </div>
@@ -248,8 +262,10 @@ const HistorialActividad = () => {
                     return (
                       <tr key={evento.id}>
                         <td>
-                          <span className={`historial-actividad-nombre ${estado.clase}`}>
-                            <IconoDeTipo tipo={evento.action_type} />
+                          <span className="historial-actividad-nombre">
+                            <span className={`historial-icono-fila ${estado.clase}`}>
+                              <IconoDeTipo tipo={evento.action_type} />
+                            </span>
                             {evento.action_type}
                           </span>
                         </td>
@@ -287,25 +303,43 @@ const HistorialActividad = () => {
           {eventos.length > 0 && (
             <div className="historial-paginacion">
               <span>Mostrando {desde}–{hasta} de {resumen?.total || 0} eventos</span>
-              <div>
+              <nav className="historial-paginas" aria-label="Paginación del historial">
                 <button
                   type="button"
-                  className="btn-view-doc"
+                  className="historial-pagina"
                   disabled={datos.pagina <= 1 || cargando}
                   onClick={() => setPagina(p => Math.max(1, p - 1))}
                 >
-                  Anterior
+                  <Iconos.ChevronLeft size={14} aria-hidden="true" /> Anterior
                 </button>
-                <span className="historial-pagina-actual">{datos.pagina} / {datos.paginas}</span>
+
+                {paginasVisibles(datos.pagina, datos.paginas).map((numero, i) => (
+                  numero === SALTO_DE_PAGINAS ? (
+                    <span key={`salto-${i}`} className="historial-salto" aria-hidden="true">{SALTO_DE_PAGINAS}</span>
+                  ) : (
+                    <button
+                      key={numero}
+                      type="button"
+                      className={`historial-pagina${numero === datos.pagina ? ' activa' : ''}`}
+                      aria-current={numero === datos.pagina ? 'page' : undefined}
+                      aria-label={`Página ${numero}`}
+                      disabled={cargando}
+                      onClick={() => setPagina(numero)}
+                    >
+                      {numero}
+                    </button>
+                  )
+                ))}
+
                 <button
                   type="button"
-                  className="btn-view-doc"
+                  className="historial-pagina"
                   disabled={datos.pagina >= datos.paginas || cargando}
                   onClick={() => setPagina(p => p + 1)}
                 >
-                  Siguiente
+                  Siguiente <Iconos.ChevronRight size={14} aria-hidden="true" />
                 </button>
-              </div>
+              </nav>
             </div>
           )}
         </div>

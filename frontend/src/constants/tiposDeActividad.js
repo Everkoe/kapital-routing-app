@@ -53,3 +53,27 @@ export const fechaLegible = (iso, ahora = new Date()) => {
   if (diferencia === 1) return `Ayer, ${hora}`;
   return `${fecha.toLocaleDateString('es-PE')}, ${hora}`;
 };
+
+/** Marca lo que va entre números de página cuando no caben todos. */
+export const SALTO_DE_PAGINAS = '…';
+
+/**
+ * Números de página que se muestran, con saltos cuando son demasiados.
+ *
+ * Siempre se ven la primera y la última —son las dos que más se buscan— más
+ * una ventana alrededor de la actual. Con pocas páginas se listan todas, sin
+ * saltos que no aportan nada.
+ */
+export const paginasVisibles = (actual, total, ventana = 1) => {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+  const numeros = new Set([1, total]);
+  for (let n = actual - ventana; n <= actual + ventana; n += 1) {
+    if (n >= 1 && n <= total) numeros.add(n);
+  }
+
+  const ordenados = [...numeros].sort((a, b) => a - b);
+  return ordenados.flatMap((numero, i) => (
+    i > 0 && numero - ordenados[i - 1] > 1 ? [SALTO_DE_PAGINAS, numero] : [numero]
+  ));
+};

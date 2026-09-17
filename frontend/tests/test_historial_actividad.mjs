@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   ESTADOS_ACTIVIDAD,
   ICONO_POR_TIPO,
+  SALTO_DE_PAGINAS,
   estadoDeActividad,
   fechaLegible,
+  paginasVisibles,
 } from '../src/constants/tiposDeActividad.js';
 
 test('un estado conocido trae su etiqueta escrita, no solo un color', () => {
@@ -46,5 +48,30 @@ test('lo más antiguo lleva su fecha completa', () => {
 test('una fecha ausente o ilegible no imprime «Invalid Date»', () => {
   for (const entrada of [null, undefined, '', 'no-es-fecha']) {
     assert.equal(fechaLegible(entrada), '—');
+  }
+});
+
+test('con pocas páginas se listan todas, sin saltos que no aportan', () => {
+  assert.deepEqual(paginasVisibles(1, 1), [1]);
+  assert.deepEqual(paginasVisibles(3, 5), [1, 2, 3, 4, 5]);
+  assert.deepEqual(paginasVisibles(4, 7), [1, 2, 3, 4, 5, 6, 7]);
+});
+
+test('con muchas páginas siempre se ven la primera, la última y el entorno', () => {
+  // El caso del mockup: 25 páginas, en la primera.
+  assert.deepEqual(paginasVisibles(1, 25), [1, 2, SALTO_DE_PAGINAS, 25]);
+  assert.deepEqual(paginasVisibles(13, 25), [1, SALTO_DE_PAGINAS, 12, 13, 14, SALTO_DE_PAGINAS, 25]);
+  assert.deepEqual(paginasVisibles(25, 25), [1, SALTO_DE_PAGINAS, 24, 25]);
+});
+
+test('la paginación nunca ofrece una página que no existe', () => {
+  for (const total of [1, 2, 8, 25, 100]) {
+    for (const actual of [1, Math.ceil(total / 2), total]) {
+      const numeros = paginasVisibles(actual, total).filter((n) => n !== SALTO_DE_PAGINAS);
+      assert.ok(numeros.every((n) => n >= 1 && n <= total), `${actual}/${total}`);
+      assert.ok(numeros.includes(actual), `falta la actual en ${actual}/${total}`);
+      // Ordenada y sin repetir: si no, los botones saltarían hacia atrás.
+      assert.deepEqual(numeros, [...new Set(numeros)].sort((a, b) => a - b));
+    }
   }
 });

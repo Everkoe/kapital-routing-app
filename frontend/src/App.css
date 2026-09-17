@@ -2035,7 +2035,14 @@ select.campo-pendiente {
    Historial de actividad. Reutiliza los tokens y el aspecto de las
    tablas de Flota y Accesos: no es una segunda identidad visual.
    --------------------------------------------------------------- */
-.historial-actividad { display: flex; flex-direction: column; gap: 16px; }
+.historial-actividad {
+  /* La aplicación centra el texto; una pantalla de tabla y filtros se lee por
+     columnas y necesita el borde izquierdo como referencia. */
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .historial-cabecera h1 { margin: 0 0 4px 0; font-size: 1.5rem; color: var(--text-primary); }
 .historial-cabecera p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }
 
@@ -2240,3 +2247,59 @@ select.campo-pendiente {
   border-top: 1px solid var(--border-color);
 }
 .drawer-pie button { padding: 9px 22px; }
+
+/* Icono de cada fila en su cuadro de color tenue, como en la referencia: el
+   tipo de evento se reconoce antes de leer el texto. */
+.historial-icono-fila {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px;
+}
+.historial-icono-fila.act-info { background: var(--accent-bg); }
+.historial-icono-fila.act-exito { background: rgba(16, 185, 129, 0.12); }
+.historial-icono-fila.act-aviso { background: rgba(245, 158, 11, 0.14); }
+.historial-icono-fila.act-error { background: rgba(239, 68, 68, 0.12); }
+.historial-actividad-nombre { gap: 10px; color: var(--text-primary); }
+.historial-tabla tbody tr:hover { background: var(--bg-hover); }
+
+/* Cada filtro lleva su icono dentro, igual que la caja de busqueda. */
+.historial-campo {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 10px;
+  color: var(--text-secondary); background: var(--bg);
+  border: 1px solid var(--border-color); border-radius: 8px;
+}
+.historial-campo select,
+.historial-campo input {
+  padding: 9px 0; font-size: 0.85rem;
+  color: var(--text-primary); background: transparent;
+  border: none; outline: none;
+}
+.historial-filtros select,
+.historial-filtros input[type="date"] { border: none; background: transparent; padding: 9px 0; }
+
+.historial-exportar {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-left: auto; padding: 10px 18px;
+  font-size: 0.85rem; font-weight: 600;
+  color: #ffffff; background: var(--primary-color);
+  border: none; border-radius: 8px; cursor: pointer;
+}
+.historial-exportar:hover { opacity: 0.9; }
+
+/* Paginacion con numeros, como la referencia. */
+.historial-paginas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.historial-pagina {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 34px; height: 34px; padding: 0 10px;
+  justify-content: center;
+  font-size: 0.82rem; color: var(--text-primary);
+  background: var(--bg); border: 1px solid var(--border-color);
+  border-radius: 8px; cursor: pointer;
+}
+.historial-pagina:hover:not(:disabled):not(.activa) { background: var(--bg-hover); }
+.historial-pagina.activa {
+  color: #ffffff; background: var(--primary-color); border-color: var(--primary-color);
+  font-weight: 600; cursor: default;
+}
+.historial-pagina:disabled { cursor: default; opacity: 0.45; }
+.historial-salto { padding: 0 4px; color: var(--text-secondary); }
