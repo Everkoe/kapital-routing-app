@@ -150,7 +150,10 @@ const PantallaAuth = ({ onLogin }) => {
               </>
             )}
 
-            {!isLogin && formData.rol !== 'Conductor' && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
+            {/* El conductor también da su nombre al registrarse. Sin él entraba
+                como «Conductor Pendiente» y Administración no tenía forma de
+                saber a quién estaba aprobando hasta que completara el alta. */}
+            {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
             
             {!isLogin && formData.rol !== 'Conductor' && (
               <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />

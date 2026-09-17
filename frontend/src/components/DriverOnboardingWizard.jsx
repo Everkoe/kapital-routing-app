@@ -89,6 +89,9 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
   // Check if the registered name is actually a DNI (digits only)
   const isRegisteredNameDni = usuario?.nombre && /^\d+$/.test(usuario.nombre);
+  // Los conductores dados de alta antes de pedir el nombre en el registro
+  // llevan este relleno. No es un nombre: no debe aparecer en su formulario.
+  const nombreRegistrado = usuario?.nombre === 'Conductor Pendiente' ? '' : usuario?.nombre;
 
   // Draft keys unique per user
   const draftKey = `driver_onboarding_draft_${usuario?.identifier || 'unknown'}`;
@@ -100,7 +103,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
   const [formData, setFormData] = useState({
     // Datos Personales
-    nombres: isRegisteredNameDni ? '' : (usuario?.nombre || ''),
+    nombres: isRegisteredNameDni ? '' : (nombreRegistrado || ''),
     tipoDoc: 'DNI',
     numDoc: isRegisteredNameDni ? usuario.nombre : '',
     fechaNacimiento: '',
