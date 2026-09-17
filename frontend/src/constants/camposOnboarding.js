@@ -112,6 +112,19 @@ export const esRequerido = (campo) => {
   return Boolean(regla) && regla.requerido !== false;
 };
 
+/**
+ * Documentos que hacen falta para dar por completo el perfil.
+ *
+ * Tres pantallas tenían su propia copia de esta lista y ninguna coincidía con
+ * el alta: el portal del conductor exigía el CV, que el alta no pide, y la
+ * pantalla de resubida daba por «faltante» todo lo que no estuviera subido
+ * —reversos opcionales, referencias laborales, y hasta el cuestionario, que no
+ * es un archivo—. El conductor entregaba todo y seguía viendo el aviso rojo.
+ */
+export const documentosRequeridos = () =>
+  CAMPOS_ONBOARDING.filter((regla) => regla.archivo && regla.requerido !== false)
+    .map((regla) => regla.campo);
+
 export const reglaDe = (campo) => CAMPOS_ONBOARDING.find((regla) => regla.campo === campo) || null;
 
 export const estadoDeCampo = (campo, datos) => {

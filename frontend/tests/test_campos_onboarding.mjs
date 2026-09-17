@@ -6,6 +6,7 @@ import {
   ESTADO_OK,
   ayudaDeCampo,
   camposPendientes,
+  documentosRequeridos,
   estadoDeCampo,
   progresoDe,
   seccionCompleta,
@@ -101,4 +102,27 @@ test('los pendientes salen en el orden del formulario', () => {
     camposPendientes(datos).map((r) => r.campo),
     ['nombres', 'vehiculoPlaca', 'quizManejoDefensivo'],
   );
+});
+
+test('los documentos exigidos son los del alta, ni uno más', () => {
+  // Tres pantallas tenían su propia lista. El portal exigía el CV, que el alta
+  // no pide, y la resubida daba por faltante hasta el cuestionario de manejo,
+  // que no es un archivo: el conductor entregaba todo y seguía en rojo.
+  assert.deepEqual(documentosRequeridos(), [
+    'comprobanteDomicilio',
+    'dniScaneado',
+    'licenciaConducir',
+    'recordConductor',
+    'antecedentesPoliciales',
+    'tarjetaPropiedad',
+    'soat',
+  ]);
+});
+
+test('ni los reversos ni los documentos opcionales bloquean el perfil', () => {
+  for (const clave of ['dniScaneadoReverso', 'dniScaneadoCompleto', 'licenciaConducirReverso',
+                       'lunasPolarizadas', 'cv', 'certificadosTrabajo', 'referenciasLaborales',
+                       'revisionTecnica', 'cuestionarioManejoDefensivo']) {
+    assert.equal(documentosRequeridos().includes(clave), false, clave);
+  }
 });

@@ -1,6 +1,7 @@
 // App.jsx - Trigger Vercel Deploy 
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { documentosRequeridos } from './constants/camposOnboarding';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
@@ -1250,7 +1251,7 @@ function App() {
       }
 
       if (p) {
-        const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
+        const REQUIRED_DOCS = documentosRequeridos();
         const hasMissing = REQUIRED_DOCS.some(k => {
           const hasDoc = !!p[k];
           const isPendingOrRejected = p.revision_docs?.[k]?.estado;
