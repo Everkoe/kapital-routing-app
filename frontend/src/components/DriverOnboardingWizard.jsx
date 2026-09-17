@@ -5,6 +5,14 @@ import FileUploadZone from './FileUploadZone';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
 import { subirDocumento } from '../utils/documentoStorage';
+import {
+  ESTADO_OK,
+  ayudaDeCampo,
+  camposPendientes,
+  estadoDeCampo,
+  progresoDe,
+  seccionCompleta,
+} from '../constants/camposOnboarding';
 
 const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
   return (
@@ -44,6 +52,10 @@ const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
 const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   const [openSection, setOpenSection] = useState('personales');
   const [isSaving, setIsSaving] = useState(false);
+  // Campos por los que el conductor ya pasó: hasta entonces no se le avisa
+  // de nada, para no recibirle con el formulario en amarillo.
+  const [tocados, setTocados] = useState({});
+  const [intentoDeEnvio, setIntentoDeEnvio] = useState(false);
 
   // Load quiz result from localStorage
   const loadQuizFromStorage = () => {
@@ -224,41 +236,71 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     }
   }, [formData.fechaNacimiento]);
 
+  // Las reglas se evalúan sobre el alta entera: el cuestionario no está en
+  // `formData`, pero cuenta igual que cualquier otro requisito.
+  const datosDelAlta = { ...formData, quizManejoDefensivo: quizResult };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  /**
+   * Un campo se marca en ámbar cuando el conductor ya pasó por él y lo dejó
+   * a medias, o cuando intenta enviar. Marcarlos todos desde el principio
+   * pintaría el formulario entero de amarillo antes de que escriba nada.
+   */
+  const marcarComoVisitado = (campo) =>
+    setTocados(prev => (prev[campo] ? prev : { ...prev, [campo]: true }));
+
+  const debeAvisar = (campo) =>
+    (tocados[campo] || intentoDeEnvio) && estadoDeCampo(campo, datosDelAlta) !== ESTADO_OK;
+
+  const propsDeCampo = (campo) => ({
+    id: `campo-${campo}`,
+    onBlur: () => marcarComoVisitado(campo),
+    className: debeAvisar(campo) ? 'campo-pendiente' : undefined,
+  });
+
+  const avisoDe = (campo) => (debeAvisar(campo) ? (
+    <small className="campo-aviso">
+      <AlertCircle size={13} aria-hidden="true" /> {ayudaDeCampo(campo, datosDelAlta)}
+    </small>
+  ) : null);
 
 
   const toggleSection = (section) => {
     setOpenSection(openSection === section ? null : section);
   };
 
-  const calculateProgress = () => {
-    const totalFields = 16;
-    let filled = 0;
-    
-    if (formData.nombres) filled++;
-    if (formData.numDoc && formData.numDoc.length >= 8) filled++;
-    if (formData.fechaNacimiento) filled++;
-    if (formData.direccion) filled++;
-    if (formData.telefonoDirecto) filled++;
-    if (formData.comprobanteDomicilio) filled++;
-    if (formData.dniScaneado) filled++;
-    if (formData.licenciaConducir) filled++;
-    if (formData.recordConductor) filled++;
-    if (formData.antecedentesPoliciales) filled++;
-    
-    if (quizResult) filled++;
-    
-    // Vehiculares
-    if (formData.vehiculoMarca) filled++;
-    if (formData.vehiculoPlaca) filled++;
-    if (formData.vehiculoCapacidad) filled++;
-    if (formData.tarjetaPropiedad) filled++;
-    if (formData.soat) filled++;
 
-    return Math.round((filled / totalFields) * 100);
+  /**
+   * Envío del alta.
+   *
+   * El botón ya no está deshabilitado. Antes lo estaba hasta llegar al 100% y
+   * no explicaba nada: el conductor veía un botón muerto y un porcentaje, sin
+   * forma de saber qué le faltaba. Ahora al pulsarlo se marcan en ámbar todos
+   * los campos pendientes, se abre la sección del primero y se sube hasta él.
+   */
+  const handleEnviar = () => {
+    const pendientes = camposPendientes(datosDelAlta);
+    if (pendientes.length === 0) {
+      onComplete?.(datosDelAlta);
+      return;
+    }
+
+    setIntentoDeEnvio(true);
+    const [primero] = pendientes;
+    setOpenSection(primero.seccion);
+    toast.error(pendientes.length === 1
+      ? `Falta un dato: ${primero.etiqueta}.`
+      : `Faltan ${pendientes.length} datos. El primero es ${primero.etiqueta}.`);
+
+    // El acordeón se abre con una animación de 300 ms; sin esperar, el campo
+    // todavía no ocupa sitio en la página y el desplazamiento no va a ninguna.
+    setTimeout(() => {
+      document.getElementById(`campo-${primero.campo}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 350);
   };
 
   const handleSaveDraft = () => {
@@ -271,7 +313,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     setIsSaving(false);
   };
 
-  const progress = Math.min(calculateProgress(), 100);
+  const progress = Math.min(progresoDe(datosDelAlta), 100);
 
   return (
     <div className="onboarding-wizard">
@@ -300,12 +342,13 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="1. Identificación y Datos Personales" 
           isOpen={openSection === 'personales'} 
           onToggle={() => toggleSection('personales')}
-          status={progress >= 30 ? 'complete' : 'incomplete'}
+          status={seccionCompleta('personales', datosDelAlta) ? 'complete' : 'incomplete'}
         >
           <div className="form-grid">
             <div className="form-group full-width">
               <label>Nombres y Apellidos Completos</label>
-              <input type="text" name="nombres" value={formData.nombres} onChange={handleChange} placeholder="Ej. Juan Pérez" />
+              <input type="text" name="nombres" value={formData.nombres} onChange={handleChange} placeholder="Ej. Juan Pérez" {...propsDeCampo('nombres')} />
+              {avisoDe('nombres')}
             </div>
 
             <div className="form-group">
@@ -319,12 +362,14 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
             <div className="form-group">
               <label>Número de Documento</label>
-              <input type="text" name="numDoc" value={formData.numDoc} onChange={handleChange} placeholder="Ej. 12345678" maxLength={formData.tipoDoc === 'DNI' ? 8 : 12} />
+              <input type="text" name="numDoc" value={formData.numDoc} onChange={handleChange} placeholder="Ej. 12345678" maxLength={formData.tipoDoc === 'DNI' ? 8 : 12} {...propsDeCampo('numDoc')} />
+              {avisoDe('numDoc')}
             </div>
 
             <div className="form-group">
               <label>Fecha de Nacimiento</label>
-              <input type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} />
+              <input type="date" name="fechaNacimiento" value={formData.fechaNacimiento} onChange={handleChange} {...propsDeCampo('fechaNacimiento')} />
+              {avisoDe('fechaNacimiento')}
             </div>
 
             <div className="form-group">
@@ -334,7 +379,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
 
             <div className="form-group full-width">
               <label>Dirección de Residencia Actual</label>
-              <input type="text" name="direccion" value={formData.direccion} onChange={handleChange} placeholder="Ej. Av. Siempre Viva 123" />
+              <input type="text" name="direccion" value={formData.direccion} onChange={handleChange} placeholder="Ej. Av. Siempre Viva 123" {...propsDeCampo('direccion')} />
+              {avisoDe('direccion')}
             </div>
 
             <div className="form-group full-width">
@@ -342,12 +388,15 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="Comprobante de Domicilio (Agua/Luz)" 
                 file={formData.comprobanteDomicilio} 
                 onFileSelect={(f) => handleFileChange('comprobanteDomicilio', f)} 
+                pendiente={debeAvisar('comprobanteDomicilio')}
+                aviso={ayudaDeCampo('comprobanteDomicilio', datosDelAlta)}
               />
             </div>
 
             <div className="form-group">
               <label>Teléfono Directo</label>
-              <input type="tel" name="telefonoDirecto" value={formData.telefonoDirecto} onChange={handleChange} placeholder="Ej. 987654321" />
+              <input type="tel" name="telefonoDirecto" value={formData.telefonoDirecto} onChange={handleChange} placeholder="Ej. 987654321" {...propsDeCampo('telefonoDirecto')} />
+              {avisoDe('telefonoDirecto')}
             </div>
 
             <div className="form-group">
@@ -365,7 +414,9 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 value={formData.correo}
                 onChange={handleChange}
                 placeholder="Ej. juan.perez@gmail.com"
+                {...propsDeCampo('correo')}
               />
+              {avisoDe('correo')}
             </div>
           </div>
 
@@ -381,6 +432,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="DNI · Anverso"
                 file={formData.dniScaneado}
                 onFileSelect={(f) => handleFileChange('dniScaneado', f)}
+                pendiente={debeAvisar('dniScaneado')}
+                aviso={ayudaDeCampo('dniScaneado', datosDelAlta)}
               />
             </div>
             <div className="form-group">
@@ -402,6 +455,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="Licencia de Conducir · Anverso"
                 file={formData.licenciaConducir}
                 onFileSelect={(f) => handleFileChange('licenciaConducir', f)}
+                pendiente={debeAvisar('licenciaConducir')}
+                aviso={ayudaDeCampo('licenciaConducir', datosDelAlta)}
               />
             </div>
             <div className="form-group">
@@ -444,6 +499,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="Récord o Historial del Conductor (MTC)" 
                 file={formData.recordConductor} 
                 onFileSelect={(f) => handleFileChange('recordConductor', f)} 
+                pendiente={debeAvisar('recordConductor')}
+                aviso={ayudaDeCampo('recordConductor', datosDelAlta)}
               />
             </div>
             <div className="form-group full-width">
@@ -451,6 +508,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
                 label="Certificado de Antecedentes Policiales" 
                 file={formData.antecedentesPoliciales} 
                 onFileSelect={(f) => handleFileChange('antecedentesPoliciales', f)} 
+                pendiente={debeAvisar('antecedentesPoliciales')}
+                aviso={ayudaDeCampo('antecedentesPoliciales', datosDelAlta)}
               />
             </div>
           </div>
@@ -492,12 +551,13 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="2. Datos Vehiculares" 
           isOpen={openSection === 'vehiculares'} 
           onToggle={() => toggleSection('vehiculares')}
-          status={progress >= 80 ? 'complete' : 'incomplete'}
+          status={seccionCompleta('vehiculares', datosDelAlta) ? 'complete' : 'incomplete'}
         >
           <div className="form-grid">
             <div className="form-group">
               <label>Marca del Vehículo</label>
-              <input type="text" name="vehiculoMarca" value={formData.vehiculoMarca} onChange={handleChange} placeholder="Ej. Mercedes-Benz" />
+              <input type="text" name="vehiculoMarca" value={formData.vehiculoMarca} onChange={handleChange} placeholder="Ej. Mercedes-Benz" {...propsDeCampo('vehiculoMarca')} />
+              {avisoDe('vehiculoMarca')}
             </div>
             <div className="form-group">
               <label>Modelo</label>
@@ -509,7 +569,8 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </div>
             <div className="form-group">
               <label>Placa del Vehículo</label>
-              <input type="text" name="vehiculoPlaca" value={formData.vehiculoPlaca} onChange={handleChange} placeholder="Ej. ABC-123" />
+              <input type="text" name="vehiculoPlaca" value={formData.vehiculoPlaca} onChange={handleChange} placeholder="Ej. ABC-123" {...propsDeCampo('vehiculoPlaca')} />
+              {avisoDe('vehiculoPlaca')}
             </div>
             <div className="form-group">
               <label>Color</label>
@@ -517,11 +578,12 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </div>
             <div className="form-group">
               <label>Capacidad de Pasajeros</label>
-              <input type="number" name="vehiculoCapacidad" value={formData.vehiculoCapacidad} onChange={handleChange} placeholder="Ej. 15" />
+              <input type="number" name="vehiculoCapacidad" value={formData.vehiculoCapacidad} onChange={handleChange} placeholder="Ej. 15" {...propsDeCampo('vehiculoCapacidad')} />
+              {avisoDe('vehiculoCapacidad')}
             </div>
 
             <div className="form-group">
-              <FileUploadZone label="Tarjeta de Propiedad · Anverso" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)} />
+              <FileUploadZone label="Tarjeta de Propiedad · Anverso" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)}pendiente={debeAvisar('tarjetaPropiedad')} aviso={ayudaDeCampo('tarjetaPropiedad', datosDelAlta)} />
             </div>
             <div className="form-group">
               <FileUploadZone label="Tarjeta de Propiedad · Reverso (opcional)" file={formData.tarjetaPropiedadReverso} onFileSelect={(f) => handleFileChange('tarjetaPropiedadReverso', f)} />
@@ -534,7 +596,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
               />
             </div>
             <div className="form-group full-width">
-              <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)} />
+              <FileUploadZone label="SOAT Vigente" file={formData.soat} onFileSelect={(f) => handleFileChange('soat', f)}pendiente={debeAvisar('soat')} aviso={ayudaDeCampo('soat', datosDelAlta)} />
             </div>
             <div className="form-group full-width">
               <FileUploadZone label="Revisión Técnica (Opcional)" file={formData.revisionTecnica} onFileSelect={(f) => handleFileChange('revisionTecnica', f)} />
@@ -549,7 +611,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           title="3. Cuestionario de Manejo Defensivo" 
           isOpen={openSection === 'manejo'} 
           onToggle={() => toggleSection('manejo')}
-          status={quizResult ? 'complete' : 'incomplete'}
+          status={seccionCompleta('manejo', datosDelAlta) ? 'complete' : 'incomplete'}
         >
           <QuizManejoDefensivo
             initialData={quizResult}
@@ -565,7 +627,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
         <button className="btn-draft" onClick={handleSaveDraft} disabled={isSaving}>
           <Save size={18} /> {isSaving ? 'Guardando...' : 'Guardar Progreso (Borrador)'}
         </button>
-        <button className="btn-primary" onClick={() => onComplete && onComplete({ ...formData, quizManejoDefensivo: quizResult })} disabled={progress < 100}>
+        <button className="btn-primary" onClick={handleEnviar}>
           <Send size={18} /> Enviar para Revisión
         </button>
       </div>
