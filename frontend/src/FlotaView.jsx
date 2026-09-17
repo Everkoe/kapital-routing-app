@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Pencil, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
+import { MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import FileUploadZone from './components/FileUploadZone';
@@ -9,6 +9,7 @@ import { apiFetch, apiRequest } from './utils/apiClient';
 import { validarArchivoDocumento } from './utils/validacionDocumento';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
+import EdicionUnidad from './components/EdicionUnidad';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
 import { documentoABase64 } from './utils/imageUtils';
 import './App.css';
@@ -388,27 +389,6 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
   };
 
-  const handleEdit = (vehiculo) => {
-    const unitId = getFleetUnitId(vehiculo);
-    if (!unitId) {
-      toast.error('La unidad no tiene un identificador válido.');
-      return;
-    }
-    const editableData = {
-      placa: unitId,
-      capacidad: vehiculo.capacidad ?? 10,
-      tipo: vehiculo.tipo || 'AUTO',
-      chofer: vehiculo.chofer || '',
-      // Mismo origen que el botón de WhatsApp, para que no discrepen.
-      telefono: telefonoDeUnidad(vehiculo),
-      soat: vehiculo.soat || '', revision: vehiculo.revision || '', atu: vehiculo.atu || '', licencia: vehiculo.licencia || '',
-    };
-    setFormData(editableData);
-    setEditingUnitId(unitId);
-    setInitialEditData(editableData);
-    setIsEditing(true);
-    setShowModal(true);
-  };
 
   const handleCreate = () => {
     setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
@@ -799,7 +779,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                         <MessageCircle size={15} />
                       </a>
                     )}
-                    <button className="btn-icon" onClick={() => handleEdit(vehiculo)} title="Editar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} /></button>
                     <button className="btn-icon" onClick={() => handleDelete(getFleetUnitId(vehiculo))} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
                   </div>
                 </td>
@@ -1024,6 +1003,19 @@ const FlotaView = ({ usuario, initialBase }) => {
                       </div>
                     </div>
                   )}
+
+                  {/* La unidad se edita aquí, donde ya se está mirando al
+                      conductor. Antes había que cerrar esta ficha y abrir el
+                      lápiz de la tabla, otra ventana sobre la misma persona. */}
+                  <EdicionUnidad
+                    unidad={conductorInfo.flota}
+                    unidadId={conductorInfo.unidad_id || getFleetUnitId(conductorInfo.flota || {})}
+                    puedeRenombrar={puedeRenombrar}
+                    onGuardado={(nuevoId) => {
+                      fetchFlota();
+                      handleOpenConductor(nuevoId);
+                    }}
+                  />
 
                   {/* La misma revisión que muestra Accesos: un solo
                       componente para las dos pantallas. */}

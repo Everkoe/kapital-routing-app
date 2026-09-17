@@ -1947,3 +1947,82 @@ select.campo-pendiente {
 .review-docs-title svg {
   color: var(--primary-color);
 }
+
+/* Datos de la unidad dentro de la ficha del conductor (EdicionUnidad.jsx).
+   Sustituye al modal que se abría con el lápiz de la tabla. */
+.unidad-edicion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.unidad-edicion-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.unidad-edicion-cabecera h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.unidad-edicion-cabecera svg {
+  color: var(--primary-color);
+}
+
+.unidad-vigencias-titulo {
+  margin: 8px 0 0 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.unidad-edicion-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.unidad-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.unidad-campo input,
+.unidad-campo select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  color: var(--text-primary);
+  background: var(--bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.unidad-campo input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.unidad-campo small {
+  font-size: 0.72rem;
+  line-height: 1.3;
+  opacity: 0.8;
+}
+
+.unidad-campo .status-badge {
+  align-self: flex-start;
+}
