@@ -1,6 +1,7 @@
 // App.jsx - Trigger Vercel Deploy 
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { documentosRequeridos } from './constants/camposOnboarding';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
@@ -149,7 +150,10 @@ const PantallaAuth = ({ onLogin }) => {
               </>
             )}
 
-            {!isLogin && formData.rol !== 'Conductor' && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
+            {/* El conductor también da su nombre al registrarse. Sin él entraba
+                como «Conductor Pendiente» y Administración no tenía forma de
+                saber a quién estaba aprobando hasta que completara el alta. */}
+            {!isLogin && <input className="auth-input" name="nombre" type="text" placeholder="Nombre Completo" autoComplete="name" onChange={handleInputChange} required />}
             
             {!isLogin && formData.rol !== 'Conductor' && (
               <input className="auth-input" name="telefono" type="tel" placeholder="Teléfono" onChange={handleInputChange} required />
@@ -1014,6 +1018,9 @@ function App() {
     } else {
       localStorage.setItem('kapital_user', JSON.stringify(userData));
       setUsuarioActual(userData);
+      // Sin esto, la vista de la sesión anterior sobrevive al cambio de cuenta.
+      setVistaActual('dashboard');
+      setVistaParams({});
 
       // Immediately fetch fresh profile so perfil_conductor is loaded before
       // renderVista evaluates it — prevents the "Documentos Faltantes" flash on login
@@ -1234,35 +1241,19 @@ function App() {
 
 
   const renderVista = () => {
+    // Un conductor solo tiene su portal y su perfil. Antes esta rama devolvía
+    // el portal únicamente cuando `vistaActual` era 'dashboard', así que al
+    // entrar con una cuenta de conductor sobre una sesión de administración
+    // —sin recargar la página— la vista anterior seguía puesta y el conductor
+    // veía la gestión de flota entera, con los datos de los demás.
+    //
+    // Qué pantalla le toca dentro del portal (alta, resubida o rutas) lo
+    // decide `DriverPortal`, que ya tenía esa lógica: aquí estaba repetida.
     if (usuarioActual?.rol === 'Conductor') {
-      const p = usuarioActual?.perfil_conductor;
-
-      // Fast-path: if driver is already 'Activo' and on the main dashboard view,
-      // skip doc checks entirely — prevents the "Documentos Faltantes" flash on login.
-      // Only applies to 'dashboard' so other routes (e.g. 'perfil') still work normally.
-      const isActive = usuarioActual?.estado === 'Activo';
-      if (isActive && (vistaActual === 'dashboard' || vistaActual === 'default')) {
-        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+      if (vistaActual === 'perfil') {
+        return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       }
-
-      if (!p && vistaActual === 'dashboard') {
-        return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
-      }
-
-      if (p) {
-        const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
-        const hasMissing = REQUIRED_DOCS.some(k => {
-          const hasDoc = !!p[k];
-          const isPendingOrRejected = p.revision_docs?.[k]?.estado;
-          return !hasDoc && !isPendingOrRejected;
-        });
-        const hasRejected = Object.values(p.revision_docs || {}).some(r => r.estado?.toLowerCase() === 'rechazado');
-        const isPending = usuarioActual?.estado === 'Pendiente Revisión' || usuarioActual?.estado === 'Documentos Observados';
-        
-        if (hasMissing || hasRejected || isPending) {
-          return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
-        }
-      }
+      return <DriverPortal usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
     }
 
     switch (vistaActual) {

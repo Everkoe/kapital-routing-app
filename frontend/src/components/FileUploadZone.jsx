@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
-import { UploadCloud, File, X, CheckCircle } from 'lucide-react';
+import { AlertCircle, UploadCloud, File, X, CheckCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 const MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024;
@@ -35,6 +35,9 @@ const FileUploadZone = ({
   label,
   onFileSelect,
   file,
+  // Aviso del alta: este documento se pidió y todavía no está.
+  pendiente = false,
+  aviso = '',
   accept = DEFAULT_DOCUMENT_ACCEPT,
   maxFiles = 1,
   maxSize = MAX_DOCUMENT_SIZE_BYTES,
@@ -82,8 +85,13 @@ const FileUploadZone = ({
   };
 
   return (
-    <div className="file-upload-wrapper">
-      <label className="upload-label">{label}</label>
+    <div className={`file-upload-wrapper${pendiente ? ' campo-pendiente' : ''}`}>
+      {label && <label className="upload-label">{label}</label>}
+      {pendiente && aviso && (
+        <small className="campo-aviso">
+          <AlertCircle size={13} aria-hidden="true" /> {aviso}
+        </small>
+      )}
       
       {!file ? (
         <div 

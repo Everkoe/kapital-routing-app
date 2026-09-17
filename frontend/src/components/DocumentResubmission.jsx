@@ -4,6 +4,7 @@ import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
+import { documentosRequeridos } from '../constants/camposOnboarding';
 import { subirDocumento } from '../utils/documentoStorage';
 import DocumentViewer from './DocumentViewer';
 
@@ -37,12 +38,17 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
   const markedNotificationIdsRef = useRef(new Set());
   const revisions = usuario?.perfil_conductor?.revision_docs || {};
   const rejectedDocs = Object.keys(revisions).filter(key => revisions[key].estado?.toLowerCase() === 'rechazado');
+  // Solo falta lo que de verdad se pidió. Antes se recorría el catálogo entero
+  // y se daba por «faltante» todo lo que no estuviera subido: los reversos
+  // opcionales, las referencias laborales y hasta el cuestionario de manejo,
+  // que no es un archivo. El conductor entregaba todo y seguía viendo el aviso.
+  const requeridos = new Set(documentosRequeridos());
   const missingDocs = Object.keys(DOC_LABELS).filter(key => {
-    if (key === 'revisionTecnica') return false; // Optional document
-    const hasDoc = !!usuario?.perfil_conductor?.[key];
     const revision = revisions[key];
-    const estado = revision ? revision.estado?.toLowerCase() : (hasDoc ? 'pendiente' : 'faltante');
-    return estado === 'faltante';
+    // Si Administración lo marcó, manda su marca, sea el documento que sea.
+    if (revision) return revision.estado?.toLowerCase() === 'faltante';
+    if (!requeridos.has(key)) return false;
+    return !usuario?.perfil_conductor?.[key];
   });
   const hasRejectedOrMissing = rejectedDocs.length > 0 || missingDocs.length > 0;
 

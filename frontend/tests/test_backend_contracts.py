@@ -2129,6 +2129,85 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # Con la exigencia desactivada no hay actor: se conserva el rollback.
         self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
 
+    def test_resubmitting_a_profile_never_orphans_a_stored_document(self):
+        """El formulario reenviaba fichas sin ruta y el archivo quedaba huérfano.
+
+        El conductor veía «Documento no disponible» aunque el fichero seguía
+        en el bucket: lo único que se había perdido era el puntero.
+        """
+        anterior = {
+            "dniScaneado": {"name": "dni.png", "size": 38943, "path": "usuario-ab12/dniScaneado.png"},
+            "soat": {"name": "soat.png", "path": "usuario-ab12/soat.png"},
+            "direccion": "AV. SIEMPRE VIVA 123",
+        }
+        # Lo que mandaba el formulario tras restaurar el borrador.
+        entrante = {
+            "dniScaneado": {"name": "dni.png", "size": 38943, "type": "image/png", "isRestored": True},
+            "soat": {"name": "soat-nuevo.png", "path": "usuario-ab12/soat-nuevo.png"},
+            "direccion": "AV. NUEVA 456",
+        }
+
+        resultado = backend.conservar_documentos(anterior, entrante)
+
+        self.assertEqual(resultado["dniScaneado"], anterior["dniScaneado"], "la ficha vacía no pisa la ruta")
+        self.assertEqual(resultado["soat"]["path"], "usuario-ab12/soat-nuevo.png", "un documento nuevo sí sustituye")
+        self.assertEqual(resultado["direccion"], "AV. NUEVA 456", "los datos de texto se actualizan igual")
+
+    def test_a_document_can_still_be_removed_on_purpose(self):
+        anterior = {"cv": {"name": "cv.pdf", "path": "usuario-ab12/cv.pdf"}}
+        for retirado in (None, ""):
+            with self.subTest(retirado=retirado):
+                resultado = backend.conservar_documentos(anterior, {"cv": retirado})
+                self.assertEqual(resultado["cv"], retirado)
+
+    def test_the_first_profile_of_a_driver_is_stored_as_sent(self):
+        entrante = {"dniScaneado": {"name": "dni.png", "path": "usuario-ab12/dniScaneado.png"}}
+        self.assertEqual(backend.conservar_documentos(None, entrante), entrante)
+
+    def test_a_real_email_is_stored_beside_the_account_key(self):
+        """Los 108 conductores del Excel tienen por clave un correo inventado.
+
+        Cambiar esa clave sería migrar la cuenta entera. El correo real se
+        guarda al lado, en `email` y en el perfil, que es lo que se muestra y
+        lo que `get_user_by_identifier` reconoce para entrar.
+        """
+        conductor = {"rol": "Conductor", "email": "de.los@kapital.com", "perfil_conductor": {}}
+        usuarios = {"de.los@kapital.com": conductor}
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True),                 mock.patch.object(backend, "refresh_session_index_for") as refresco:
+            cambio = backend.asignar_correo(conductor, "  Richard.DeLosSantos@Gmail.com ")
+            claves = list(backend.usuarios_db)
+
+        self.assertTrue(cambio)
+        self.assertEqual(conductor["email"], "richard.delossantos@gmail.com")
+        self.assertEqual(conductor["perfil_conductor"]["correo"], "richard.delossantos@gmail.com")
+        # La instantánea de autorización guarda el correo: sin refrescarla, la
+        # sesión abierta seguiría respondiendo por el correo anterior.
+        refresco.assert_called_once_with(conductor)
+        # Y la clave de la cuenta sigue siendo la de siempre.
+        self.assertEqual(claves, ["de.los@kapital.com"])
+
+    def test_an_email_that_belongs_to_another_account_is_refused(self):
+        conductor = {"rol": "Conductor", "email": "de.los@kapital.com"}
+        usuarios = {
+            "de.los@kapital.com": conductor,
+            "otro@kapital.com": {"rol": "Conductor", "email": "ya.tomado@gmail.com"},
+        }
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True):
+            with self.assertRaises(HTTPException) as error:
+                backend.asignar_correo(conductor, "ya.tomado@gmail.com")
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(conductor["email"], "de.los@kapital.com", "no debe quedar a medias")
+
+    def test_an_unusable_email_is_refused_before_touching_the_account(self):
+        for entrada in ("", "   ", None, "no-es-un-correo", "falta@dominio", "a b@c.com"):
+            with self.subTest(entrada=entrada):
+                conductor = {"rol": "Conductor", "email": "previo@kapital.com"}
+                with mock.patch.dict(backend.usuarios_db, {"k": conductor}, clear=True):
+                    with self.assertRaises(HTTPException) as error:
+                        backend.asignar_correo(conductor, entrada)
+                self.assertEqual(error.exception.status_code, 400)
+                self.assertEqual(conductor["email"], "previo@kapital.com")
+
     def test_an_approved_driver_seeds_their_unit_with_what_they_declared(self):
         """La flota leía `chofer` y la aprobación escribía `nombre`.
 

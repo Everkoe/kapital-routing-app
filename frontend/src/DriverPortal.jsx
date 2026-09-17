@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import DocumentResubmission from './components/DocumentResubmission';
+import { documentosRequeridos } from './constants/camposOnboarding';
 import SwipeablePassenger from './components/SwipeablePassenger';
 import ZenModeView from './components/ZenModeView';
 import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play, Bell } from 'lucide-react';
@@ -473,7 +474,9 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       });
       if (!response.ok) throw new Error('Error al enviar perfil');
       
-      const updatedUser = { ...usuario, estado: 'Pendiente Revisión' };
+      // Sin el perfil recién guardado, la pantalla siguiente lee el anterior y
+      // da por faltante todo lo que el conductor acaba de subir.
+      const updatedUser = { ...usuario, estado: 'Pendiente Revisión', perfil_conductor: data };
       localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
       if (setUsuarioActual) {
         setUsuarioActual(updatedUser);
@@ -503,7 +506,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
     );
   }
 
-  const REQUIRED_DOCS = ['comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad', 'soat'];
+  const REQUIRED_DOCS = documentosRequeridos();
 
   const hasMissingDocs = REQUIRED_DOCS.some(key => {
     const hasDoc = !!usuario?.perfil_conductor?.[key];

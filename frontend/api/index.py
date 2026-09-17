@@ -3331,6 +3331,83 @@ def get_user_by_identifier(identifier: str):
             return v
     return None
 
+# Un correo se guarda como dato de contacto, no como clave de la cuenta: los 108
+# conductores importados del Excel tienen por clave un correo inventado
+# (`apellido@kapital.com`) y `identifier` a nulo. Renombrar esa clave sería
+# migrar la cuenta entera; guardar el correo real al lado no rompe nada y
+# `get_user_by_identifier` lo reconoce igual para iniciar sesión.
+_FORMATO_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def correo_normalizado(correo: Any) -> str:
+    """Correo en minúsculas y sin espacios, o cadena vacía si no lo parece."""
+    limpio = str(correo or "").strip().lower()
+    return limpio if _FORMATO_CORREO.match(limpio) else ""
+
+
+def _cuenta_con_correo(correo: str, excepto: Dict[str, Any]) -> Optional[str]:
+    """Clave de otra cuenta que ya responde a ese correo, si la hay."""
+    buscado = correo.strip().lower()
+    for clave, otro in usuarios_db.items():
+        if not isinstance(otro, dict) or otro is excepto:
+            continue
+        candidatos = [clave, otro.get("identifier"), otro.get("email"), otro.get("login_identifier")]
+        if any(str(valor or "").strip().lower() == buscado for valor in candidatos):
+            return clave
+    return None
+
+
+def asignar_correo(user: Dict[str, Any], correo: Any) -> bool:
+    """Guarda el correo real del usuario. Devuelve si cambió algo.
+
+    El correo entra también en la instantánea de sesión, así que hay que
+    refrescar el índice o la autorización seguiría viendo el anterior.
+    """
+    limpio = correo_normalizado(correo)
+    if not limpio:
+        raise HTTPException(status_code=400, detail="El correo no tiene un formato válido.")
+
+    ocupado = _cuenta_con_correo(limpio, excepto=user)
+    if ocupado:
+        raise HTTPException(status_code=409, detail="Ese correo ya pertenece a otra cuenta.")
+
+    perfil = user.get("perfil_conductor")
+    cambio = str(user.get("email") or "").strip().lower() != limpio
+    user["email"] = limpio
+    if isinstance(perfil, dict):
+        cambio = cambio or str(perfil.get("correo") or "").strip().lower() != limpio
+        perfil["correo"] = limpio
+    refresh_session_index_for(user)
+    return cambio
+
+
+class CorreoConductorPayload(BaseModel):
+    identificador: str
+    correo: str
+
+
+@app.put("/api/conductor/correo")
+async def actualizar_correo_conductor(payload: CorreoConductorPayload, session_token: SessionCookie = None):
+    """Corrige el correo de un conductor.
+
+    Lo puede hacer Administración —los correos del Excel eran inventados y hay
+    que sustituirlos por los reales— y el propio conductor sobre el suyo.
+    """
+    await _load_compat_users()
+    user = get_user_by_identifier(payload.identificador)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ADMIN_ROLES:
+        if not _owner_matches(actor, _IDENTITY_FIELDS, payload.identificador):
+            raise HTTPException(status_code=403, detail="No puedes cambiar el correo de otra cuenta.")
+
+    asignar_correo(user, payload.correo)
+    await persist_users_only()
+    return {"email": user.get("email")}
+
+
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin, response: Response):
     if _is_normalized_storage() and not _full_cache_is_fresh():
@@ -3979,6 +4056,43 @@ async def url_de_documento(path: str, session_token: SessionCookie = None):
     return {"url": url}
 
 
+def _tiene_contenido(valor: Any) -> bool:
+    """Si este valor apunta a un archivo de verdad."""
+    if isinstance(valor, str):
+        return valor.startswith("data:") or valor.startswith("http")
+    if isinstance(valor, dict):
+        return bool(valor.get("path") or valor.get("base64") or valor.get("url"))
+    return False
+
+
+def _es_cascara(valor: Any) -> bool:
+    """Ficha de un archivo que ya no dice dónde está.
+
+    El formulario del conductor reconstruía cada documento guardado a partir de
+    `name`, `size` y `type`, y en el camino perdía `path`. Al reenviar el
+    perfil, esa ficha vacía sustituía al documento bueno y el archivo quedaba
+    huérfano en el bucket: la pantalla decía «Documento no disponible» aunque el
+    fichero siguiera allí.
+    """
+    return isinstance(valor, dict) and not _tiene_contenido(valor) and bool(valor.get("name"))
+
+
+def conservar_documentos(anterior: Any, nuevo: Dict[str, Any]) -> Dict[str, Any]:
+    """Perfil nuevo, pero sin perder documentos por el camino.
+
+    Un envío solo puede sustituir un documento por otro con contenido, o
+    retirarlo explícitamente (`null`). Lo que no puede es pisarlo con una ficha
+    que ya no apunta a ningún sitio.
+    """
+    if not isinstance(anterior, dict):
+        return nuevo
+    resultado = dict(nuevo)
+    for campo, valor in nuevo.items():
+        if _es_cascara(valor) and _tiene_contenido(anterior.get(campo)):
+            resultado[campo] = anterior[campo]
+    return resultado
+
+
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):
     # Cargar solo los usuarios, no el estado completo: el envío del perfil no
@@ -3991,11 +4105,17 @@ async def driver_onboarding(payload: DriverProfilePayload):
     if user.get("rol") != "Conductor":
         raise HTTPException(status_code=403, detail="El usuario no es un conductor.")
         
-    user["perfil_conductor"] = payload.perfilData
+    user["perfil_conductor"] = conservar_documentos(user.get("perfil_conductor"), payload.perfilData)
     user["estado"] = "Pendiente Revisión"
     
     if payload.perfilData.get("nombres"):
         user["nombre"] = payload.perfilData.get("nombres")
+
+    # El conductor ya puede escribir su correo en el alta. Se guarda también
+    # como correo de la cuenta para que Administración vea el real y no el
+    # `apellido@kapital.com` que traía la importación del Excel.
+    if str(payload.perfilData.get("correo") or "").strip():
+        asignar_correo(user, payload.perfilData["correo"])
     
     await persist_users_only()
     return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}
@@ -4178,7 +4298,11 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
 
 
 @app.get("/api/flota")
-async def get_flota_status():
+async def get_flota_status(session_token: SessionCookie = None):
+    # La respuesta enriquece cada unidad con datos personales del conductor
+    # —DNI, dirección, fecha de nacimiento, celular— para la exportación al
+    # formato oficial. Servía todo eso sin pedir sesión: bastaba conocer la URL.
+    await require_any_session(session_token)
     if _is_compat_storage() and not _full_cache_is_fresh():
         # Fleet is already materialized under the reserved compatibility key;
         # avoid downloading the users and routes JSONB columns just to render

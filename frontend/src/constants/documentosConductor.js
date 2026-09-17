@@ -84,6 +84,9 @@ export const claveCompleto = (key) => `${key}${SUFIJO_COMPLETO}`;
 /** Un documento de dos caras admite reverso; uno de papel, no. */
 export const admiteReverso = (documento) => documento?.tipo === TIPO_TARJETA;
 
+export const documentoPorClave = (key) =>
+  DOCUMENTOS_CONDUCTOR.find((documento) => documento.key === key) || null;
+
 export const documentosPorDueno = (dueno) =>
   DOCUMENTOS_CONDUCTOR.filter((documento) => documento.dueno === dueno);
 

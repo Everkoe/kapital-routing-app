@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ImagenGuardada from './components/ImagenGuardada';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'react-hot-toast';
 import { Camera, Truck, Edit3, X, FileText, Download } from 'lucide-react';
@@ -266,7 +267,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                     <input {...getInputPropsVehiculo()} />
                     <div className="photo-preview-rect">
                       {fotoVehiculo ? (
-                        <img src={fotoVehiculo} alt="Vehículo" className="photo-preview-img-rect" />
+                        <ImagenGuardada imagen={fotoVehiculo} alt="Vehículo" className="photo-preview-img-rect" />
                       ) : (
                         <div className="photo-placeholder-rect">
                           <Truck size={36} color="#38bdf8" />
