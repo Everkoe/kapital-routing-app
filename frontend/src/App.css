@@ -1448,3 +1448,89 @@ select.campo-pendiente {
 .campo-aviso svg {
   flex-shrink: 0;
 }
+
+/* Documento de varias caras en una sola tarjeta (DocumentoMultiCara.jsx).
+   Antes cada cara ocupaba su propia celda de la rejilla y, como sus etiquetas
+   tenían largos distintos, las filas quedaban desalineadas. */
+.documento-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.documento-card-titulo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.documento-opcional {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-radius: 999px;
+}
+
+.documento-caras {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+}
+
+.documento-cara {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.documento-cara:hover {
+  color: var(--text-primary);
+}
+
+.documento-cara.activa {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.documento-cara svg {
+  color: var(--primary-color);
+}
+
+.documento-pista {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+/* La zona de arrastre vive dentro de la tarjeta: sin margen propio y
+   ocupando el alto que sobra, para que dos tarjetas contiguas se alineen. */
+.documento-card .file-upload-wrapper {
+  flex: 1;
+  margin: 0;
+}

@@ -86,7 +86,7 @@ const FileUploadZone = ({
 
   return (
     <div className={`file-upload-wrapper${pendiente ? ' campo-pendiente' : ''}`}>
-      <label className="upload-label">{label}</label>
+      {label && <label className="upload-label">{label}</label>}
       {pendiente && aviso && (
         <small className="campo-aviso">
           <AlertCircle size={13} aria-hidden="true" /> {aviso}

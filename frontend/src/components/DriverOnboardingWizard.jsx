@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide-react';
 import FileUploadZone from './FileUploadZone';
+import DocumentoMultiCara from './DocumentoMultiCara';
+import { documentoPorClave } from '../constants/documentosConductor';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
 import { subirDocumento } from '../utils/documentoStorage';
@@ -425,75 +427,19 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
           </div>
           
           <div className="form-grid">
-            {/* Una foto solo muestra una cara. Se pide cada una por separado,
-                y el reverso queda opcional porque un PDF puede traer ambas. */}
-            <div className="form-group">
-              <FileUploadZone
-                label="DNI · Anverso"
-                file={formData.dniScaneado}
-                onFileSelect={(f) => handleFileChange('dniScaneado', f)}
-                pendiente={debeAvisar('dniScaneado')}
-                aviso={ayudaDeCampo('dniScaneado', datosDelAlta)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="DNI · Reverso (opcional)"
-                file={formData.dniScaneadoReverso}
-                onFileSelect={(f) => handleFileChange('dniScaneadoReverso', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="DNI · Completo (opcional, ambas caras en una imagen)"
-                file={formData.dniScaneadoCompleto}
-                onFileSelect={(f) => handleFileChange('dniScaneadoCompleto', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Licencia de Conducir · Anverso"
-                file={formData.licenciaConducir}
-                onFileSelect={(f) => handleFileChange('licenciaConducir', f)}
-                pendiente={debeAvisar('licenciaConducir')}
-                aviso={ayudaDeCampo('licenciaConducir', datosDelAlta)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Licencia de Conducir · Reverso (opcional)"
-                file={formData.licenciaConducirReverso}
-                onFileSelect={(f) => handleFileChange('licenciaConducirReverso', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Licencia de Conducir · Completo (opcional, ambas caras en una imagen)"
-                file={formData.licenciaConducirCompleto}
-                onFileSelect={(f) => handleFileChange('licenciaConducirCompleto', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Lunas Polarizadas · Anverso (opcional)"
-                file={formData.lunasPolarizadas}
-                onFileSelect={(f) => handleFileChange('lunasPolarizadas', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Lunas Polarizadas · Reverso (opcional)"
-                file={formData.lunasPolarizadasReverso}
-                onFileSelect={(f) => handleFileChange('lunasPolarizadasReverso', f)}
-              />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Lunas Polarizadas · Completo (opcional, ambas caras en una imagen)"
-                file={formData.lunasPolarizadasCompleto}
-                onFileSelect={(f) => handleFileChange('lunasPolarizadasCompleto', f)}
-              />
-            </div>
+            {/* Las tres caras son el mismo documento: una tarjeta con selector
+                en vez de tres zonas de arrastre sueltas. */}
+            {['dniScaneado', 'licenciaConducir', 'lunasPolarizadas'].map((clave) => (
+              <div className="form-group" key={clave}>
+                <DocumentoMultiCara
+                  documento={documentoPorClave(clave)}
+                  archivos={formData}
+                  onArchivo={handleFileChange}
+                  pendiente={debeAvisar(clave)}
+                  aviso={ayudaDeCampo(clave, datosDelAlta)}
+                />
+              </div>
+            ))}
             <div className="form-group full-width">
               <FileUploadZone 
                 label="Récord o Historial del Conductor (MTC)" 
@@ -583,16 +529,12 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
             </div>
 
             <div className="form-group">
-              <FileUploadZone label="Tarjeta de Propiedad · Anverso" file={formData.tarjetaPropiedad} onFileSelect={(f) => handleFileChange('tarjetaPropiedad', f)}pendiente={debeAvisar('tarjetaPropiedad')} aviso={ayudaDeCampo('tarjetaPropiedad', datosDelAlta)} />
-            </div>
-            <div className="form-group">
-              <FileUploadZone label="Tarjeta de Propiedad · Reverso (opcional)" file={formData.tarjetaPropiedadReverso} onFileSelect={(f) => handleFileChange('tarjetaPropiedadReverso', f)} />
-            </div>
-            <div className="form-group">
-              <FileUploadZone
-                label="Tarjeta de Propiedad · Completo (opcional, ambas caras en una imagen)"
-                file={formData.tarjetaPropiedadCompleto}
-                onFileSelect={(f) => handleFileChange('tarjetaPropiedadCompleto', f)}
+              <DocumentoMultiCara
+                documento={documentoPorClave('tarjetaPropiedad')}
+                archivos={formData}
+                onArchivo={handleFileChange}
+                pendiente={debeAvisar('tarjetaPropiedad')}
+                aviso={ayudaDeCampo('tarjetaPropiedad', datosDelAlta)}
               />
             </div>
             <div className="form-group full-width">
