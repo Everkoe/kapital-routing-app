@@ -2153,6 +2153,9 @@ select.campo-pendiente {
   background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(2px);
 }
 .drawer-panel {
+  /* La aplicación centra el texto y eso se hereda hasta aquí. En un panel de
+     pares etiqueta/valor, centrado no hay columna que seguir con la vista. */
+  text-align: left;
   display: flex; flex-direction: column;
   width: 40%; min-width: 340px; max-width: 560px; height: 100%;
   background: var(--bg-secondary);
@@ -2203,3 +2206,37 @@ select.campo-pendiente {
   .historial-tabla-caja { overflow-x: auto; }
   .historial-tabla { min-width: 620px; }
 }
+
+/* Filas del detalle: icono, etiqueta encima y valor debajo. Sustituyen a la
+   rejilla de dos columnas, que apretaba los valores largos contra el borde. */
+.drawer-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.drawer-datos li { display: flex; align-items: flex-start; gap: 12px; }
+.drawer-dato-icono {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex-shrink: 0;
+  color: var(--primary-color); background: var(--accent-bg); border-radius: 8px;
+}
+.drawer-dato-etiqueta {
+  display: block; margin-bottom: 2px;
+  font-size: 0.76rem; color: var(--text-secondary);
+}
+.drawer-dato-valor {
+  display: block; font-size: 0.88rem; font-weight: 500;
+  color: var(--text-primary); overflow-wrap: anywhere;
+}
+
+.drawer-titular .historial-indicador-icono { width: 46px; height: 46px; border-radius: 12px; }
+
+.drawer-pie {
+  display: flex; justify-content: flex-end;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color);
+}
+.drawer-pie button { padding: 9px 22px; }

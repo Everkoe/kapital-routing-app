@@ -38,6 +38,22 @@ const Skeleton = ({ ancho = '100%', alto = 14 }) => (
   <span className="act-skeleton" style={{ width: ancho, height: alto }} aria-hidden="true" />
 );
 
+/**
+ * Filas del detalle, en el orden en que se leen.
+ *
+ * Solo lo que el evento trae de verdad: un campo ausente no aparece, en vez de
+ * enseñar un guion que hace pensar que el dato existe y está vacío.
+ */
+const datosDelEvento = (evento) => [
+  { clave: 'fecha', Icono: Calendar, etiqueta: 'Fecha y hora', valor: fechaLegible(evento.created_at) },
+  { clave: 'actor', Icono: Iconos.User, etiqueta: 'Responsable', valor: evento.actor_name || '—' },
+  evento.actor_email && { clave: 'correo', Icono: Iconos.Mail, etiqueta: 'Correo', valor: evento.actor_email },
+  evento.entity_label && { clave: 'elemento', Icono: Iconos.Package, etiqueta: 'Elemento afectado', valor: evento.entity_label },
+  evento.entity_type && { clave: 'tipo', Icono: Iconos.FileText, etiqueta: 'Tipo de evento', valor: evento.entity_type },
+  evento.description && { clave: 'descripcion', Icono: Iconos.AlignLeft, etiqueta: 'Descripción', valor: evento.description },
+  { clave: 'id', Icono: Iconos.Hash, etiqueta: 'Identificador', valor: evento.id, mono: true },
+].filter(Boolean);
+
 const HistorialActividad = () => {
   const [datos, setDatos] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -295,7 +311,12 @@ const HistorialActividad = () => {
         </div>
       )}
 
-      <DrawerLateral abierto={Boolean(detalle)} titulo="Detalle de actividad" onCerrar={() => setDetalle(null)}>
+      <DrawerLateral
+        abierto={Boolean(detalle)}
+        titulo="Detalle de actividad"
+        onCerrar={() => setDetalle(null)}
+        pie={<button type="button" className="btn-view-doc" onClick={() => setDetalle(null)}>Cerrar</button>}
+      >
         {detalle && (
           <>
             <div className="drawer-titular">
@@ -312,15 +333,17 @@ const HistorialActividad = () => {
 
             <section className="drawer-bloque">
               <h5>Información del evento</h5>
-              <dl>
-                <dt>Fecha y hora</dt><dd>{fechaLegible(detalle.created_at)}</dd>
-                <dt>Responsable</dt><dd>{detalle.actor_name || '—'}</dd>
-                {detalle.actor_email && (<><dt>Correo</dt><dd>{detalle.actor_email}</dd></>)}
-                {detalle.entity_label && (<><dt>Elemento afectado</dt><dd>{detalle.entity_label}</dd></>)}
-                {detalle.entity_type && (<><dt>Tipo de elemento</dt><dd>{detalle.entity_type}</dd></>)}
-                {detalle.description && (<><dt>Descripción</dt><dd>{detalle.description}</dd></>)}
-                <dt>Identificador</dt><dd className="drawer-id">{detalle.id}</dd>
-              </dl>
+              <ul className="drawer-datos">
+                {datosDelEvento(detalle).map(({ clave, Icono, etiqueta, valor, mono }) => (
+                  <li key={clave}>
+                    <span className="drawer-dato-icono"><Icono size={16} aria-hidden="true" /></span>
+                    <div>
+                      <span className="drawer-dato-etiqueta">{etiqueta}</span>
+                      <span className={`drawer-dato-valor${mono ? ' drawer-id' : ''}`}>{valor}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </section>
 
             {/* Solo cuando el evento guardó valores: una comparación vacía o

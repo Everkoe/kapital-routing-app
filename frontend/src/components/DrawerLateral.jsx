@@ -13,7 +13,7 @@ import { X } from 'lucide-react';
  * foco dentro al abrir y devolverlo al botón que lo abrió al cerrar.
  */
 
-const DrawerLateral = ({ abierto, titulo, onCerrar, children }) => {
+const DrawerLateral = ({ abierto, titulo, onCerrar, children, pie = null }) => {
   const panel = useRef(null);
   const focoPrevio = useRef(null);
 
@@ -59,6 +59,7 @@ const DrawerLateral = ({ abierto, titulo, onCerrar, children }) => {
           </button>
         </header>
         <div className="drawer-cuerpo">{children}</div>
+        {pie && <footer className="drawer-pie">{pie}</footer>}
       </aside>
     </div>
   );
