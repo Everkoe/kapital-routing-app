@@ -1948,81 +1948,56 @@ select.campo-pendiente {
   color: var(--primary-color);
 }
 
-/* Datos de la unidad dentro de la ficha del conductor (EdicionUnidad.jsx).
-   Sustituye al modal que se abría con el lápiz de la tabla. */
-.unidad-edicion {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
 
-.unidad-edicion-cabecera {
+/* Un valor que se edita donde se lee (CampoEditable.jsx). Sustituye al
+   formulario que repetía debajo los datos que ya estaban arriba. */
+.campo-editable {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-color);
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px 0;
 }
 
-.unidad-edicion-cabecera h4 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 1rem;
-  color: var(--text-primary);
+.campo-editable-abierto {
+  flex-wrap: nowrap;
 }
 
-.unidad-edicion-cabecera svg {
-  color: var(--primary-color);
-}
-
-.unidad-vigencias-titulo {
-  margin: 8px 0 0 0;
-  font-size: 0.9rem;
-  color: var(--text-secondary);
-}
-
-.unidad-edicion-campos {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 12px;
-}
-
-.unidad-campo {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  text-align: left;
-}
-
-.unidad-campo input,
-.unidad-campo select {
-  width: 100%;
-  padding: 8px 10px;
-  font-size: 0.86rem;
+.campo-editable input,
+.campo-editable select {
+  flex: 1;
+  min-width: 90px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
   color: var(--text-primary);
   background: var(--bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
-.unidad-campo input:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+.campo-editable-vacio {
+  font-style: italic;
+  opacity: 0.65;
 }
 
-.unidad-campo small {
-  font-size: 0.72rem;
-  line-height: 1.3;
-  opacity: 0.8;
+.campo-editable-vigencia {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.unidad-campo .status-badge {
-  align-self: flex-start;
+.info-section-sub {
+  margin: 12px 0 6px 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* La ficha trae tres bloques de datos y trece tarjetas de documento: con el
+   ancho anterior todo salía en una columna estrecha. */
+.conductor-profile {
+  max-width: 1180px;
 }

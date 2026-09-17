@@ -3,16 +3,25 @@ import { toast } from 'react-hot-toast';
 import { MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
+import CampoEditable from './components/CampoEditable';
+import ImagenGuardada from './components/ImagenGuardada';
 import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
 import { validarArchivoDocumento } from './utils/validacionDocumento';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
-import EdicionUnidad from './components/EdicionUnidad';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
 import { documentoABase64 } from './utils/imageUtils';
 import './App.css';
+
+/** Vigencias de la unidad: fecha y nada más, sin archivo que revisar. */
+const VIGENCIAS_DE_UNIDAD = [
+  { campo: 'soat', etiqueta: 'SOAT' },
+  { campo: 'revision', etiqueta: 'Revisión Técnica' },
+  { campo: 'atu', etiqueta: 'T.U.C. (ATU)' },
+  { campo: 'licencia', etiqueta: 'Licencia MTC' },
+];
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
 const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
@@ -305,6 +314,40 @@ const FlotaView = ({ usuario, initialBase }) => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  /**
+   * Guarda un solo campo de la unidad, desde el lápiz que hay junto al valor.
+   *
+   * El padrón es el único que no viaja por aquí: renombrarlo migra la unidad,
+   * el usuario y su sesión, así que tiene endpoint propio y hay que recargar
+   * la ficha con la clave nueva.
+   */
+  const guardarCampoUnidad = async (campo, valor) => {
+    const unidadActual = conductorInfo?.unidad_id || getFleetUnitId(conductorInfo?.flota || {});
+    if (!unidadActual) return;
+
+    if (campo === 'padron') {
+      const nuevo = String(valor).trim();
+      if (!nuevo || nuevo === unidadActual) return;
+      await apiFetch(`/api/flota/${encodeURIComponent(unidadActual)}/renombrar`, {
+        method: 'POST',
+        json: { nuevo_id: nuevo },
+      });
+      toast.success('Padrón actualizado.');
+      await fetchFlota();
+      await handleOpenConductor(nuevo);
+      return;
+    }
+
+    const valorFinal = campo === 'capacidad' ? Number.parseInt(valor, 10) || 0 : valor;
+    await apiFetch(`/api/flota/${encodeURIComponent(unidadActual)}`, {
+      method: 'PUT',
+      json: { [campo]: valorFinal },
+    });
+    setConductorInfo(previo => ({ ...previo, flota: { ...previo?.flota, [campo]: valorFinal } }));
+    toast.success('Unidad actualizada.');
+    fetchFlota();
+  };
 
   const handleOpenConductor = async (unidadId) => {
     if (!unidadId) return;
@@ -874,7 +917,15 @@ const FlotaView = ({ usuario, initialBase }) => {
                       <div className="avatar-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={40} strokeWidth={1.5} /></div>
                     )}
                   </div>
-                  <h2 className="driver-id">{conductorInfo.unidad_id}</h2>
+                  {/* El padrón se edita en su propio rótulo: repetirlo en una
+                      fila «Padrón: K-027» debajo era leer dos veces lo mismo. */}
+                  <h2 className="driver-id">
+                    <CampoEditable
+                      valor={conductorInfo.unidad_id}
+                      editable={puedeRenombrar}
+                      onGuardar={(valor) => guardarCampoUnidad('padron', valor)}
+                    />
+                  </h2>
                   <h3 className="driver-name">{conductorInfo.usuario.nombre?.toUpperCase()}</h3>
                   <CorreoEditable
                     identificador={conductorInfo.usuario.identifier || conductorInfo.usuario.email}
@@ -885,16 +936,19 @@ const FlotaView = ({ usuario, initialBase }) => {
                     }))}
                   />
 
-                  {/* Vehicle photo from profile */}
-                  {conductorInfo.usuario.perfil_conductor?.fotoVehiculo ? (
-                    <div className="vehicle-photo" style={{marginTop:'0'}}>
-                      <img src={conductorInfo.usuario.perfil_conductor.fotoVehiculo} alt="Vehículo" style={{width:'100%',height:'100%',objectFit:'cover'}} />
-                    </div>
-                  ) : (
-                    <div className="vehicle-photo" style={{marginTop:'0'}}>
+                  {/* La foto vive en Storage desde la migración, así que el
+                      perfil solo guarda su ruta: pasársela a `img` dejaba la
+                      imagen rota aunque el archivo siguiera en el bucket. */}
+                  <div className="vehicle-photo" style={{marginTop:'0'}}>
+                    <ImagenGuardada
+                      imagen={conductorInfo.usuario.perfil_conductor?.fotoVehiculo}
+                      alt="Vehículo"
+                      style={{width:'100%',height:'100%',objectFit:'cover'}}
+                    />
+                    {!conductorInfo.usuario.perfil_conductor?.fotoVehiculo && (
                       <div className="vehicle-placeholder"><CarFront size={36} strokeWidth={1} /><p style={{fontSize:'0.75rem',marginTop:'6px'}}>Sin foto de vehículo</p></div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 {/* RIGHT: Info + Docs review */}
@@ -906,13 +960,64 @@ const FlotaView = ({ usuario, initialBase }) => {
                       <p><strong>Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || '—'}</p>
                       <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || '—'}</p>
                       <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || '—'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
+                      {/* Los dos que sí son de la unidad y no del perfil: el
+                          nombre que sale en la tabla de flota y el número al
+                          que escribe el botón de WhatsApp. */}
+                      <CampoEditable
+                        etiqueta="Nombre en la flota"
+                        valor={conductorInfo.flota?.chofer}
+                        onGuardar={(valor) => guardarCampoUnidad('chofer', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="WhatsApp de la unidad"
+                        valor={conductorInfo.flota?.telefono}
+                        vacio="Usa el del conductor"
+                        onGuardar={(valor) => guardarCampoUnidad('telefono', valor)}
+                      />
                     </div>
                     <div className="info-section">
                       <h4>Información del vehículo</h4>
                       <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
                       <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || '—'}</p>
                       <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa || conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
-                      <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo || conductorInfo.flota?.capacidad || 15} pasajeros</p>
+                      {/* Tipo y capacidad son los de la unidad, no los que
+                          declaró el conductor: son los que usa el ruteo. */}
+                      <CampoEditable
+                        etiqueta="Tipo"
+                        valor={conductorInfo.flota?.tipo}
+                        opciones={TIPOS_DE_UNIDAD}
+                        vacio="Sin tipo"
+                        onGuardar={(valor) => guardarCampoUnidad('tipo', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="Capacidad"
+                        valor={conductorInfo.flota?.capacidad}
+                        tipo="number"
+                        vacio="Sin capacidad"
+                        onGuardar={(valor) => guardarCampoUnidad('capacidad', valor)}
+                      >
+                        {conductorInfo.flota?.capacidad ? `${conductorInfo.flota.capacidad} pasajeros` : ''}
+                      </CampoEditable>
+
+                      <h5 className="info-section-sub">Vigencias</h5>
+                      {VIGENCIAS_DE_UNIDAD.map(({ campo, etiqueta }) => {
+                        const { status, text } = getDocumentStatus(conductorInfo.flota?.[campo]);
+                        return (
+                          <CampoEditable
+                            key={campo}
+                            etiqueta={etiqueta}
+                            valor={conductorInfo.flota?.[campo]}
+                            tipo="date"
+                            vacio="Sin fecha"
+                            onGuardar={(valor) => guardarCampoUnidad(campo, valor)}
+                          >
+                            <span className="campo-editable-vigencia">
+                              {conductorInfo.flota?.[campo] || 'Sin fecha'}
+                              <span className={`status-badge status-${status}`}><span className="dot"></span>{text}</span>
+                            </span>
+                          </CampoEditable>
+                        );
+                      })}
                     </div>
 
                     {(conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === true) && (
@@ -1003,19 +1108,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                       </div>
                     </div>
                   )}
-
-                  {/* La unidad se edita aquí, donde ya se está mirando al
-                      conductor. Antes había que cerrar esta ficha y abrir el
-                      lápiz de la tabla, otra ventana sobre la misma persona. */}
-                  <EdicionUnidad
-                    unidad={conductorInfo.flota}
-                    unidadId={conductorInfo.unidad_id || getFleetUnitId(conductorInfo.flota || {})}
-                    puedeRenombrar={puedeRenombrar}
-                    onGuardado={(nuevoId) => {
-                      fetchFlota();
-                      handleOpenConductor(nuevoId);
-                    }}
-                  />
 
                   {/* La misma revisión que muestra Accesos: un solo
                       componente para las dos pantallas. */}
