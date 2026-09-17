@@ -2129,6 +2129,41 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # Con la exigencia desactivada no hay actor: se conserva el rollback.
         self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
 
+    def test_resubmitting_a_profile_never_orphans_a_stored_document(self):
+        """El formulario reenviaba fichas sin ruta y el archivo quedaba huérfano.
+
+        El conductor veía «Documento no disponible» aunque el fichero seguía
+        en el bucket: lo único que se había perdido era el puntero.
+        """
+        anterior = {
+            "dniScaneado": {"name": "dni.png", "size": 38943, "path": "usuario-ab12/dniScaneado.png"},
+            "soat": {"name": "soat.png", "path": "usuario-ab12/soat.png"},
+            "direccion": "AV. SIEMPRE VIVA 123",
+        }
+        # Lo que mandaba el formulario tras restaurar el borrador.
+        entrante = {
+            "dniScaneado": {"name": "dni.png", "size": 38943, "type": "image/png", "isRestored": True},
+            "soat": {"name": "soat-nuevo.png", "path": "usuario-ab12/soat-nuevo.png"},
+            "direccion": "AV. NUEVA 456",
+        }
+
+        resultado = backend.conservar_documentos(anterior, entrante)
+
+        self.assertEqual(resultado["dniScaneado"], anterior["dniScaneado"], "la ficha vacía no pisa la ruta")
+        self.assertEqual(resultado["soat"]["path"], "usuario-ab12/soat-nuevo.png", "un documento nuevo sí sustituye")
+        self.assertEqual(resultado["direccion"], "AV. NUEVA 456", "los datos de texto se actualizan igual")
+
+    def test_a_document_can_still_be_removed_on_purpose(self):
+        anterior = {"cv": {"name": "cv.pdf", "path": "usuario-ab12/cv.pdf"}}
+        for retirado in (None, ""):
+            with self.subTest(retirado=retirado):
+                resultado = backend.conservar_documentos(anterior, {"cv": retirado})
+                self.assertEqual(resultado["cv"], retirado)
+
+    def test_the_first_profile_of_a_driver_is_stored_as_sent(self):
+        entrante = {"dniScaneado": {"name": "dni.png", "path": "usuario-ab12/dniScaneado.png"}}
+        self.assertEqual(backend.conservar_documentos(None, entrante), entrante)
+
     def test_a_real_email_is_stored_beside_the_account_key(self):
         """Los 108 conductores del Excel tienen por clave un correo inventado.
 

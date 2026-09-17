@@ -51,6 +51,18 @@ const AccordionItem = ({ title, isOpen, onToggle, children, status }) => {
   );
 };
 
+/** Campos del formulario que guardan un archivo. */
+const FILE_FIELDS = [
+  'comprobanteDomicilio',
+  'dniScaneado', 'dniScaneadoReverso', 'dniScaneadoCompleto',
+  'licenciaConducir', 'licenciaConducirReverso', 'licenciaConducirCompleto',
+  'lunasPolarizadas', 'lunasPolarizadasReverso', 'lunasPolarizadasCompleto',
+  'recordConductor', 'antecedentesPoliciales', 'cv',
+  'certificadosTrabajo', 'referenciasLaborales', 'cuestionarioManejoDefensivo',
+  'tarjetaPropiedad', 'tarjetaPropiedadReverso', 'tarjetaPropiedadCompleto',
+  'soat', 'revisionTecnica',
+];
+
 const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   const [openSection, setOpenSection] = useState('personales');
   const [isSaving, setIsSaving] = useState(false);
@@ -85,16 +97,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   // Los documentos de dos caras guardan la segunda en un campo hermano
   // (`dniScaneado` + `dniScaneadoReverso`), de modo que lo ya subido sigue
   // siendo válido y cada cara conserva su propia revisión.
-  const FILE_FIELDS = [
-    'comprobanteDomicilio',
-    'dniScaneado', 'dniScaneadoReverso', 'dniScaneadoCompleto',
-    'licenciaConducir', 'licenciaConducirReverso', 'licenciaConducirCompleto',
-    'lunasPolarizadas', 'lunasPolarizadasReverso', 'lunasPolarizadasCompleto',
-    'recordConductor', 'antecedentesPoliciales', 'cv',
-    'certificadosTrabajo', 'referenciasLaborales', 'cuestionarioManejoDefensivo',
-    'tarjetaPropiedad', 'tarjetaPropiedadReverso', 'tarjetaPropiedadCompleto',
-    'soat', 'revisionTecnica',
-  ];
 
   const [formData, setFormData] = useState({
     // Datos Personales
@@ -152,6 +154,25 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
         setFormData(prev => ({ ...prev, ...parsed }));
       } catch (e) { console.error('Error loading draft', e); }
     }
+    // Lo ya guardado en el perfil se muestra aunque este navegador no tenga
+    // borrador: el conductor puede volver desde otro equipo, y ver el
+    // formulario vacío le haría subirlo todo otra vez sin necesidad.
+    const guardados = usuario?.perfil_conductor;
+    if (guardados && typeof guardados === 'object') {
+      const delPerfil = {};
+      FILE_FIELDS.forEach((campo) => {
+        const valor = guardados[campo];
+        if (valor && typeof valor === 'object' && (valor.path || valor.base64)) {
+          delPerfil[campo] = { ...valor, isRestored: true };
+        } else if (typeof valor === 'string' && valor.startsWith('data:')) {
+          delPerfil[campo] = { name: campo, base64: valor, isRestored: true };
+        }
+      });
+      if (Object.keys(delPerfil).length > 0) {
+        setFormData(prev => ({ ...prev, ...delPerfil }));
+      }
+    }
+
     // Restore file fields from Base64
     const savedFiles = localStorage.getItem(filesKey);
     if (savedFiles) {
@@ -161,14 +182,12 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
         const restored = {};
         Object.entries(parsedFiles).forEach(([key, val]) => {
           if (val) {
-            // Create a minimal file-like object that FileUploadZone can display
-            restored[key] = {
-              name: val.name,
-              size: val.size,
-              type: val.type,
-              base64: val.base64, // keep for submission
-              isRestored: true,
-            };
+            // Se conserva el objeto entero. Antes se reconstruía campo a campo
+            // —`name`, `size`, `type`, `base64`— y eso perdía `path`, que es lo
+            // único que traen los documentos guardados en Storage: al reenviar
+            // el perfil, la ficha vacía sustituía al documento bueno y el
+            // archivo quedaba huérfano en el bucket.
+            restored[key] = { ...val, isRestored: true };
           }
         });
         setFormData(prev => ({ ...prev, ...restored }));

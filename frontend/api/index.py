@@ -4056,6 +4056,43 @@ async def url_de_documento(path: str, session_token: SessionCookie = None):
     return {"url": url}
 
 
+def _tiene_contenido(valor: Any) -> bool:
+    """Si este valor apunta a un archivo de verdad."""
+    if isinstance(valor, str):
+        return valor.startswith("data:") or valor.startswith("http")
+    if isinstance(valor, dict):
+        return bool(valor.get("path") or valor.get("base64") or valor.get("url"))
+    return False
+
+
+def _es_cascara(valor: Any) -> bool:
+    """Ficha de un archivo que ya no dice dónde está.
+
+    El formulario del conductor reconstruía cada documento guardado a partir de
+    `name`, `size` y `type`, y en el camino perdía `path`. Al reenviar el
+    perfil, esa ficha vacía sustituía al documento bueno y el archivo quedaba
+    huérfano en el bucket: la pantalla decía «Documento no disponible» aunque el
+    fichero siguiera allí.
+    """
+    return isinstance(valor, dict) and not _tiene_contenido(valor) and bool(valor.get("name"))
+
+
+def conservar_documentos(anterior: Any, nuevo: Dict[str, Any]) -> Dict[str, Any]:
+    """Perfil nuevo, pero sin perder documentos por el camino.
+
+    Un envío solo puede sustituir un documento por otro con contenido, o
+    retirarlo explícitamente (`null`). Lo que no puede es pisarlo con una ficha
+    que ya no apunta a ningún sitio.
+    """
+    if not isinstance(anterior, dict):
+        return nuevo
+    resultado = dict(nuevo)
+    for campo, valor in nuevo.items():
+        if _es_cascara(valor) and _tiene_contenido(anterior.get(campo)):
+            resultado[campo] = anterior[campo]
+    return resultado
+
+
 @app.post("/api/driver/onboarding")
 async def driver_onboarding(payload: DriverProfilePayload):
     # Cargar solo los usuarios, no el estado completo: el envío del perfil no
@@ -4068,7 +4105,7 @@ async def driver_onboarding(payload: DriverProfilePayload):
     if user.get("rol") != "Conductor":
         raise HTTPException(status_code=403, detail="El usuario no es un conductor.")
         
-    user["perfil_conductor"] = payload.perfilData
+    user["perfil_conductor"] = conservar_documentos(user.get("perfil_conductor"), payload.perfilData)
     user["estado"] = "Pendiente Revisión"
     
     if payload.perfilData.get("nombres"):
