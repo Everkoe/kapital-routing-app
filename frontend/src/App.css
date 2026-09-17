@@ -421,9 +421,6 @@ body, #root {
 .emergency-form { display: flex; gap: 15px; align-items: center; }
 .form-input, .form-select { padding: 12px 16px; border: 1px solid var(--kapital-border); border-radius: 10px; flex: 1; background-color: var(--kapital-bg) !important; color: var(--kapital-text-primary) !important; font-size: 0.95rem; transition: border-color 0.3s; }
 .form-input:focus, .form-select:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,0.1); }
-.audit-log-container { background-color: var(--kapital-bg); color: var(--kapital-text-primary); font-family: 'Fira Code', 'Courier New', Courier, monospace; padding: 20px; border-radius: 12px; max-height: 200px; overflow-y: auto; border: 1px solid var(--kapital-border); }
-.log-entry { margin: 0 0 8px 0; font-size: 0.9rem; color: #10B981; text-shadow: 0 0 5px rgba(16,185,129,0.3); }
-.log-entry:first-child { font-weight: bold; color: #38bdf8; text-shadow: 0 0 5px rgba(56,189,248,0.3); }
 .loading-indicator, .error-message { text-align: center; padding: 40px; font-weight: 500; border-radius: 12px; }
 .loading-indicator { background-color: var(--kapital-badge-bg); color: var(--kapital-badge-text); border: 1px solid rgba(56,189,248,0.2); }
 .error-message { background-color: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
