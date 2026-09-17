@@ -926,7 +926,16 @@ const FlotaView = ({ usuario, initialBase }) => {
                       onGuardar={(valor) => guardarCampoUnidad('padron', valor)}
                     />
                   </h2>
-                  <h3 className="driver-name">{conductorInfo.usuario.nombre?.toUpperCase()}</h3>
+                  {/* El nombre se edita aquí, que es donde ya se lee. Tenerlo
+                      además como fila «Nombre en la flota» dentro de la tarjeta
+                      era el mismo dato dos veces. */}
+                  <h3 className="driver-name">
+                    <CampoEditable
+                      valor={conductorInfo.flota?.chofer || conductorInfo.usuario.nombre || ''}
+                      vacio="Sin nombre"
+                      onGuardar={(valor) => guardarCampoUnidad('chofer', valor)}
+                    />
+                  </h3>
                   <CorreoEditable
                     identificador={conductorInfo.usuario.identifier || conductorInfo.usuario.email}
                     correo={conductorInfo.usuario.email}
@@ -959,21 +968,20 @@ const FlotaView = ({ usuario, initialBase }) => {
                       <p><strong>DNI/Documento:</strong> {conductorInfo.usuario.perfil_conductor?.tipoDoc || 'DNI'} {conductorInfo.usuario.perfil_conductor?.numDoc || 'No registrado'}</p>
                       <p><strong>Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || '—'}</p>
                       <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || '—'}</p>
-                      <p><strong>Teléfonos:</strong> {conductorInfo.usuario.perfil_conductor?.telefonoDirecto || '—'} {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia ? `/ ${conductorInfo.usuario.perfil_conductor.telefonoEmergencia}` : ''}</p>
-                      {/* Los dos que sí son de la unidad y no del perfil: el
-                          nombre que sale en la tabla de flota y el número al
-                          que escribe el botón de WhatsApp. */}
+                      {/* Un solo teléfono: el que usa el botón de WhatsApp. El
+                          de la unidad manda, y si no lo tiene se muestra el que
+                          declaró el conductor, que es de donde sale el enlace.
+                          Antes aparecían los dos, repetidos y sin saber cuál
+                          mandaba. */}
                       <CampoEditable
-                        etiqueta="Nombre en la flota"
-                        valor={conductorInfo.flota?.chofer}
-                        onGuardar={(valor) => guardarCampoUnidad('chofer', valor)}
-                      />
-                      <CampoEditable
-                        etiqueta="WhatsApp de la unidad"
-                        valor={conductorInfo.flota?.telefono}
-                        vacio="Usa el del conductor"
+                        etiqueta="Teléfono"
+                        valor={telefonoDeUnidad({ ...conductorInfo.flota, celular: conductorInfo.usuario.perfil_conductor?.telefonoDirecto })}
+                        vacio="Sin teléfono"
                         onGuardar={(valor) => guardarCampoUnidad('telefono', valor)}
                       />
+                      {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia && (
+                        <p><strong>Emergencia:</strong> {conductorInfo.usuario.perfil_conductor.telefonoEmergencia}</p>
+                      )}
                     </div>
                     <div className="info-section">
                       <h4>Información del vehículo</h4>
@@ -998,8 +1006,26 @@ const FlotaView = ({ usuario, initialBase }) => {
                       >
                         {conductorInfo.flota?.capacidad ? `${conductorInfo.flota.capacidad} pasajeros` : ''}
                       </CampoEditable>
+                    </div>
 
-                      <h5 className="info-section-sub">Vigencias</h5>
+                    {(conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === true) && (
+                      <div className="info-section">
+                        <h4 style={{ color: 'var(--text-primary)' }}>Información del vehículo 2</h4>
+                        <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca2 || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo2 || ''}</p>
+                        <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio2 || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor2 || '—'}</p>
+                        <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa2 || '—'}</p>
+                        <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo2 || '—'} pasajeros</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Las vigencias, en su propia caja y a lo ancho. Dentro de la
+                      tarjeta del vehículo caían en una columna estrecha, con la
+                      fecha y su estado partidos en dos líneas. Y no son del
+                      vehículo que declaró el conductor: son de la unidad. */}
+                  <div className="info-section vigencias-unidad">
+                    <h4>Vigencias de la unidad</h4>
+                    <div className="vigencias-unidad-lista">
                       {VIGENCIAS_DE_UNIDAD.map(({ campo, etiqueta }) => {
                         const { status, text } = getDocumentStatus(conductorInfo.flota?.[campo]);
                         return (
@@ -1019,16 +1045,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                         );
                       })}
                     </div>
-
-                    {(conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === true) && (
-                      <div className="info-section">
-                        <h4 style={{ color: 'var(--text-primary)' }}>Información del vehículo 2</h4>
-                        <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca2 || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo2 || ''}</p>
-                        <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio2 || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor2 || '—'}</p>
-                        <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa2 || '—'}</p>
-                        <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo2 || '—'} pasajeros</p>
-                      </div>
-                    )}
                   </div>
 
 
