@@ -756,7 +756,10 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* `1fr` nunca baja del ancho de su contenido, así que un nombre de archivo
+     largo ensanchaba la columna y se salía de la tarjeta. `minmax(0, 1fr)` sí
+     deja que la columna encoja y obliga al contenido a adaptarse. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   margin-top: 15px;
 }
@@ -871,6 +874,11 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .file-preview-card {
   display: flex;
+  gap: 10px;
+  /* El formulario centra el texto y eso se hereda hasta aquí, donde no pega:
+     esta tarjeta es una fila —icono, nombre, acciones— y el nombre partido en
+     dos líneas centradas quedaba descolgado del icono. */
+  text-align: left;
   justify-content: space-between;
   align-items: center;
   background: rgba(16, 185, 129, 0.1);
@@ -881,16 +889,22 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .file-info {
   display: flex;
+  min-width: 0;
+  flex: 1;
   align-items: center;
   gap: 12px;
 }
 
 .file-icon {
+  flex-shrink: 0;
   color: #10B981;
 }
 
 .file-details {
   display: flex;
+  /* Sin esto un hijo flex nunca baja del ancho de su contenido, y el nombre
+     del archivo empuja la tarjeta entera hasta salirse de su columna. */
+  min-width: 0;
   flex-direction: column;
 }
 
@@ -898,6 +912,10 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   color: var(--kapital-text-primary);
   font-weight: 600;
   font-size: 0.95rem;
+  /* Un nombre de archivo puede ser una sola palabra de treinta caracteres, que
+     no tiene por dónde partirse: hay que autorizar el corte en cualquier
+     letra o no cabe en ninguna columna. */
+  overflow-wrap: anywhere;
 }
 
 .file-size {
@@ -907,6 +925,7 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 .file-actions {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 15px;
 }
