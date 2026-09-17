@@ -1,9 +1,25 @@
 import { useState, useEffect } from 'react';
-import { Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
+import { Shield, Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
+import { fechaLegible } from './constants/tiposDeActividad';
 import { countFleetDocumentStatuses, getDocumentStatus } from './utils/flotaDocumentStatus';
 import './App.css';
+
+/** Icono de cada tipo, con el mismo criterio que el historial completo. */
+const ICONOS_ACTIVIDAD = {
+  'Usuario inició sesión': UserCircle,
+  'Usuario desactivado': UserCircle,
+  'Usuario reactivado': UserCircle,
+  'Unidad creada': Truck,
+  'Unidad actualizada': Truck,
+  'Documento cargado': FileText,
+  'Documento aprobado': FileText,
+  'Documento rechazado': FileText,
+  'Acceso aprobado': Shield,
+  'Acceso denegado': Shield,
+};
+
 
 /**
  * Adaptador sobre la utilidad compartida.
@@ -36,8 +52,6 @@ const ROLE_DISPLAY = {
   'Programador de rutas': 'Programadores',
 };
 
-const fmtTime = (date) =>
-  `Hoy ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 
 const DASHBOARD_LOAD_TIMEOUT_MS = 12000;
 
@@ -66,7 +80,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [retryCount, setRetryCount] = useState(0);
-  const [loadTime] = useState(() => new Date());
+  const [actividad, setActividad] = useState([]);
   const usuarioKey = usuario?.identifier || usuario?.email || '';
 
   useEffect(() => {
@@ -78,6 +92,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       if (!usuarioKey) {
         setFlota([]);
         setUsers([]);
+      setActividad([]);
         setLoadError('No se pudo validar la identidad de la sesión actual.');
         setLoading(false);
         return;
@@ -89,9 +104,12 @@ export default function AdminDashboard({ onNavigate, usuario }) {
       setUsers([]);
 
       try {
-        const [flotaData, usersData] = await Promise.all([
+        const [flotaData, usersData, actividadData] = await Promise.all([
           fetchJson('/api/flota', 'No se pudo cargar la flota', controller.signal),
           fetchJson(`/api/admin/users?email=${encodeURIComponent(usuarioKey)}`, 'No se pudo cargar los usuarios', controller.signal),
+          // El historial no es crítico para el panel: si falla, el resto se
+          // muestra igual y la tarjeta queda vacía en vez de tumbar la página.
+          fetchJson('/api/actividad?limite=5', '', controller.signal).catch(() => null),
         ]);
 
         const nextFlota = flotaData?.flota || (Array.isArray(flotaData) ? flotaData : null);
@@ -107,6 +125,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
         if (!cancelled) {
           setFlota(nextFlota);
           setUsers(nextUsers);
+          setActividad(actividadData?.eventos || []);
           setLoadError('');
         }
       } catch (err) {
@@ -207,17 +226,14 @@ export default function AdminDashboard({ onNavigate, usuario }) {
     { key: 'MOTORIZADO', label: 'Motorizado', count: baseCounts.motorizado, Icon: Bike,     color: '#f59e0b' },
   ];
 
-  const recentActivity = [];
-  recentActivity.push({ Icon: UserCircle, title: 'Usuario inició sesión', subtitle: usuario?.email || 'admin', time: fmtTime(loadTime) });
-  flota.slice(-2).reverse().forEach((v, i) => {
-    const t = new Date(loadTime.getTime() - (i + 1) * 38 * 60 * 1000);
-    recentActivity.push({ Icon: Truck, title: 'Unidad actualizada', subtitle: `Unidad ${v.placa}`, time: fmtTime(t) });
-  });
-  if (flota.length > 0) {
-    const t = new Date(loadTime.getTime() - 3 * 38 * 60 * 1000);
-    const v = flota[Math.floor(flota.length / 2)];
-    recentActivity.push({ Icon: FileText, title: 'Documento cargado', subtitle: `SOAT - Unidad ${v.placa}`, time: fmtTime(t) });
-  }
+  // Antes esta lista se inventaba: tomaba dos unidades de la flota y les ponía
+  // horas calculadas restando 38 minutos. Ahora sale del historial real.
+  const recentActivity = actividad.map((evento) => ({
+    Icon: ICONOS_ACTIVIDAD[evento.action_type] || Activity,
+    title: evento.action_type,
+    subtitle: evento.entity_label || evento.actor_email || evento.actor_name || '',
+    time: fechaLegible(evento.created_at),
+  }));
 
   // --- Styles ---
   const card = {
@@ -556,7 +572,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
               <List size={18} color="#38bdf8" />
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Actividad reciente</h3>
             </div>
-            <button style={linkBtn} onClick={() => onNavigate('usuarios')}>
+            <button style={linkBtn} onClick={() => onNavigate('historial')}>
               Ver todas <ChevronRight size={14} />
             </button>
           </div>

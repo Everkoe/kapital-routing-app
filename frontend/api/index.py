@@ -1013,6 +1013,12 @@ historial_rutas: List[Dict[str, Any]] = []
 board_lock: Dict[str, Any] = {}
 routes_summary: List[Dict[str, Any]] = []  # Compact summary for GerentePortal
 notifications_db: List[Dict[str, Any]] = [] # Real-time events
+# Historial de acciones administrativas. Vive como pseudo-clave
+# `usuarios.__actividad__`, igual que `__notifications__`: el proyecto guarda
+# todo el estado en una sola fila y no hay acceso para crear tablas nuevas.
+# Se recorta a los últimos `MAX_ACTIVIDAD` para que la fila no vuelva a crecer
+# sin control, que es lo que ya tumbó una vez el envío de perfiles.
+actividad_db: List[Dict[str, Any]] = []
 # Índice de sesiones: sha256(token) -> instantánea de autorización. Vive como
 # pseudo-clave `usuarios.__sessions__`, igual que `__flota__`. Existe para que
 # validar una sesión no cueste los ~3,42 MB del objeto usuarios completo.
@@ -1358,6 +1364,7 @@ def _state_row_or_raise(response, operation: str = "load") -> Dict[str, Any]:
         "__lock__": dict,
         "__flota__": dict,
         "__notifications__": list,
+        "__actividad__": list,
     }
     for key, expected_type in reserved_shapes.items():
         if key in data["usuarios"] and not isinstance(data["usuarios"][key], expected_type):
@@ -1777,7 +1784,7 @@ def _normalized_snapshot_keys(rows_by_resource: Mapping[str, List[Dict[str, Any]
 async def _load_normalized_state_locked() -> None:
     """Load V2 resources once and atomically rebuild the legacy globals."""
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
-    global historial_rutas, board_lock, routes_summary, notifications_db
+    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db
     global session_index
     global _normalized_snapshot_ids, _normalized_snapshot_ready
     rows_by_resource = await _fetch_normalized_snapshot()
@@ -1788,6 +1795,7 @@ async def _load_normalized_state_locked() -> None:
     historial_rutas = decoded["historial_rutas"]
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
+    actividad_db = decoded.get("actividad", [])
     session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     conductores_db = decoded["flota"]
     _normalized_snapshot_ids = _normalized_snapshot_keys(rows_by_resource)
@@ -2214,6 +2222,7 @@ def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[
         "historial_rutas": usuarios.pop("__historial_rutas__", data.get("historial", [])),
         "board_lock": usuarios.pop("__lock__", data.get("lock", {})),
         "notifications": usuarios.pop("__notifications__", data.get("notifications", [])),
+        "actividad": usuarios.pop("__actividad__", []),
         "flota": usuarios.pop("__flota__", data.get("flota", _MISSING)),
         "sessions": usuarios.pop("__sessions__", {}) or {},
         "has_canonical_flota": has_canonical_flota,
@@ -2240,7 +2249,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
         await _load_normalized_state_locked()
         return
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
-    global historial_rutas, board_lock, routes_summary, notifications_db
+    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db
     global session_index
     response = await _db_http_request(
         "GET",
@@ -2259,6 +2268,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     historial_rutas = decoded["historial_rutas"]
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
+    actividad_db = decoded.get("actividad", [])
     session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     if decoded["flota"] is not _MISSING:
         conductores_db = decoded["flota"]
@@ -2916,6 +2926,8 @@ async def persist():
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+        "__actividad__": actividad_db,
+            "__actividad__": actividad_db,
             "__sessions__": session_index,
         },
         "rutas": rutas_estado_actual,
@@ -2962,6 +2974,8 @@ async def persist_users_only():
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+        "__actividad__": actividad_db,
+            "__actividad__": actividad_db,
             "__sessions__": session_index,
         },
     }
@@ -2981,6 +2995,8 @@ async def persist_routes_summary(summary: list):
             "__lock__": next_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+        "__actividad__": actividad_db,
+            "__actividad__": actividad_db,
             "__sessions__": session_index,
         },
     }
@@ -3439,6 +3455,12 @@ async def login_user(usuario: UsuarioLogin, response: Response):
     # Registrar última conexión
     user_in_db["last_login"] = datetime.now().isoformat()
     session_token = issue_session(user_in_db)
+    registrar_actividad(
+        "Usuario inició sesión",
+        actor=user_in_db,
+        entity_type="sesion",
+        description=f"Acceso al sistema como {user_in_db.get('rol') or 'Usuario'}.",
+    )
     await persist_users_only()
 
     response.set_cookie(
@@ -3594,6 +3616,191 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
         "profileComplete": "perfil_conductor" in user
     }
 
+# --- Historial de actividad ---------------------------------------------------
+
+# Tope de eventos guardados. El estado entero vive en una sola fila, así que un
+# historial sin límite la haría crecer hasta repetir el fallo que tuvo el envío
+# de perfiles: una escritura que no cabía en el tiempo de la función.
+MAX_ACTIVIDAD = 500
+
+# Nombres de los campos de flota tal como se leen en pantalla: en la
+# comparación de un evento no sirve enseñar la clave interna.
+_ETIQUETA_FLOTA = {
+    "chofer": "Nombre del chofer",
+    "telefono": "Teléfono",
+    "tipo": "Tipo de vehículo",
+    "capacidad": "Capacidad",
+    "soat": "Vencimiento SOAT",
+    "revision": "Vencimiento revisión técnica",
+    "atu": "Vencimiento T.U.C. (ATU)",
+    "licencia": "Vencimiento licencia MTC",
+}
+
+_actividad_cache_loaded_at: Optional[float] = None
+
+
+def _actor_visible(actor: Optional[Dict[str, Any]], respaldo: str = "") -> Dict[str, str]:
+    """Quién hizo la acción, con lo que se puede enseñar sin exponer de más."""
+    if not isinstance(actor, dict):
+        return {"actor_id": respaldo, "actor_name": respaldo or "Sistema", "actor_email": respaldo}
+    identificador = str(
+        actor.get("identifier") or actor.get("email") or actor.get("dni") or respaldo or ""
+    )
+    return {
+        "actor_id": identificador,
+        "actor_name": str(actor.get("nombre") or identificador or "Sistema"),
+        "actor_email": str(actor.get("email") or ""),
+    }
+
+
+def registrar_actividad(
+    action_type: str,
+    *,
+    actor: Optional[Dict[str, Any]] = None,
+    actor_respaldo: str = "",
+    entity_type: str = "",
+    entity_id: str = "",
+    entity_label: str = "",
+    description: str = "",
+    status: str = "info",
+    changes: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """Anota una acción administrativa en el historial.
+
+    No persiste por su cuenta: se apoya en el guardado que el propio endpoint ya
+    hace, así que auditar no añade ni un viaje más contra Supabase.
+
+    Nunca lanza. Un fallo apuntando lo que pasó no puede impedir que pase: si
+    algo va mal aquí, la acción del usuario debe seguir su curso.
+    """
+    global actividad_db
+    try:
+        evento = {
+            "id": f"act_{int(datetime.now(timezone.utc).timestamp() * 1000)}_{secrets.token_hex(3)}",
+            "action_type": action_type,
+            **_actor_visible(actor, actor_respaldo),
+            "entity_type": entity_type,
+            "entity_id": str(entity_id or ""),
+            "entity_label": str(entity_label or ""),
+            "description": description,
+            "status": status,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if changes:
+            evento["changes"] = changes
+        actividad_db.append(evento)
+        if len(actividad_db) > MAX_ACTIVIDAD:
+            del actividad_db[: len(actividad_db) - MAX_ACTIVIDAD]
+    except Exception as exc:  # noqa: BLE001 - auditar no puede romper la acción
+        print(f"[Actividad] no se pudo registrar {action_type}: {type(exc).__name__}")
+
+
+def cambio(campo: str, antes: Any, despues: Any) -> Optional[Dict[str, Any]]:
+    """Una fila de la comparación «antes / después», o `None` si no cambió."""
+    anterior, nuevo = ("" if antes is None else str(antes)), ("" if despues is None else str(despues))
+    if anterior == nuevo:
+        return None
+    return {"campo": campo, "anterior": anterior, "nuevo": nuevo}
+
+
+async def reload_actividad() -> None:
+    """Carga solo el historial: unas decenas de KB en vez del estado entero."""
+    global actividad_db, _actividad_cache_loaded_at
+    if _full_cache_is_fresh() or _cache_is_fresh(_actividad_cache_loaded_at):
+        return
+    if not _is_compat_storage():
+        await reload_db()
+        return
+    try:
+        async with _get_db_io_lock():
+            if _full_cache_is_fresh() or _cache_is_fresh(_actividad_cache_loaded_at):
+                return
+            value = await _fetch_projection_value("__actividad__", "load_actividad")
+            actividad_db = value if isinstance(value, list) else []
+            _actividad_cache_loaded_at = time.monotonic()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _raise_database_unavailable("load_actividad", error=exc)
+
+
+def _coincide_texto(evento: Dict[str, Any], buscado: str) -> bool:
+    campos = ("action_type", "actor_name", "actor_email", "actor_id",
+              "entity_label", "entity_id", "entity_type", "description")
+    return any(buscado in str(evento.get(campo) or "").lower() for campo in campos)
+
+
+def _dentro_del_rango(evento: Dict[str, Any], desde: str, hasta: str) -> bool:
+    fecha = str(evento.get("created_at") or "")[:10]
+    if desde and fecha < desde:
+        return False
+    # `hasta` es inclusivo: quien filtra «hasta el 17» espera ver el día 17.
+    if hasta and fecha > hasta:
+        return False
+    return True
+
+
+@app.get("/api/actividad")
+async def listar_actividad(
+    session_token: SessionCookie = None,
+    pagina: int = 1,
+    limite: int = 10,
+    q: str = "",
+    tipo: str = "",
+    actor: str = "",
+    desde: str = "",
+    hasta: str = "",
+):
+    """Historial de acciones administrativas, filtrado y paginado.
+
+    Es de solo lectura: no hay forma de editar ni borrar un evento desde la
+    aplicación, que es lo que hace que un registro de auditoría sirva de algo.
+    """
+    await require_admin_session(session_token)
+    await reload_actividad()
+
+    eventos = [e for e in actividad_db if isinstance(e, dict)]
+    buscado = q.strip().lower()
+    if buscado:
+        eventos = [e for e in eventos if _coincide_texto(e, buscado)]
+    if tipo:
+        eventos = [e for e in eventos if e.get("action_type") == tipo]
+    if actor:
+        eventos = [e for e in eventos if (e.get("actor_id") or e.get("actor_email")) == actor]
+    if desde or hasta:
+        eventos = [e for e in eventos if _dentro_del_rango(e, desde.strip(), hasta.strip())]
+
+    # Más reciente primero: es el orden en el que se audita.
+    eventos.sort(key=lambda e: str(e.get("created_at") or ""), reverse=True)
+
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    resumen = {
+        "total": len(eventos),
+        "hoy": sum(1 for e in eventos if str(e.get("created_at") or "").startswith(hoy)),
+        "responsables": len({e.get("actor_id") or e.get("actor_email") or "" for e in eventos} - {""}),
+    }
+
+    limite = max(1, min(int(limite or 10), 100))
+    paginas = max(1, (len(eventos) + limite - 1) // limite)
+    pagina = max(1, min(int(pagina or 1), paginas))
+    inicio = (pagina - 1) * limite
+
+    # Los tipos y responsables que ofrecen los desplegables salen de lo que hay
+    # de verdad en el historial, no de una lista escrita a mano que se desviaría.
+    todos = [e for e in actividad_db if isinstance(e, dict)]
+    return {
+        "eventos": eventos[inicio:inicio + limite],
+        "pagina": pagina,
+        "paginas": paginas,
+        "limite": limite,
+        "resumen": resumen,
+        "tipos": sorted({e.get("action_type") for e in todos if e.get("action_type")}),
+        "responsables": sorted(
+            {(e.get("actor_id") or e.get("actor_email") or "") for e in todos} - {""}
+        ),
+    }
+
+
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
 async def get_all_users(email: str, session_token: SessionCookie = None):
@@ -3668,6 +3875,16 @@ async def approve_user(
         usuarios_db[target_email]["unidad_id"] = unidad_id.strip()
         _sembrar_unidad(unidad_id.strip(), usuarios_db[target_email])
 
+    registrar_actividad(
+        "Acceso aprobado",
+        actor=req_user,
+        actor_respaldo=admin_email,
+        entity_type="usuario",
+        entity_id=target_email,
+        entity_label=usuarios_db[target_email].get("nombre") or target_email,
+        description=f"Alta autorizada{f' con padrón {unidad_id.strip()}' if unidad_id else ''}.",
+        status="success",
+    )
     await persist_users_only()
     return {"message": f"Usuario {target_email} aprobado exitosamente."}
 
@@ -3764,6 +3981,16 @@ async def deactivate_user(target_email: str, admin_email: str, session_token: Se
     # Sin esto, la instantánea del índice seguiría diciendo "Activo" hasta que
     # la sesión caducara: una desactivación que no desactiva.
     refresh_session_index_for(user)
+    registrar_actividad(
+        "Usuario desactivado",
+        actor=req_user,
+        actor_respaldo=admin_email,
+        entity_type="usuario",
+        entity_id=target_email,
+        entity_label=user.get("nombre") or target_email,
+        description="La cuenta deja de tener acceso al sistema.",
+        status="error",
+    )
     await persist_users_only()
     return {"message": f"Usuario {target_email} desactivado.", "estado": "Inactivo"}
 
@@ -3780,6 +4007,16 @@ async def reactivate_user(target_email: str, admin_email: str, session_token: Se
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
+    registrar_actividad(
+        "Usuario reactivado",
+        actor=req_user,
+        actor_respaldo=admin_email,
+        entity_type="usuario",
+        entity_id=target_email,
+        entity_label=user.get("nombre") or target_email,
+        description="La cuenta vuelve a tener acceso al sistema.",
+        status="success",
+    )
     user["estado"] = "Activo"
     refresh_session_index_for(user)
     await persist_users_only()
@@ -3882,6 +4119,16 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
         # esto quedaba en la flota sin nombre de chofer ni capacidad.
         _sembrar_unidad(str(conductor.get("unidad_id") or "").strip(), conductor)
 
+    registrar_actividad(
+        "Documento aprobado" if payload.estado == "aprobado" else "Documento rechazado",
+        actor=req_user,
+        actor_respaldo=payload.admin_email,
+        entity_type="documento",
+        entity_id=payload.campo,
+        entity_label=f"{payload.campo} · {conductor.get('unidad_id') or conductor_key}",
+        description=payload.nota or f"Documento marcado como {payload.estado}.",
+        status="success" if payload.estado == "aprobado" else "error",
+    )
     await persist_users_only()
     return {
         "message": f"Documento '{payload.campo}' marcado como {payload.estado}.",
@@ -4035,6 +4282,16 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
     actor = await require_any_session(session_token)
     ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
+    # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
+    # para el contenido de un DNI.
+    registrar_actividad(
+        "Documento cargado",
+        actor=actor,
+        entity_type="documento",
+        entity_id=datos.campo,
+        entity_label=f"{datos.campo} · {datos.unidad_id or 'sin unidad'}",
+        description=f"Archivo {datos.nombre} subido al almacenamiento.",
+    )
     return {"path": ruta, "name": datos.nombre, "type": datos.tipo}
 
 
@@ -4623,6 +4880,8 @@ async def publish_routes_summary(rutas: list = Body(...), session_token: Session
             "__lock__": next_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+        "__actividad__": actividad_db,
+            "__actividad__": actividad_db,
             "__sessions__": session_index,
         },
     }
@@ -5038,6 +5297,8 @@ async def _persist_and_verify_fleet(
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
+        "__actividad__": actividad_db,
+            "__actividad__": actividad_db,
             "__sessions__": session_index,
         },
     }, "persist_fleet")
@@ -5096,7 +5357,7 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
 @app.put("/api/flota/{placa}")
 async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCookie = None):
     # Autorizar antes de leer, por el motivo explicado en `add_flota`.
-    await require_admin_session(session_token)
+    actor_admin = await require_admin_session(session_token)
     # A fresh provider read prevents a warm Vercel instance from overwriting a
     # newer fleet snapshot written by another instance.
     await reload_db(force=True)
@@ -5114,10 +5375,27 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     if updated == previous:
         return {"message": "Sin cambios", "unchanged": True, "unidad": {"unidad_id": placa, **previous}, "flota": conductores_db}
     conductores_db[placa] = updated
+    # Se anota antes de persistir para que el guardado lo lleve consigo, y se
+    # deshace junto al resto si la escritura falla.
+    actividad_previa = list(actividad_db)
+    registrar_actividad(
+        "Unidad actualizada",
+        actor=actor_admin,
+        entity_type="unidad",
+        entity_id=placa,
+        entity_label=placa,
+        description=f"Unidad {placa} modificada desde la ficha del conductor.",
+        status="success",
+        changes=[c for c in (
+            cambio(_ETIQUETA_FLOTA.get(campo, campo), previous.get(campo), valor)
+            for campo, valor in changes.items()
+        ) if c],
+    )
     try:
         stored = await _persist_and_verify_fleet(placa, updated)
     except Exception:
         conductores_db[placa] = previous
+        actividad_db[:] = actividad_previa
         raise
     return {"message": "Unidad actualizada", "unchanged": False, "unidad": {"unidad_id": placa, **stored}, "flota": conductores_db}
 

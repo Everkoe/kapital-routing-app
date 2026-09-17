@@ -4,6 +4,7 @@ import hashlib
 import io
 import random
 import time
+import json
 import unittest
 from unittest import mock
 from unittest.mock import AsyncMock, patch
@@ -2163,6 +2164,121 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def test_the_first_profile_of_a_driver_is_stored_as_sent(self):
         entrante = {"dniScaneado": {"name": "dni.png", "path": "usuario-ab12/dniScaneado.png"}}
         self.assertEqual(backend.conservar_documentos(None, entrante), entrante)
+
+    def _historial_de_prueba(self):
+        """Veinticinco eventos de mentira para ejercitar filtros y páginas."""
+        eventos = []
+        for i in range(25):
+            eventos.append({
+                "id": f"act_{i}",
+                "action_type": "Unidad actualizada" if i % 2 else "Usuario inició sesión",
+                "actor_id": "admin@kapital.com" if i % 3 else "gerente@kapital.com",
+                "actor_email": "admin@kapital.com" if i % 3 else "gerente@kapital.com",
+                "entity_label": f"K-{i:03d}",
+                "status": "success",
+                "created_at": f"2026-09-{(i % 20) + 1:02d}T10:00:00+00:00",
+            })
+        return eventos
+
+    def test_the_activity_endpoint_pages_without_losing_or_repeating_events(self):
+        async def ejecutar():
+            with mock.patch.object(backend, "actividad_db", self._historial_de_prueba()),                     mock.patch.object(backend, "require_admin_session", new=AsyncMock(return_value={})),                     mock.patch.object(backend, "reload_actividad", new=AsyncMock()):
+                vistos = []
+                primera = await backend.listar_actividad(pagina=1, limite=10)
+                for numero in range(1, primera["paginas"] + 1):
+                    pagina = await backend.listar_actividad(pagina=numero, limite=10)
+                    vistos.extend(e["id"] for e in pagina["eventos"])
+                return primera, vistos
+
+        primera, vistos = asyncio.run(ejecutar())
+        self.assertEqual(primera["resumen"]["total"], 25)
+        self.assertEqual(primera["paginas"], 3)
+        self.assertEqual(len(vistos), 25, "ninguna página se salta eventos")
+        self.assertEqual(len(set(vistos)), 25, "ni los repite entre páginas")
+        # Más reciente primero.
+        self.assertEqual(primera["eventos"][0]["created_at"][:10], "2026-09-20")
+
+    def test_the_activity_filters_combine(self):
+        async def ejecutar(**filtros):
+            with mock.patch.object(backend, "actividad_db", self._historial_de_prueba()),                     mock.patch.object(backend, "require_admin_session", new=AsyncMock(return_value={})),                     mock.patch.object(backend, "reload_actividad", new=AsyncMock()):
+                return await backend.listar_actividad(limite=100, **filtros)
+
+        por_tipo = asyncio.run(ejecutar(tipo="Unidad actualizada"))
+        self.assertTrue(all(e["action_type"] == "Unidad actualizada" for e in por_tipo["eventos"]))
+
+        # Tipo y fecha a la vez: el filtro se acumula, no se sustituye.
+        combinado = asyncio.run(ejecutar(tipo="Unidad actualizada", desde="2026-09-15"))
+        self.assertTrue(combinado["eventos"], "el caso de prueba debe dejar algo")
+        for evento in combinado["eventos"]:
+            self.assertEqual(evento["action_type"], "Unidad actualizada")
+            self.assertGreaterEqual(evento["created_at"][:10], "2026-09-15")
+        self.assertLess(len(combinado["eventos"]), len(por_tipo["eventos"]))
+
+        # La búsqueda no distingue mayúsculas.
+        self.assertEqual(
+            len(asyncio.run(ejecutar(q="k-007"))["eventos"]),
+            len(asyncio.run(ejecutar(q="K-007"))["eventos"]),
+        )
+
+    def test_the_activity_endpoint_offers_only_the_filters_that_exist(self):
+        async def ejecutar():
+            with mock.patch.object(backend, "actividad_db", self._historial_de_prueba()),                     mock.patch.object(backend, "require_admin_session", new=AsyncMock(return_value={})),                     mock.patch.object(backend, "reload_actividad", new=AsyncMock()):
+                return await backend.listar_actividad()
+
+        datos = asyncio.run(ejecutar())
+        self.assertEqual(datos["tipos"], ["Unidad actualizada", "Usuario inició sesión"])
+        self.assertEqual(datos["responsables"], ["admin@kapital.com", "gerente@kapital.com"])
+
+    def test_the_activity_log_never_grows_past_its_cap(self):
+        """Todo el estado vive en una fila: un historial sin tope la hincharía."""
+        with mock.patch.object(backend, "actividad_db", []):
+            for i in range(backend.MAX_ACTIVIDAD + 25):
+                backend.registrar_actividad("Unidad actualizada", entity_id=f"K-{i:03d}")
+            self.assertEqual(len(backend.actividad_db), backend.MAX_ACTIVIDAD)
+            # Se descartan los más viejos, no los recientes.
+            self.assertEqual(backend.actividad_db[-1]["entity_id"], f"K-{backend.MAX_ACTIVIDAD + 24:03d}")
+
+    def test_recording_an_activity_never_breaks_the_action(self):
+        """Apuntar lo que pasó no puede impedir que pase."""
+        with mock.patch.object(backend, "actividad_db", []),                 mock.patch.object(backend, "_actor_visible", side_effect=RuntimeError("boom")):
+            backend.registrar_actividad("Unidad actualizada")  # no debe lanzar
+            self.assertEqual(backend.actividad_db, [])
+
+    def test_a_change_row_only_appears_when_the_value_really_changed(self):
+        self.assertIsNone(backend.cambio("Capacidad", 4, 4))
+        self.assertIsNone(backend.cambio("Capacidad", "4", 4), "mismo valor con otro tipo")
+        self.assertEqual(
+            backend.cambio("Capacidad", 15, 4),
+            {"campo": "Capacidad", "anterior": "15", "nuevo": "4"},
+        )
+
+    def test_the_activity_log_never_stores_credentials(self):
+        """El historial se enseña entero en pantalla: no es sitio para secretos."""
+        usuario = {"nombre": "Admin", "email": "admin@kapital.com", "password": "kap9810",
+                   "identifier": "admin@kapital.com"}
+        with mock.patch.object(backend, "actividad_db", []):
+            backend.registrar_actividad("Usuario inició sesión", actor=usuario)
+            evento = backend.actividad_db[0]
+        self.assertNotIn("password", json.dumps(evento))
+        self.assertNotIn("kap9810", json.dumps(evento))
+        self.assertEqual(evento["actor_email"], "admin@kapital.com")
+
+    def test_the_date_filter_includes_both_ends(self):
+        evento = {"created_at": "2026-09-17T12:00:00+00:00"}
+        self.assertTrue(backend._dentro_del_rango(evento, "2026-09-17", "2026-09-17"))
+        self.assertTrue(backend._dentro_del_rango(evento, "", ""))
+        self.assertFalse(backend._dentro_del_rango(evento, "2026-09-18", ""))
+        self.assertFalse(backend._dentro_del_rango(evento, "", "2026-09-16"))
+
+    def test_the_search_looks_at_every_field_the_table_shows(self):
+        evento = {
+            "action_type": "Unidad actualizada", "actor_name": "Admin",
+            "actor_email": "admin@kapital.com", "entity_label": "KAP-TESTV3",
+            "description": "Capacidad corregida",
+        }
+        for buscado in ("unidad", "kap-testv3", "ADMIN@KAPITAL.COM".lower(), "capacidad"):
+            self.assertTrue(backend._coincide_texto(evento, buscado), buscado)
+        self.assertFalse(backend._coincide_texto(evento, "documento"))
 
     def test_a_real_email_is_stored_beside_the_account_key(self):
         """Los 108 conductores del Excel tienen por clave un correo inventado.

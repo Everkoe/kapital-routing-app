@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
+import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
@@ -33,6 +33,7 @@ const VistaReportes = React.lazy(() => import('./VistaReportes'));
 const ClientPortal = React.lazy(() => import('./ClientPortal'));
 const AdminDashboard = React.lazy(() => import('./AdminDashboard'));
 const UsersManagementTab = React.lazy(() => import('./components/UsersManagementTab'));
+const HistorialActividad = React.lazy(() => import('./HistorialActividad'));
 const VistaPerfil = React.lazy(() => import('./VistaPerfil'));
 const ProgramadorWorkbench = React.lazy(() => import('./programador/ProgramadorWorkbench'));
 const ProgramadorFlota = React.lazy(() => import('./programador/FlotaProgramador'));
@@ -309,6 +310,9 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
               <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'} style={{color: '#38BDF8'}}>
                 <Shield size={18} /> Accesos
               </a>
+              <a onClick={() => handleNav('historial')} className={vistaActual === 'historial' ? 'nav-link nav-link-icon active' : 'nav-link nav-link-icon'}>
+                <History size={18} /> Historial
+              </a>
             </>
           )}
           <span className="nav-separator">|</span>
@@ -383,6 +387,10 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             <a onClick={() => handleNav('usuarios')} className={vistaActual === 'usuarios' ? 'nav-link active' : 'nav-link'} style={vistaActual === 'usuarios' ? {color: '#38BDF8'} : {}}>
               <Shield size={20} />
               <span>Accesos B2B</span>
+            </a>
+            <a onClick={() => handleNav('historial')} className={vistaActual === 'historial' ? 'nav-link active' : 'nav-link'}>
+              <History size={20} />
+              <span>Historial</span>
             </a>
           </>
         )}
@@ -1257,6 +1265,12 @@ function App() {
           ? <ProgramadorConfig />
           : <VistaConfiguracion />;
       case 'usuarios': return <UsersManagementTab usuarioActual={usuarioActual} initialTab={vistaParams?.tab || 'Todos'} />;
+      case 'historial':
+        // La auditoría es de Administración. Quien no lo sea cae en su propia
+        // pantalla en vez de recibir un 403 del backend con la vista vacía.
+        return ['Administración', 'Administrador'].includes(usuarioActual?.rol)
+          ? <HistorialActividad />
+          : <AdminDashboard onNavigate={handleNavigate} usuario={usuarioActual} />;
       case 'perfil': return <VistaPerfil usuario={usuarioActual} setUsuarioActual={setUsuarioActual} onLogout={handleLogout} />;
       case 'dashboard':
       default:
