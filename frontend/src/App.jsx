@@ -6,6 +6,7 @@ import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, Aler
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
+import { olvidarUrlsFirmadas } from './utils/documentoStorage';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -1066,6 +1067,9 @@ function App() {
     // porque dejar al usuario en la app si el backend no contesta sería peor.
     logoutSession();
     clearStoredUser();
+    // Una URL firmada es un permiso con fecha: si en este mismo navegador
+    // entra otra persona, no debe heredar las de la anterior.
+    olvidarUrlsFirmadas();
     setUsuarioActual(null);
   };
 
