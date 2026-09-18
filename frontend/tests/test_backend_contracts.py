@@ -1805,6 +1805,113 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(created["id"], seen)
                 seen.add(created["id"])
 
+    # --- Reinicio de contraseña ---
+
+    def _escenario_de_reinicio(self):
+        """Un administrador, un gerente y un conductor con sesión abierta."""
+        backend.AUTH_ENFORCED = True
+        admin = {"identifier": "admin@kapital.com", "nombre": "Admin",
+                 "rol": "Administrador", "estado": "Activo", "password": "x"}
+        gerente = {"identifier": "gerente@kapital.com", "nombre": "Gerente",
+                   "rol": "Gerente de Operaciones", "estado": "Activo", "password": "x"}
+        chofer = {"identifier": "chofer@kapital.com", "nombre": "Chofer",
+                  "rol": "Conductor", "estado": "Activo", "password": "la-que-olvido"}
+        backend.usuarios_db.update({u["identifier"]: u for u in (admin, gerente, chofer)})
+        return admin, gerente, chofer
+
+    async def test_a_reset_hands_over_a_one_time_password_and_forces_a_change(self):
+        """Es la única salida a un olvido desde que las contraseñas se cifran."""
+        admin, _gerente, chofer = self._escenario_de_reinicio()
+        token_admin = backend.issue_session(admin)
+        token_chofer = backend.issue_session(chofer)
+        anterior = chofer["password"]
+
+        with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
+            respuesta = await backend.reset_user_password(
+                backend.ReinicioDeContrasena(admin_email=admin["identifier"],
+                                             target=chofer["identifier"]),
+                token_admin,
+            )
+
+        provisional = respuesta["password"]
+        self.assertEqual(len(provisional), backend.LARGO_CONTRASENA_PROVISIONAL)
+        self.assertNotEqual(chofer["password"], anterior)
+        self.assertTrue(backend.verify_password(provisional, chofer["password"]))
+        self.assertFalse(backend.verify_password("la-que-olvido", chofer["password"]))
+        self.assertTrue(chofer["needs_password_change"], "debe elegir la suya al entrar")
+
+        # La sesión que tuviera abierta se cierra: si no, seguiría dentro doce
+        # horas más con la contraseña que acaba de dejar de ser válida.
+        self.assertEqual(respuesta["sesiones_cerradas"], 1)
+        self.assertIsNone(backend.session_actor_from_index(token_chofer))
+
+        # Y la provisional no se queda escrita en el historial.
+        for evento in backend.actividad_db:
+            self.assertNotIn(provisional, json.dumps(evento, ensure_ascii=False))
+
+    async def test_a_reset_never_becomes_a_way_to_take_over_an_admin(self):
+        """Reiniciar la contraseña de quien tiene más permisos es tomar su cuenta."""
+        admin, gerente, chofer = self._escenario_de_reinicio()
+        token_gerente = backend.issue_session(gerente)
+
+        with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
+            # Un gerente sí puede con un conductor: es el caso cotidiano.
+            await backend.reset_user_password(
+                backend.ReinicioDeContrasena(admin_email=gerente["identifier"],
+                                             target=chofer["identifier"]),
+                token_gerente,
+            )
+            # Pero no con la administración principal.
+            with self.assertRaises(HTTPException) as caught:
+                await backend.reset_user_password(
+                    backend.ReinicioDeContrasena(admin_email=gerente["identifier"],
+                                                 target=admin["identifier"]),
+                    token_gerente,
+                )
+            self.assertEqual(caught.exception.status_code, 403)
+            self.assertEqual(admin["password"], "x", "intacta")
+
+            # Ni consigo mismo: para eso está cambiarla sabiendo la actual.
+            with self.assertRaises(HTTPException) as caught:
+                await backend.reset_user_password(
+                    backend.ReinicioDeContrasena(admin_email=gerente["identifier"],
+                                                 target=gerente["identifier"]),
+                    token_gerente,
+                )
+            self.assertEqual(caught.exception.status_code, 400)
+
+    async def test_a_reset_needs_an_administration_session(self):
+        """Sin sesión, o con la de un conductor, no se reinicia nada."""
+        _admin, _gerente, chofer = self._escenario_de_reinicio()
+        otro = {"identifier": "otro@kapital.com", "rol": "Conductor",
+                "estado": "Activo", "password": "y"}
+        backend.usuarios_db["otro@kapital.com"] = otro
+        token_chofer = backend.issue_session(chofer)
+
+        with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
+            for etiqueta, admin_email, token in (
+                ("un conductor haciéndose pasar por admin", chofer["identifier"], token_chofer),
+                ("sin cookie ninguna", "admin@kapital.com", None),
+            ):
+                with self.subTest(etiqueta):
+                    with self.assertRaises(HTTPException) as caught:
+                        await backend.reset_user_password(
+                            backend.ReinicioDeContrasena(admin_email=admin_email,
+                                                         target="otro@kapital.com"),
+                            token,
+                        )
+                    self.assertIn(caught.exception.status_code, (401, 403))
+        self.assertEqual(otro["password"], "y", "intacta")
+
+    def test_a_provisional_password_can_be_read_out_loud(self):
+        """Se dicta por teléfono, así que no puede tener caracteres ambiguos."""
+        vistas = {backend.contrasena_provisional() for _ in range(200)}
+        self.assertGreater(len(vistas), 190, "no puede repetirse")
+        for clave in vistas:
+            self.assertEqual(len(clave), backend.LARGO_CONTRASENA_PROVISIONAL)
+            # Ni O ni 0, ni l ni I ni 1: se confunden al cantarlas.
+            self.assertFalse(set(clave) & set("O0lI1"), clave)
+
     # --- Lote 1: identidad de sesión ---
 
     async def test_document_states_do_not_block_driver_operations(self):

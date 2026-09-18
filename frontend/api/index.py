@@ -811,6 +811,36 @@ def password_needs_upgrade(stored_password: str | None) -> bool:
         return True
 
 
+# Alfabeto sin caracteres que se confunden al dictar por teléfono: fuera la O
+# y el cero, fuera la l, la I y el uno. Quien reinicia una contraseña se la
+# canta al conductor por WhatsApp, y un carácter ambiguo es una llamada más.
+_ALFABETO_PROVISIONAL = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+LARGO_CONTRASENA_PROVISIONAL = 10
+
+
+def contrasena_provisional() -> str:
+    """Una contraseña de un solo uso, para dictar y cambiar al entrar."""
+    return "".join(secrets.choice(_ALFABETO_PROVISIONAL)
+                   for _ in range(LARGO_CONTRASENA_PROVISIONAL))
+
+
+def revocar_sesiones_de(user: Dict[str, Any]) -> int:
+    """Cierra todas las sesiones abiertas de una cuenta.
+
+    Reiniciar una contraseña sin esto no echaría a nadie: quien tuviera la
+    sesión abierta seguiría dentro doce horas más, que es justo lo que no se
+    quiere cuando se reinicia porque una cuenta pudo quedar comprometida.
+    """
+    ahora = int(datetime.now(timezone.utc).timestamp())
+    cerradas = 0
+    for sesion in user.get("_auth_sessions") or []:
+        if isinstance(sesion, dict) and not sesion.get("revoked_at"):
+            sesion["revoked_at"] = ahora
+            revoke_session_in_index(str(sesion.get("token_hash") or ""), ahora)
+            cerradas += 1
+    return cerradas
+
+
 def password_for_storage(password: str) -> str:
     """Keep rollback-safe plaintext until hash writing is explicitly enabled."""
     return hash_password(password) if PASSWORD_HASH_WRITE_ENABLED else password
@@ -3404,6 +3434,10 @@ class BulkActionPayload(BaseModel):
     target_emails: List[str]
     action: str # "approve", "reject", "delete", "deactivate"
 
+class ReinicioDeContrasena(BaseModel):
+    admin_email: str
+    target: str
+
 class DriverDocReviewPayload(BaseModel):
     admin_email: str
     conductor_email: str
@@ -4038,6 +4072,78 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
                 
     await persist_users_only()
     return {"message": f"Acción '{payload.action}' aplicada a {len(payload.target_emails)} usuarios."}
+
+# Quién puede reiniciar la contraseña de quién.
+#
+# Cualquiera de administración puede reiniciar la de un conductor o un cliente,
+# que es el caso real y cotidiano. Pero reiniciar la de otra cuenta de
+# administración es tomarla: se te da una contraseña que conoces sobre una
+# cuenta con más permisos que la tuya. Eso queda reservado a la administración
+# principal, y nadie puede reiniciar la suya propia por esta vía —para eso
+# está cambiarla sabiendo la actual—.
+_ROLES_QUE_REINICIAN_A_UN_ADMIN = ["Admin", "Administración", "Administrador"]
+
+
+@app.post("/api/admin/users/reset-password")
+async def reset_user_password(payload: ReinicioDeContrasena, session_token: SessionCookie = None):
+    """Devuelve una contraseña provisional para una cuenta, una sola vez.
+
+    Hace falta porque las contraseñas se guardan cifradas: ya no se puede leer
+    la de nadie, así que un olvido no tenía salida dentro de la aplicación.
+
+    La provisional se devuelve aquí y no se guarda en ningún otro sitio —ni en
+    el historial de actividad—: quien la reinicia se la dicta a su dueño y
+    después no vuelve a existir. Al entrar, el sistema le obliga a poner la
+    suya, que es lo que ya hace `needs_password_change`.
+    """
+    await reload_db()
+    actor = usuarios_db.get(payload.admin_email)
+    if not actor or actor.get("rol") not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+    require_request_actor(session_token, expected_user=actor, allowed_roles=_ADMIN_ROLES)
+
+    destino = usuarios_db.get(payload.target)
+    if not isinstance(destino, dict):
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    if destino.get("identifier") == actor.get("identifier"):
+        raise HTTPException(
+            status_code=400,
+            detail="Para cambiar la tuya usa «Cambiar contraseña», que pide la actual.",
+        )
+    if destino.get("rol") in _ADMIN_ROLES and actor.get("rol") not in _ROLES_QUE_REINICIAN_A_UN_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo la administración principal puede reiniciar la contraseña de otra cuenta de administración.",
+        )
+
+    provisional = contrasena_provisional()
+    destino["password"] = password_for_storage(provisional)
+    destino["needs_password_change"] = True
+    # Si no se cierran, quien ya estuviera dentro seguiría doce horas más.
+    cerradas = revocar_sesiones_de(destino)
+
+    registrar_actividad(
+        "Contraseña reiniciada",
+        actor=actor,
+        entity_type="usuario",
+        entity_id=str(destino.get("identifier") or payload.target),
+        entity_label=str(destino.get("nombre") or payload.target),
+        description=(
+            "Se entregó una contraseña provisional; deberá cambiarla al entrar."
+            + (f" Se cerraron {cerradas} sesiones abiertas." if cerradas else "")
+        ),
+        status="warning",
+    )
+    await persist_users_only()
+
+    # La provisional viaja solo en esta respuesta.
+    return {
+        "password": provisional,
+        "nombre": destino.get("nombre"),
+        "sesiones_cerradas": cerradas,
+    }
+
 
 @app.put("/api/admin/users/approve/{target_email}")
 async def approve_user(
