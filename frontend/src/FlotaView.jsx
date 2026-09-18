@@ -15,13 +15,6 @@ import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
 import { documentoABase64 } from './utils/imageUtils';
 import './App.css';
 
-/** Vigencias de la unidad: fecha y nada más, sin archivo que revisar. */
-const VIGENCIAS_DE_UNIDAD = [
-  { campo: 'soat', etiqueta: 'SOAT' },
-  { campo: 'revision', etiqueta: 'Revisión Técnica' },
-  { campo: 'licencia', etiqueta: 'Licencia MTC' },
-];
-
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
 const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
 const DEFAULT_DOCUMENT_ACCEPT = FileUploadZone.DEFAULT_DOCUMENT_ACCEPT;
@@ -1014,34 +1007,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                         <p><strong>Capacidad:</strong> {conductorInfo.usuario.perfil_conductor?.capacidadVehiculo2 || '—'} pasajeros</p>
                       </div>
                     )}
-                  </div>
-
-                  {/* Las vigencias, en su propia caja y a lo ancho. Dentro de la
-                      tarjeta del vehículo caían en una columna estrecha, con la
-                      fecha y su estado partidos en dos líneas. Y no son del
-                      vehículo que declaró el conductor: son de la unidad. */}
-                  <div className="info-section vigencias-unidad">
-                    <h4>Vigencias de la unidad</h4>
-                    <div className="vigencias-unidad-lista">
-                      {VIGENCIAS_DE_UNIDAD.map(({ campo, etiqueta }) => {
-                        const { status, text } = getDocumentStatus(conductorInfo.flota?.[campo]);
-                        return (
-                          <CampoEditable
-                            key={campo}
-                            etiqueta={etiqueta}
-                            valor={conductorInfo.flota?.[campo]}
-                            tipo="date"
-                            vacio="Sin fecha"
-                            onGuardar={(valor) => guardarCampoUnidad(campo, valor)}
-                          >
-                            <span className="campo-editable-vigencia">
-                              {conductorInfo.flota?.[campo] || 'Sin fecha'}
-                              <span className={`status-badge status-${status}`}><span className="dot"></span>{text}</span>
-                            </span>
-                          </CampoEditable>
-                        );
-                      })}
-                    </div>
                   </div>
 
 

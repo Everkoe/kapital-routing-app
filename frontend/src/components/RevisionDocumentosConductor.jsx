@@ -96,6 +96,11 @@ const RevisionDocumentosConductor = ({
   /**
    * Barra con el vencimiento del documento abierto.
    *
+   * Vive dentro del visor y no en la tarjeta a propósito: quien revisa primero
+   * comprueba que el archivo está subido y es el que dice ser, y solo entonces
+   * corrobora hasta cuándo vale. La fecha fuera, junto a un documento que aún
+   * no ha mirado, invita a darla por buena antes de tiempo.
+   *
    * Solo para los tres que tienen uno —SOAT, revisión técnica y licencia—, y
    * solo cuando quien usa el componente sabe guardarlo.
    */

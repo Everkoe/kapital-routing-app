@@ -2001,21 +2001,6 @@ select.campo-pendiente {
   padding: 28px 32px;
 }
 
-/* Las vigencias, en su propia caja a lo ancho bajo las dos tarjetas. */
-.vigencias-unidad {
-  margin-top: 14px;
-}
-
-.vigencias-unidad-lista {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 10px 18px;
-}
-
-.vigencias-unidad .campo-editable {
-  justify-content: flex-start;
-  margin: 0;
-}
 
 /* Las tarjetas de datos leen mejor alineadas a la izquierda que centradas:
    son pares etiqueta/valor, no un rótulo. */
@@ -2321,12 +2306,3 @@ select.campo-pendiente {
 
 /* Las vigencias de la unidad, cada una con su etiqueta encima: con tres
    columnas y etiquetas de largos distintos, en linea quedaban descuadradas. */
-/* La etiqueta ocupa su propia linea y el valor con su lapiz van juntos debajo:
-   en columna, el lapiz caia en una tercera linea, lejos de lo que edita. */
-.vigencias-unidad-lista .campo-editable { justify-content: flex-start; gap: 6px; }
-.vigencias-unidad-lista .campo-editable strong {
-  flex: 1 1 100%;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.vigencias-unidad-lista .campo-editable.campo-editable-abierto strong { flex: 0 0 auto; }
