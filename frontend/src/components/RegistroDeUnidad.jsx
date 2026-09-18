@@ -243,8 +243,10 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
                 </select>
               </div>
 
-              {campo('telefono', 'Teléfono WhatsApp', { placeholder: 'Ej. 987654321', opcional: true, inputMode: 'tel' })}
+              {/* La capacidad va pegada al tipo: las dos describen el vehículo.
+                  El teléfono es del conductor y cierra la fila. */}
               {campo('capacidad', 'Capacidad (pasajeros)', { placeholder: 'Ej. 4', obligatorio: true, type: 'number', min: '1' })}
+              {campo('telefono', 'Teléfono WhatsApp', { placeholder: 'Ej. 987654321', opcional: true, inputMode: 'tel' })}
             </div>
           </section>
 
