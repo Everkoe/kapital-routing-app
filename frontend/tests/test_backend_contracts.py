@@ -1164,6 +1164,77 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(patch_payload[reserved_key], canonical_state["usuarios"][reserved_key])
         self.assertIn("admin@example.com", patch_payload)
 
+    async def test_a_login_through_the_index_never_drops_the_other_users(self):
+        """El atajo trae un solo usuario; la escritura debe seguir llevándolos todos.
+
+        Es el riesgo real de resolver un login sin leer el bloque entero: si la
+        persistencia usara lo que hay en memoria —una única cuenta—, un acceso
+        cualquiera borraría a los ciento y pico restantes. Lo que lo impide es
+        que `_ensure_compat_users_for_write` hidrata el estado completo antes
+        del PATCH, y esto lo deja clavado.
+        """
+        entrando = {
+            "identifier": "09704190", "email": "chofer@kapital.com",
+            "password": "su-clave", "nombre": "Conductor Uno",
+            "rol": "Conductor", "estado": "Activo",
+        }
+        otros = {
+            f"conductor{n}@kapital.com": {
+                "identifier": f"conductor{n}@kapital.com", "password": "x",
+                "nombre": f"Conductor {n}", "rol": "Conductor", "estado": "Activo",
+            }
+            for n in range(40)
+        }
+        estado_completo = {
+            "usuarios": {
+                "chofer@kapital.com": dict(entrando),
+                **otros,
+                "__routes_summary__": [], "__historial_rutas__": [],
+                "__lock__": {}, "__flota__": {"K-001": {"capacidad": 4}},
+                "__notifications__": [],
+                "__login__": {"09704190": "chofer@kapital.com"},
+            },
+            "rutas": [],
+        }
+        backend._activate_storage_config(backend._build_storage_config({
+            "KAPITAL_STORAGE_BACKEND": "V2_COMPAT",
+            "KAPITAL_V2_SUPABASE_URL": "https://v2-compat.invalid/rest/v1",
+            "KAPITAL_V2_SUPABASE_KEY": "compat-key",
+            "KAPITAL_V2_ENABLED": "true",
+            "KAPITAL_V2_REMOTE_ENABLED": "true",
+            "KAPITAL_V2_READ_ONLY": "false",
+        }))
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        # Índice, el usuario suelto, y el estado completo que exige la escritura.
+        # PostgREST nombra la columna con el ultimo tramo del camino, asi que
+        # una proyeccion vuelve como {"__login__": ...}, no anidada bajo
+        # "usuarios". Comprobado contra la base real.
+        client.get.side_effect = [
+            httpx.Response(200, json=[{"__login__": {"09704190": "chofer@kapital.com"}}]),
+            httpx.Response(200, json=[{"chofer@kapital.com": dict(entrando)}]),
+            httpx.Response(200, json=[estado_completo]),
+        ]
+        client.patch.return_value = httpx.Response(204)
+
+        with patch.object(backend.httpx, "AsyncClient", return_value=client):
+            respuesta = await backend.login_user(
+                backend.UsuarioLogin(identifier="09704190", password="su-clave"),
+                Response(),
+            )
+
+        self.assertEqual(respuesta["identifier"], "09704190")
+        escrito = client.patch.call_args.kwargs["json"]["usuarios"]
+        cuentas = [k for k in escrito if not str(k).startswith("__")]
+        # Ninguno de los que no participan en este login puede desaparecer.
+        for clave in otros:
+            self.assertIn(clave, escrito, f"{clave} se perdio al escribir")
+        self.assertIn("chofer@kapital.com", escrito)
+        self.assertGreaterEqual(len(cuentas), 41, "los 40 de la fila mas quien entra")
+        # Y las claves reservadas tampoco: son el tablero, la flota y el resto.
+        self.assertEqual(escrito["__flota__"], estado_completo["usuarios"]["__flota__"])
+
     async def test_compat_profile_and_admin_users_use_users_projection(self):
         users = {
             "admin@example.com": {
