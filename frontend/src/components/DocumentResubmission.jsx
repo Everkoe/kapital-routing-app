@@ -184,6 +184,34 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
 
   const isPending = usuario.estado === 'Pendiente Revisión';
   const hasRejected = rejectedDocs.length > 0;
+
+  /**
+   * Mientras el perfil está en revisión no hay nada que hacer aquí.
+   *
+   * Se seguían listando todos los documentos debajo del aviso, y la lista era
+   * además la única parte de la pantalla que pedía algo: el conductor acababa
+   * de enviarlo todo y leía «Perfil en Revisión» encima de unas tarjetas en
+   * rojo que le decían que faltaba lo que ya había mandado. Cuando de verdad
+   * falte algo, Administración lo marca y la lista vuelve.
+   */
+  const soloEsperando = isPending && !hasRejectedOrMissing;
+
+  /**
+   * Qué mostrar de cada cara, con el mismo criterio que el resto de la app.
+   *
+   * La rejilla tenía su propia comprobación —`!perfil[campo]`— y por eso daba
+   * por faltantes los reversos que nadie pidió y el anverso de un DNI subido
+   * en una sola imagen. `null` significa que esa cara no se dibuja: ni se
+   * entregó ni se pedía.
+   */
+  const estadoDeCara = (campo) => {
+    const revision = revisions[campo];
+    if (revision) return revision.estado?.toLowerCase();
+    if (usuario?.perfil_conductor?.[campo]) return 'pendiente';
+    return requeridos.has(campo) && !documentoEntregado(campo, usuario?.perfil_conductor)
+      ? 'faltante'
+      : null;
+  };
   // We don't change hasRejected here to avoid breaking the logic that displays the "Último mensaje de Administración" if there are actually rejected ones.
 
   if (notificationsLoading) {
@@ -245,12 +273,12 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
           </div>
         )}
 
+        {!soloEsperando && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '30px' }}>
           {Object.keys(DOC_LABELS).map(docKey => {
-            const hasDoc = !!usuario?.perfil_conductor?.[docKey];
-            const revision = revisions[docKey];
-            const estado = revision ? revision.estado?.toLowerCase() : (hasDoc ? 'pendiente' : 'faltante');
-            
+            const estado = estadoDeCara(docKey);
+            if (!estado) return null;
+
             if (estado === 'faltante' || estado === 'rechazado') {
               return (
                 <div key={docKey} style={{ gridColumn: '1 / -1', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px', background: 'var(--bg)' }}>
@@ -301,6 +329,7 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
             );
           })}
         </div>
+        )}
 
         {hasRejectedOrMissing && (
           <button 
