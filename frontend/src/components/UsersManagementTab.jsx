@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, Truck, Shield, Search, User, Trash2, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, Truck, Shield, Search, User, Trash2, RotateCcw, KeyRound } from 'lucide-react';
 import { GlobalLoader } from './GlobalLoader';
 import { apiFetch } from '../utils/apiClient';
 import RevisionDocumentosConductor from './RevisionDocumentosConductor';
 import ImagenGuardada from './ImagenGuardada';
+import ContrasenaProvisional from './ContrasenaProvisional';
 
 const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
   if (!isOpen) return null;
@@ -131,6 +132,9 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [modal, setModal] = useState({ isOpen: false, config: null, onConfirm: null });
+  // La provisional que devuelve un reinicio. Solo vive aquí y hasta que se
+  // cierre el aviso: el servidor no la guarda en ningún sitio.
+  const [provisional, setProvisional] = useState(null);
   const [driverModal, setDriverModal] = useState({ isOpen: false, user: null });
   const [padronModal, setPadronModal] = useState({ isOpen: false, email: null, padron: '' });
 
@@ -289,6 +293,43 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     });
   };
 
+  /**
+   * Entrega una contraseña provisional para una cuenta.
+   *
+   * Hace falta desde que las contraseñas se guardan cifradas: ya no se puede
+   * leer la de nadie, así que un olvido no tenía salida dentro de la
+   * aplicación. La respuesta trae la provisional una única vez.
+   */
+  const reiniciarContrasena = (u) => {
+    setModal({
+      isOpen: true,
+      config: {
+        type: 'danger',
+        icon: <KeyRound size={36} color="#f59e0b" />,
+        title: 'Reiniciar contraseña',
+        message: `Se generará una contraseña provisional para ${u.nombre}. La actual dejará de servir y se cerrarán sus sesiones abiertas, así que tendrás que hacérsela llegar.`,
+        userEmail: u.email,
+        confirmText: 'Sí, reiniciar',
+      },
+      onConfirm: async () => {
+        closeModal();
+        setActionLoading(u.email);
+        try {
+          const datos = await apiFetch('/api/admin/users/reset-password', {
+            method: 'POST',
+            json: { admin_email: usuarioActual.email, target: u.email },
+          });
+          setProvisional(datos);
+          await fetchUsers();
+        } catch (error) {
+          toast.error(error?.message || 'No se pudo reiniciar la contraseña.');
+        } finally {
+          setActionLoading(null);
+        }
+      },
+    });
+  };
+
   const pendingCount = users.filter(u => u.estado === 'Pendiente' || u.estado === 'Pendiente Revisión').length;
 
   const handleReviewDriver = (user) => {
@@ -344,6 +385,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
   return (
     <>
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
+      <ContrasenaProvisional datos={provisional} onCerrar={() => setProvisional(null)} />
       {driverModal.isOpen && driverModal.user && (
         <div onClick={closeDriverModal} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '980px', width: '92%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
@@ -654,11 +696,15 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                       <td style={{ padding: '13px 14px' }}><RoleBadge rol={u.rol} /></td>
                       <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{formatTimeAgo(u.last_login)}</td>
                       <td style={{ padding: '13px 14px' }}><StatusBadge estado={u.estado} /></td>
-                      <td style={{ padding: '13px 14px', borderRadius: '0 10px 10px 0' }}>
+                      {/* Las acciones no se parten en dos líneas: doblaban el alto de
+                          cada fila. La tabla se dimensiona sola y ya vive dentro de un
+                          contenedor con desbordamiento, así que el ancho que necesita
+                          se lo quita a «Usuario», que va sobrado. */}
+                      <td style={{ padding: '13px 14px', borderRadius: '0 10px 10px 0', whiteSpace: 'nowrap' }}>
                         {actionLoading === u.email ? (
                           <span style={{ color: 'var(--text-secondary)', fontSize: '0.83rem' }}>Procesando…</span>
                         ) : (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'nowrap', alignItems: 'center' }}>
                             {u.estado === 'Pendiente' && (
                               <>
                                 <button onClick={() => requestAction(u.email, 'approve', u.nombre)} style={{
@@ -705,6 +751,26 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                                 onMouseEnter={e => { e.target.style.background = '#ef4444'; e.target.style.color = '#fff'; e.target.style.boxShadow = '0 4px 12px rgba(239,68,68,0.4)'; }}
                                 onMouseLeave={e => { e.target.style.background = 'rgba(239,68,68,0.08)'; e.target.style.color = '#ef4444'; e.target.style.boxShadow = 'none'; }}>
                                 <MinusCircle size={14} /> Desactivar
+                              </button>
+                            )}
+                            {/* Solo el icono: con su rótulo entero doblaba el alto de
+                                cada fila y ponía una acción delicada a un clic de
+                                distancia en las ciento y pico. El nombre vive en el
+                                `title` y en la etiqueta accesible. */}
+                            {u.email !== usuarioActual.email && u.estado !== 'Pendiente' && (
+                              <button onClick={() => reiniciarContrasena(u)}
+                                title={`Reiniciar la contraseña de ${u.nombre}`}
+                                aria-label={`Reiniciar la contraseña de ${u.nombre}`}
+                                style={{
+                                  width: '30px', height: '30px', padding: 0, borderRadius: '8px',
+                                  border: '1px solid var(--kapital-border)', background: 'transparent',
+                                  color: 'var(--text-secondary)', cursor: 'pointer', flexShrink: 0,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  transition: 'all 0.18s'
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,158,11,0.12)'; e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.borderColor = '#f59e0b55'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.borderColor = 'var(--kapital-border)'; }}>
+                                <KeyRound size={14} aria-hidden="true" />
                               </button>
                             )}
                             {(u.estado === 'Inactivo' || u.estado === 'Rechazado') && u.email !== usuarioActual.email && (

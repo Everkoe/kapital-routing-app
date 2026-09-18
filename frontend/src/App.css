@@ -2445,3 +2445,60 @@ select.campo-pendiente {
   .unidad-alta { max-width: none; max-height: 100vh; height: 100vh; border-radius: 0; }
   .unidad-alta-campos, .unidad-alta-docs { grid-template-columns: 1fr; }
 }
+
+/* --- Contraseña provisional de un reinicio ---------------------------------
+   Se muestra una sola vez y su destino es dictarse por teléfono, así que la
+   clave va grande, en monoespaciada y con holgura entre caracteres. */
+.provisional-card {
+  max-width: 420px;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  gap: 14px;
+}
+.provisional-cerrar { position: absolute; top: 12px; right: 12px; }
+.provisional-icono {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warning, #f59e0b);
+}
+.provisional-titulo { margin: 0; color: var(--text-primary); font-size: 1.15rem; }
+.provisional-sub {
+  margin: 0; color: var(--text-secondary);
+  font-size: 0.88rem; line-height: 1.55;
+}
+.provisional-clave {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  justify-content: center; width: 100%;
+  background: var(--kapital-bg);
+  border: 1px dashed var(--kapital-border);
+  border-radius: 12px;
+  padding: 16px 14px;
+}
+.provisional-clave code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.45rem; font-weight: 700; letter-spacing: 0.16em;
+  color: var(--text-primary); word-break: break-all;
+}
+.provisional-copiar {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg); color: var(--text-secondary);
+  font-size: 0.8rem; font-weight: 600; transition: opacity 0.18s;
+}
+.provisional-copiar:hover { opacity: 0.75; }
+.provisional-aviso {
+  margin: 0; font-size: 0.82rem; line-height: 1.5;
+  color: var(--warning, #f59e0b);
+}
+.provisional-sesiones {
+  margin: 0; font-size: 0.8rem; color: var(--text-secondary);
+}
+.provisional-listo {
+  width: 100%; padding: 11px; border-radius: 10px; cursor: pointer;
+  border: none; background: var(--primary); color: var(--kapital-bg);
+  font-weight: 700; font-size: 0.9rem; transition: opacity 0.18s;
+}
+.provisional-listo:hover { opacity: 0.88; }
