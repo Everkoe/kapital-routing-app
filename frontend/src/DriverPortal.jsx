@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import DocumentResubmission from './components/DocumentResubmission';
-import { documentosRequeridos } from './constants/camposOnboarding';
+import { documentoEntregado, documentosRequeridos } from './constants/camposOnboarding';
 import SwipeablePassenger from './components/SwipeablePassenger';
 import ZenModeView from './components/ZenModeView';
 import { LogOut, Sun, Moon, Pencil, MapPin, MessageCircle, Phone, Navigation, AlertTriangle, Play, Bell } from 'lucide-react';
@@ -509,7 +509,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const REQUIRED_DOCS = documentosRequeridos();
 
   const hasMissingDocs = REQUIRED_DOCS.some(key => {
-    const hasDoc = !!usuario?.perfil_conductor?.[key];
+    const hasDoc = documentoEntregado(key, usuario?.perfil_conductor);
     const isPendingOrRejected = usuario?.perfil_conductor?.revision_docs?.[key]?.estado;
     return !hasDoc && !isPendingOrRejected;
   });

@@ -6,6 +6,7 @@ import {
   ESTADO_OK,
   ayudaDeCampo,
   camposPendientes,
+  documentoEntregado,
   documentosRequeridos,
   estadoDeCampo,
   progresoDe,
@@ -125,4 +126,37 @@ test('ni los reversos ni los documentos opcionales bloquean el perfil', () => {
                        'revisionTecnica', 'cuestionarioManejoDefensivo']) {
     assert.equal(documentosRequeridos().includes(clave), false, clave);
   }
+});
+
+test('el DNI subido en una sola imagen ya no se pide por caras', () => {
+  // Lo que se veía: el conductor subía «Completo», la pestaña quedaba con su
+  // visto, y la tarjeta seguía en ámbar pidiendo el anverso. La regla del alta
+  // solo miraba `dniScaneado`, así que daba por faltante lo ya entregado.
+  const datos = { ...altaCompleta(), dniScaneado: null, dniScaneadoCompleto: { name: 'dni.jpg' } };
+
+  assert.equal(estadoDeCampo('dniScaneado', datos), ESTADO_OK);
+  assert.equal(ayudaDeCampo('dniScaneado', datos), '');
+  assert.equal(progresoDe(datos), 100, 'no puede faltar nada para enviar');
+  assert.ok(!camposPendientes(datos).some((r) => r.campo === 'dniScaneado'));
+});
+
+test('sin ninguna de las dos formas, el DNI sigue faltando', () => {
+  const datos = { ...altaCompleta(), dniScaneado: null };
+
+  assert.equal(estadoDeCampo('dniScaneado', datos), ESTADO_FALTA);
+  assert.equal(ayudaDeCampo('dniScaneado', datos), 'Falta completar este dato.');
+});
+
+test('solo los documentos de dos caras admiten la imagen completa', () => {
+  // El SOAT es papel: no tiene anverso ni reverso, así que un
+  // `soatCompleto` no existe y no puede darlo por entregado.
+  assert.deepEqual(documentoEntregado('soat', { soatCompleto: { name: 'x.pdf' } }), false);
+  assert.equal(documentoEntregado('soat', { soat: { name: 'x.pdf' } }), true);
+
+  // La licencia y la tarjeta de propiedad sí, igual que el DNI.
+  assert.equal(documentoEntregado('licenciaConducir', { licenciaConducirCompleto: { path: 'a/b' } }), true);
+  assert.equal(documentoEntregado('tarjetaPropiedad', { tarjetaPropiedadCompleto: { path: 'a/b' } }), true);
+
+  // Y un campo que no es un documento del catálogo no inventa hermanos.
+  assert.equal(documentoEntregado('nombres', { nombresCompleto: { name: 'x' } }), false);
 });

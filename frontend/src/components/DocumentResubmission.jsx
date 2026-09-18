@@ -4,7 +4,7 @@ import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
-import { documentosRequeridos } from '../constants/camposOnboarding';
+import { documentoEntregado, documentosRequeridos } from '../constants/camposOnboarding';
 import { subirDocumento } from '../utils/documentoStorage';
 import DocumentViewer from './DocumentViewer';
 
@@ -48,7 +48,7 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
     // Si Administración lo marcó, manda su marca, sea el documento que sea.
     if (revision) return revision.estado?.toLowerCase() === 'faltante';
     if (!requeridos.has(key)) return false;
-    return !usuario?.perfil_conductor?.[key];
+    return !documentoEntregado(key, usuario?.perfil_conductor);
   });
   const hasRejectedOrMissing = rejectedDocs.length > 0 || missingDocs.length > 0;
 

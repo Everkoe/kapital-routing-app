@@ -5,7 +5,7 @@ import {
   CARA_COMPLETO,
   CARA_DETRAS,
   carasDeDocumento,
-  caraDestinoParaArrastre,
+  caraInicial,
 } from '../constants/documentosConductor';
 import { tieneContenido } from '../utils/documentoArchivo';
 
@@ -57,7 +57,9 @@ const DocumentoMultiCara = ({
 
   // Se abre por la primera cara que falta: quien llega con todo a medias
   // empieza donde toca, y quien ya subió delante ve directamente el reverso.
-  const [activa, setActiva] = useState(() => caraDestinoParaArrastre(caras));
+  // Salvo que ya haya subido la imagen con ambas caras, en cuyo caso no falta
+  // ninguna y se abre por ella.
+  const [activa, setActiva] = useState(() => caraInicial(caras));
   const cara = caras.find((c) => c.campo === activa) || caras[0];
   const variasCaras = caras.length > 1;
 
