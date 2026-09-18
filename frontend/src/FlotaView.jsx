@@ -1099,11 +1099,12 @@ const FlotaView = ({ usuario, initialBase }) => {
         onClose={() => setViendoDocumento(null)}
       />
 
-      <RegistroDeUnidad
-        abierto={showModal}
-        onCerrar={() => setShowModal(false)}
-        onRegistrada={() => fetchFlota()}
-      />
+      {showModal && (
+        <RegistroDeUnidad
+          onCerrar={() => setShowModal(false)}
+          onRegistrada={() => fetchFlota()}
+        />
+      )}
 
 
     </div>

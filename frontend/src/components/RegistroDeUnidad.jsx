@@ -26,11 +26,21 @@ import {
  */
 
 const DATOS_VACIOS = {
-  padron: '', placa: '', chofer: '', telefono: '', tipo: TIPOS_DE_UNIDAD[0], capacidad: '',
+  padron: '', placa: '', chofer: '', dni: '', telefono: '', password: '',
+  tipo: TIPOS_DE_UNIDAD[0], capacidad: '',
 };
 
-const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
-  const [datos, setDatos] = useState(DATOS_VACIOS);
+/**
+ * Quien usa este componente lo monta solo mientras está abierto, así que cada
+ * apertura empieza de cero por construcción. Reiniciar el formulario con un
+ * efecto era el antipatrón que la regla de hooks señala, y además dejaba un
+ * parpadeo con los datos de la unidad anterior.
+ */
+const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
+  const [datos, setDatos] = useState(() => ({
+    ...DATOS_VACIOS,
+    capacidad: String(CAPACIDAD_SUGERIDA[TIPOS_DE_UNIDAD[0]] ?? ''),
+  }));
   const [archivos, setArchivos] = useState({});
   const [fechas, setFechas] = useState({});
   const [errores, setErrores] = useState({});
@@ -41,17 +51,7 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
   const primerCampo = useRef(null);
   const focoPrevio = useRef(null);
 
-  // Cada apertura empieza de cero: sin esto, los datos de la unidad anterior
-  // seguían en el formulario al volver a abrirlo.
   useEffect(() => {
-    if (!abierto) return undefined;
-
-    setDatos({ ...DATOS_VACIOS, capacidad: String(CAPACIDAD_SUGERIDA[TIPOS_DE_UNIDAD[0]] ?? '') });
-    setArchivos({});
-    setFechas({});
-    setErrores({});
-    setConfirmandoSalida(false);
-
     focoPrevio.current = document.activeElement;
     const overflowPrevio = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -62,7 +62,7 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
       document.body.style.overflow = overflowPrevio;
       if (focoPrevio.current instanceof HTMLElement) focoPrevio.current.focus();
     };
-  }, [abierto]);
+  }, []);
 
   const hayCambios = tieneCambios(datos, archivos)
     || Object.values(fechas).some(Boolean);
@@ -77,7 +77,6 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
   };
 
   useEffect(() => {
-    if (!abierto) return undefined;
     const alPulsar = (evento) => {
       if (evento.key === 'Escape') intentarCerrar();
       // El foco no sale del modal mientras está abierto.
@@ -145,6 +144,8 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
           placa: normalizarCodigo(datos.placa),
           chofer: datos.chofer.trim(),
           telefono: datos.telefono.trim(),
+          dni: datos.dni.trim(),
+          password: datos.password,
           tipo: datos.tipo,
           capacidad: Number.parseInt(datos.capacidad, 10),
           ...Object.fromEntries(DOCUMENTOS_DE_UNIDAD.map(({ campo }) => [campo, fechas[campo] || ''])),
@@ -179,8 +180,6 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
       setGuardando(false);
     }
   };
-
-  if (!abierto) return null;
 
   const campo = (nombre, etiqueta, extra = {}) => {
     const id = `unidad-${nombre}`;
@@ -230,7 +229,10 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
 
         <div className="unidad-alta-cuerpo">
           <section>
-            <h4 className="unidad-alta-seccion">Datos del conductor y la unidad</h4>
+            <h4 className="unidad-alta-seccion">
+              Datos del conductor y la unidad
+              <span className="unidad-opcional"> (se crea su cuenta para que pueda entrar)</span>
+            </h4>
             <div className="unidad-alta-campos">
               {campo('padron', 'Padrón', { placeholder: 'Ej. K-027', obligatorio: true })}
               {campo('placa', 'Placa del vehículo', { placeholder: 'Ej. BUR-628', obligatorio: true })}
@@ -246,7 +248,13 @@ const RegistroDeUnidad = ({ abierto, onCerrar, onRegistrada }) => {
               {/* La capacidad va pegada al tipo: las dos describen el vehículo.
                   El teléfono es del conductor y cierra la fila. */}
               {campo('capacidad', 'Capacidad (pasajeros)', { placeholder: 'Ej. 4', obligatorio: true, type: 'number', min: '1' })}
-              {campo('telefono', 'Teléfono WhatsApp', { placeholder: 'Ej. 987654321', opcional: true, inputMode: 'tel' })}
+              {campo('telefono', 'Teléfono de contacto', { placeholder: 'Ej. 987654321', obligatorio: true, inputMode: 'tel' })}
+
+              {/* La cuenta se crea con la unidad: el conductor entra con su DNI
+                  y la contraseña que se ponga aquí es provisional, porque el
+                  sistema le pide cambiarla la primera vez que entra. */}
+              {campo('dni', 'DNI del conductor', { placeholder: 'Ej. 45757485', obligatorio: true, inputMode: 'numeric' })}
+              {campo('password', 'Contraseña provisional', { placeholder: 'La cambiará al entrar', obligatorio: true, type: 'password' })}
             </div>
           </section>
 

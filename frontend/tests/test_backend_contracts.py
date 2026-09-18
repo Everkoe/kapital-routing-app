@@ -2277,6 +2277,53 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("BUR-628", placa.exception.detail)
         self.assertIn("K-500", placa.exception.detail, "dice en qué unidad está esa placa")
 
+    def test_registering_a_unit_creates_the_driver_account(self):
+        """Una unidad sin cuenta deja a su conductor sin poder entrar."""
+        with mock.patch.dict(backend.conductores_db, {}, clear=True),                 mock.patch.dict(backend.usuarios_db, {}, clear=True):
+            asyncio.run(self._alta(
+                padron="K-600", placa="AAA-222", chofer="JUAN PEREZ", tipo="AUTO",
+                capacidad=4, telefono="987654321", dni="45757485", password="kapital1",
+            ))
+            cuenta = backend.usuarios_db["45757485"]
+
+        self.assertEqual(cuenta["rol"], "Conductor")
+        self.assertEqual(cuenta["estado"], "Activo")
+        self.assertEqual(cuenta["unidad_id"], "K-600", "queda ligada a su unidad")
+        self.assertEqual(cuenta["nombre"], "JUAN PEREZ")
+        # La contraseña la pone Administración, así que es provisional.
+        self.assertTrue(cuenta["needs_password_change"])
+
+    def test_a_duplicated_document_never_overwrites_an_existing_account(self):
+        existente = {"45757485": {"rol": "Conductor", "nombre": "OTRO", "dni": "45757485"}}
+        with mock.patch.dict(backend.conductores_db, {}, clear=True),                 mock.patch.dict(backend.usuarios_db, existente, clear=True):
+            with self.assertRaises(HTTPException) as error:
+                asyncio.run(self._alta(
+                    padron="K-601", placa="BBB-333", chofer="JUAN", tipo="AUTO",
+                    capacidad=4, dni="45757485", password="kapital1",
+                ))
+            self.assertEqual(backend.usuarios_db["45757485"]["nombre"], "OTRO", "intacta")
+            self.assertNotIn("K-601", backend.conductores_db, "ni se crea la unidad")
+        self.assertEqual(error.exception.status_code, 409)
+
+    def test_a_unit_without_an_account_still_registers(self):
+        """Las 108 del Excel se dieron de alta sin cuenta: sigue siendo válido."""
+        with mock.patch.dict(backend.conductores_db, {}, clear=True),                 mock.patch.dict(backend.usuarios_db, {}, clear=True):
+            asyncio.run(self._alta(padron="K-602", placa="CCC-444", chofer="X", tipo="AUTO", capacidad=4))
+            self.assertIn("K-602", backend.conductores_db)
+            self.assertEqual(backend.usuarios_db, {})
+
+    def test_an_account_without_a_usable_password_is_refused(self):
+        for dni, password in [("45757485", ""), ("45757485", "abc"), ("", "kapital1")]:
+            with self.subTest(dni=dni, password=password):
+                with mock.patch.dict(backend.conductores_db, {}, clear=True),                         mock.patch.dict(backend.usuarios_db, {}, clear=True):
+                    with self.assertRaises(HTTPException) as error:
+                        asyncio.run(self._alta(
+                            padron="K-603", placa="DDD-555", chofer="X", tipo="AUTO",
+                            capacidad=4, dni=dni, password=password,
+                        ))
+                    self.assertEqual(error.exception.status_code, 400)
+                    self.assertNotIn("K-603", backend.conductores_db)
+
     def test_registering_a_unit_no_longer_asks_for_the_atu(self):
         with mock.patch.dict(backend.conductores_db, {}, clear=True):
             asyncio.run(self._alta(padron="K-502", placa="AAA-111", chofer="X", tipo="AUTO", capacidad=4))

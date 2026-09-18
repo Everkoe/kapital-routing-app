@@ -14,7 +14,8 @@ import {
 /** Un alta mínima que debe poder registrarse. */
 const altaValida = () => ({
   padron: 'K-500', placa: 'ABC-123', chofer: 'JUAN PEREZ',
-  telefono: '', tipo: 'AUTO', capacidad: '4',
+  telefono: '987654321', tipo: 'AUTO', capacidad: '4',
+  dni: '45757485', password: 'kapital1',
 });
 
 test('padrón y placa son campos distintos y los dos obligatorios', () => {
@@ -55,10 +56,27 @@ test('la capacidad solo admite enteros positivos dentro del tope', () => {
   }
 });
 
-test('el teléfono es opcional, pero a medias no vale', () => {
-  assert.equal(erroresDeUnidad({ ...altaValida(), telefono: '' }).telefono, undefined);
-  assert.equal(erroresDeUnidad({ ...altaValida(), telefono: '987654321' }).telefono, undefined);
+test('el teléfono de contacto es obligatorio y completo', () => {
+  // Es por donde se avisa de una reasignación o una emergencia: sin él la
+  // unidad queda incomunicada.
+  assert.ok(erroresDeUnidad({ ...altaValida(), telefono: '' }).telefono);
   assert.ok(erroresDeUnidad({ ...altaValida(), telefono: '9876' }).telefono);
+  assert.equal(erroresDeUnidad({ ...altaValida(), telefono: '987654321' }).telefono, undefined);
+});
+
+test('el alta exige DNI y contraseña para crear la cuenta del conductor', () => {
+  // Sin cuenta, la unidad nace con un conductor que no puede entrar a subir su
+  // documentación.
+  assert.ok(erroresDeUnidad({ ...altaValida(), dni: '' }).dni);
+  assert.ok(erroresDeUnidad({ ...altaValida(), dni: '4575' }).dni, 'un DNI a medias no vale');
+  assert.ok(erroresDeUnidad({ ...altaValida(), dni: '457574850' }).dni, 'ni uno de más');
+  assert.ok(erroresDeUnidad({ ...altaValida(), password: '' }).password);
+  assert.ok(erroresDeUnidad({ ...altaValida(), password: 'ab' }).password);
+});
+
+test('el DNI admite el formato con el que se escribe a mano', () => {
+  assert.equal(erroresDeUnidad({ ...altaValida(), dni: '45.757.485' }).dni, undefined);
+  assert.equal(erroresDeUnidad({ ...altaValida(), dni: ' 45757485 ' }).dni, undefined);
 });
 
 test('el formulario solo pide los tres documentos de la unidad', () => {

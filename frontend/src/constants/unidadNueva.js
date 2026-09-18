@@ -23,6 +23,12 @@ export const CAPACIDAD_SUGERIDA = {
 /** Tope operativo: por encima deja de ser una unidad de esta flota. */
 export const CAPACIDAD_MAXIMA = 20;
 
+/** Longitud de un DNI peruano. */
+export const LARGO_DNI = 8;
+
+/** Mínimo de la contraseña, el mismo que el resto de la aplicación. */
+export const LARGO_MINIMO_CONTRASENA = 4;
+
 /** Documentos de la unidad que el alta puede recoger, con su vencimiento. */
 export const DOCUMENTOS_DE_UNIDAD = [
   { campo: 'soat', etiqueta: 'SOAT', archivo: 'soat_doc' },
@@ -61,10 +67,27 @@ export const erroresDeUnidad = (datos) => {
     errores.capacidad = `Debe ser un número entero entre 1 y ${CAPACIDAD_MAXIMA}.`;
   }
 
-  // El teléfono es opcional, pero escrito a medias no sirve para nada.
+  // El teléfono es el contacto de la unidad: sin él no hay forma de avisar al
+  // conductor de una reasignación ni de una emergencia.
   const telefono = limpio(datos.telefono).replace(/\D/g, '');
-  if (limpio(datos.telefono) && telefono.length < 9) {
-    errores.telefono = 'Escribe el número completo o déjalo vacío.';
+  if (!telefono) {
+    errores.telefono = 'El teléfono de contacto es obligatorio.';
+  } else if (telefono.length < 9) {
+    errores.telefono = 'Escribe el número completo.';
+  }
+
+  // La cuenta se crea con la unidad: el conductor entra con su DNI.
+  const dni = limpio(datos.dni).replace(/\D/g, '');
+  if (!dni) {
+    errores.dni = 'El DNI es obligatorio.';
+  } else if (dni.length !== LARGO_DNI) {
+    errores.dni = `El DNI tiene ${LARGO_DNI} dígitos.`;
+  }
+
+  if (!limpio(datos.password)) {
+    errores.password = 'Define una contraseña provisional.';
+  } else if (datos.password.length < LARGO_MINIMO_CONTRASENA) {
+    errores.password = `Debe tener al menos ${LARGO_MINIMO_CONTRASENA} caracteres.`;
   }
 
   return errores;

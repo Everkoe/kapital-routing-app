@@ -2321,7 +2321,7 @@ select.campo-pendiente {
 .unidad-alta {
   position: relative;
   display: flex; flex-direction: column;
-  width: 100%; max-width: 1040px; max-height: 85vh;
+  width: 100%; max-width: 1040px; max-height: 90vh;
   text-align: left;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -2333,17 +2333,17 @@ select.campo-pendiente {
   padding: 18px 26px; border-bottom: 1px solid var(--border-color);
 }
 .unidad-alta-cabecera h3 { margin: 0; font-size: 1.2rem; color: var(--text-primary); }
-.unidad-alta-cuerpo { flex: 1; padding: 20px 26px; overflow-y: auto; }
+.unidad-alta-cuerpo { flex: 1; padding: 18px 26px; overflow-y: auto; }
 .unidad-alta-seccion {
   margin: 0 0 14px 0; padding-bottom: 8px;
   font-size: 0.95rem; color: var(--text-primary);
   border-bottom: 1px solid var(--border-color);
 }
-.unidad-alta-cuerpo section + section { margin-top: 20px; }
+.unidad-alta-cuerpo section + section { margin-top: 16px; }
 
 .unidad-alta-campos {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px 22px;
+  gap: 12px 22px;
 }
 .unidad-campo-alta { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .unidad-campo-alta label { font-size: 0.82rem; color: var(--text-secondary); }
@@ -2362,8 +2362,8 @@ select.campo-pendiente {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px;
 }
 .unidad-doc {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 13px; background: var(--bg);
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 12px; background: var(--bg);
   border: 1px solid var(--border-color); border-radius: 12px;
 }
 .unidad-doc-titulo { display: flex; align-items: center; gap: 10px; }
@@ -2389,8 +2389,8 @@ select.campo-pendiente {
   border: 1px solid var(--border-color); border-radius: 8px;
 }
 .unidad-doc-zona {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 13px 12px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 11px 12px; text-align: center;
   color: var(--text-secondary);
   border: 1px dashed var(--border-color); border-radius: 10px;
   transition: border-color 0.15s ease, background 0.15s ease;

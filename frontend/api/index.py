@@ -3114,6 +3114,11 @@ class FlotaRegistro(BaseModel):
     # siga registrando unidades como hasta ahora.
     padron: Optional[str] = None
     placa: str = ""
+    # Cuenta del conductor que maneja la unidad. Opcionales para no romper a un
+    # cliente viejo, pero el formulario las pide: sin ellas la unidad queda sin
+    # nadie que pueda entrar a subir su documentación.
+    dni: Optional[str] = None
+    password: Optional[str] = None
     capacidad: int
     tipo: str
     chofer: str
@@ -5338,7 +5343,7 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     # exigía el blob de usuarios; el índice de sesiones del lote anterior
     # eliminó esa dependencia, así que `require_admin_session` resuelve sin
     # cookie en cero lecturas y con cookie contra el índice.
-    await require_admin_session(session_token)
+    actor_admin = await require_admin_session(session_token)
     await reload_db(force=True)
     global conductores_db
     # Sin `padron` se usa `placa`, que es lo que mandaba el formulario antiguo.
@@ -5363,6 +5368,36 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     })
     if matricula:
         values["placa"] = matricula
+
+    # La cuenta del conductor se crea con la unidad, no después: dar de alta una
+    # unidad cuyo conductor no puede entrar deja su documentación en el aire.
+    dni = (flota.dni or "").strip()
+    conductor_nuevo = None
+    if dni or flota.password:
+        if not dni:
+            raise HTTPException(status_code=400, detail="Falta el DNI del conductor.")
+        if not flota.password or len(flota.password) < 4:
+            raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres.")
+        if get_user_by_identifier(dni):
+            raise HTTPException(status_code=409, detail=f"Ya existe una cuenta con el documento {dni}.")
+        conductor_nuevo = {
+            "identifier": dni,
+            "email": None,
+            "dni": dni,
+            "password": password_for_storage(flota.password),
+            "nombre": (flota.chofer or "").strip() or "Conductor",
+            "rol": "Conductor",
+            "telefono": (flota.telefono or "").strip(),
+            "unidad_id": unit_id,
+            "empresa_id": None,
+            "avatar": None,
+            "estado": "Activo",
+            # La contraseña la pone Administración, así que es provisional: el
+            # conductor tiene que cambiarla la primera vez que entre para que
+            # nadie más la conozca.
+            "needs_password_change": True,
+        }
+        usuarios_db[dni] = conductor_nuevo
     # Uploads remain accepted for the independent new-unit flow. They are not
     # part of FlotaUpdate and therefore cannot be changed from the pencil modal.
     for field in ("soat_doc", "revision_doc", "licencia_doc"):
@@ -5370,10 +5405,22 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
         if value is not None:
             values[field] = value
     conductores_db[unit_id] = values
+    if conductor_nuevo:
+        registrar_actividad(
+            "Unidad creada",
+            actor=actor_admin,
+            entity_type="unidad",
+            entity_id=unit_id,
+            entity_label=unit_id,
+            description=f"Alta de la unidad con la cuenta del conductor {dni}.",
+            status="success",
+        )
     try:
         stored = await _persist_and_verify_fleet(unit_id, values)
     except Exception:
         conductores_db.pop(unit_id, None)
+        if conductor_nuevo:
+            usuarios_db.pop(dni, None)
         raise
     return {"message": "Unidad agregada exitosamente", "unidad": {"unidad_id": unit_id, **stored}, "flota": conductores_db}
 
