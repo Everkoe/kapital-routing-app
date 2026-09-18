@@ -5,6 +5,8 @@ import { toast } from 'react-hot-toast';
 import { Camera, Truck, Edit3, X, FileText, Download } from 'lucide-react';
 import DocumentResubmission from './components/DocumentResubmission';
 import { apiFetch } from './utils/apiClient';
+import { subirDocumento, sinPrevisualizacion } from './utils/documentoStorage';
+import { validarArchivoDocumento } from './utils/validacionDocumento';
 
 const DOC_LABELS = {
   comprobanteDomicilio: 'Comprobante de Domicilio',
@@ -79,13 +81,38 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   };
 
 
-  const onDrop = (acceptedFiles) => {
-    const file = acceptedFiles[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => setAvatar(e.target.result);
-      reader.readAsDataURL(file);
+  /**
+   * Recibe una foto y la manda al bucket.
+   *
+   * Antes se incrustaba en base64 dentro del perfil, y como todo el estado vive
+   * en una sola fila, tres fotos llegaron a pesar 484 KB de los 571 KB de esa
+   * fila: cada lectura de la aplicación las arrastraba. Ahora se guarda la ruta.
+   *
+   * La vista previa sale del archivo del propio equipo y no del bucket, para
+   * que aparezca en el momento en vez de después de una ida y vuelta. Esa `url`
+   * se descarta al guardar: solo sirve en esta pestaña.
+   */
+  const recibirFoto = async (file, { campo, fotoDePerfil, aplicar }) => {
+    if (!file) return;
+    const problema = validarArchivoDocumento(file);
+    if (problema) {
+      toast.error(problema);
+      return;
     }
+    const previa = URL.createObjectURL(file);
+    aplicar({ name: file.name, size: file.size, type: file.type, url: previa });
+    try {
+      const guardada = await subirDocumento(file, { campo, fotoDePerfil });
+      aplicar({ ...guardada, url: previa });
+    } catch (error) {
+      aplicar(null);
+      URL.revokeObjectURL(previa);
+      toast.error(error?.message || 'No se pudo subir la foto.');
+    }
+  };
+
+  const onDrop = (acceptedFiles) => {
+    recibirFoto(acceptedFiles[0], { campo: 'avatar', fotoDePerfil: true, aplicar: setAvatar });
   };
 
   const handleHabilitarVehiculo2 = async (e) => {
@@ -129,12 +156,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: {'image/*': []}, maxFiles: 1 });
 
   const onDropVehiculo = (acceptedFiles) => {
-    const file = acceptedFiles[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => setFotoVehiculo(e.target.result);
-      reader.readAsDataURL(file);
-    }
+    recibirFoto(acceptedFiles[0], { campo: 'fotoVehiculo', fotoDePerfil: false, aplicar: setFotoVehiculo });
   };
   const { getRootProps: getRootPropsVehiculo, getInputProps: getInputPropsVehiculo, isDragActive: isDragActiveVehiculo } = useDropzone({ onDrop: onDropVehiculo, accept: {'image/*': []}, maxFiles: 1 });
 
@@ -158,8 +180,9 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
         nombre: formData.nombre !== usuario.nombre ? formData.nombre : undefined,
         current_password: formData.current_password || undefined,
         new_password: formData.new_password || undefined,
-        avatar: avatar !== usuario.avatar ? avatar : undefined,
-        fotoVehiculo: fotoVehiculo !== usuario.perfil_conductor?.fotoVehiculo ? fotoVehiculo : undefined
+        avatar: avatar !== usuario.avatar ? sinPrevisualizacion(avatar) : undefined,
+        fotoVehiculo: fotoVehiculo !== usuario.perfil_conductor?.fotoVehiculo
+          ? sinPrevisualizacion(fotoVehiculo) : undefined
       };
 
       let data;
@@ -242,7 +265,7 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
                   <input {...getInputProps()} />
                   <div className="photo-preview-circle">
                     {avatar ? (
-                      <img src={avatar} alt="Avatar" className="photo-preview-img" />
+                      <ImagenGuardada imagen={avatar} alt="Avatar" className="photo-preview-img" />
                     ) : (
                       <div className="photo-placeholder-circle">
                         <span className="photo-placeholder-initial">{usuario.nombre.charAt(0).toUpperCase()}</span>

@@ -2142,6 +2142,68 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # Con la exigencia desactivada no hay actor: se conserva el rollback.
         self.assertTrue(backend._puede_ver_unidad(None, "K-142"))
 
+    def test_a_profile_photo_is_reachable_by_anyone_with_a_session(self):
+        """La foto de perfil no hereda el gateo por unidad de los documentos.
+
+        El cliente ve la foto del conductor de su ruta, y así era cuando la
+        foto viajaba incrustada en la fila. Si al llevarla al bucket pasara a
+        pedir permiso sobre la unidad, se rompería justo para quien más la mira.
+        """
+        cliente = {"rol": "Cliente", "email": "cliente@empresa.com"}
+        conductor = {"rol": "Conductor", "unidad_id": "K-027"}
+
+        self.assertTrue(backend._puede_ver_unidad(cliente, backend.CARPETA_AVATARES))
+        self.assertTrue(backend._puede_ver_unidad(conductor, backend.CARPETA_AVATARES))
+
+        # Lo que no cambia: los documentos de otra unidad siguen cerrados.
+        self.assertFalse(backend._puede_ver_unidad(cliente, "K-027"))
+
+    def test_a_profile_photo_goes_to_the_uploaders_own_folder(self):
+        """Nadie sube la foto de otro, así que el destino sale de la sesión.
+
+        Un administrador no tiene unidad: por la vía de los documentos se
+        quedaba sin destino y la subida fallaba con «Falta la unidad».
+        """
+        admin = {"rol": "Administrador", "email": "admin@kapital.com"}
+        conductor = {"rol": "Conductor", "unidad_id": "K-027", "email": "c@kapital.com"}
+
+        ruta_admin = backend._ruta_de_avatar(admin, "foto.JPG")
+        ruta_conductor = backend._ruta_de_avatar(conductor, "foto.jpg")
+
+        for ruta in (ruta_admin, ruta_conductor):
+            self.assertTrue(ruta.startswith(backend.CARPETA_AVATARES + "/"))
+            self.assertEqual(ruta.count("/"), 1)
+            self.assertNotIn("..", ruta)
+
+        self.assertNotEqual(ruta_admin, ruta_conductor, "cada uno la suya")
+        # El correo no puede aparecer en claro: la ruta viaja al navegador.
+        self.assertNotIn("admin", ruta_admin.split("/")[1])
+        self.assertNotIn("kapital.com", ruta_admin)
+
+    def test_saving_a_photo_never_puts_its_bytes_back_in_the_row(self):
+        """Tres fotos incrustadas pesaban 484 KB de los 571 KB de la fila.
+
+        Si al guardar se colara otra vez el base64, el ahorro se desharía solo.
+        """
+        guardada = backend._foto_guardable({
+            "name": "yo.jpg", "size": 1234, "type": "image/jpeg",
+            "path": "avatares/usuario-abc.jpg",
+            "base64": "data:image/jpeg;base64," + "A" * 100000,
+            "url": "blob:http://localhost/9f8e",
+        })
+
+        self.assertEqual(guardada, {"name": "yo.jpg", "size": 1234,
+                                    "type": "image/jpeg",
+                                    "path": "avatares/usuario-abc.jpg"})
+        self.assertNotIn("base64", guardada)
+        self.assertNotIn("url", guardada, "la vista previa solo vive en su pestaña")
+
+        # El formato viejo se deja pasar: una pestaña abierta desde antes del
+        # despliegue debe poder seguir guardando.
+        vieja = "data:image/jpeg;base64,AAAA"
+        self.assertEqual(backend._foto_guardable(vieja), vieja)
+        self.assertIsNone(backend._foto_guardable(None))
+
     def test_resubmitting_a_profile_never_orphans_a_stored_document(self):
         """El formulario reenviaba fichas sin ruta y el archivo quedaba huérfano.
 

@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, Truck, Shield, Searc
 import { GlobalLoader } from './GlobalLoader';
 import { apiFetch } from '../utils/apiClient';
 import RevisionDocumentosConductor from './RevisionDocumentosConductor';
+import ImagenGuardada from './ImagenGuardada';
 
 const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
   if (!isOpen) return null;
@@ -630,7 +631,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                       <td style={{ padding: '13px 14px', borderRadius: '10px 0 0 10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           {u.avatar ? (
-                            <img src={u.avatar} alt={u.nombre}
+                            <ImagenGuardada imagen={u.avatar} alt={u.nombre}
                               style={{
                                 width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
                                 objectFit: 'cover',

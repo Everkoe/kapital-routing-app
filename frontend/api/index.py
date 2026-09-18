@@ -5,7 +5,7 @@ from fastapi import Request
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Annotated, Dict, Any, List, Optional, Mapping
+from typing import Annotated, Dict, Any, List, Optional, Mapping, Union
 
 import asyncio
 import httpx
@@ -3312,10 +3312,29 @@ class UsuarioUpdate(BaseModel):
     nombre: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
-    avatar: Optional[str] = None
-    fotoVehiculo: Optional[str] = None
+    # Una foto llega como `{name, size, type, path}` desde que vive en Storage.
+    # Se sigue admitiendo la cadena base64 de antes para no romper una pestaña
+    # que lleve abierta desde el despliegue anterior.
+    avatar: Optional[Union[str, Dict[str, Any]]] = None
+    fotoVehiculo: Optional[Union[str, Dict[str, Any]]] = None
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
+
+def _foto_guardable(foto: Any) -> Any:
+    """Lo que de una foto se puede guardar en la fila.
+
+    De un objeto se conserva la referencia al archivo y se descartan los bytes:
+    `base64` volvería a engordar la fila —que es justo lo que se arregló al
+    llevarlas al bucket— y `url` es una vista previa local que solo existe en la
+    pestaña que la creó, así que guardarla dejaría un enlace muerto.
+
+    Una cadena se deja pasar tal cual. Es el formato viejo, y rechazarlo
+    rompería a quien todavía tenga cargada la versión anterior de la página.
+    """
+    if not isinstance(foto, dict):
+        return foto
+    return {k: v for k, v in foto.items() if k not in ("base64", "url")}
+
 
 class ChangePasswordRequest(BaseModel):
     identifier: str
@@ -3756,11 +3775,11 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
         user["password"] = password_for_storage(update_data.new_password)
 
     if update_data.nombre: user["nombre"] = update_data.nombre
-    if update_data.avatar: user["avatar"] = update_data.avatar
+    if update_data.avatar: user["avatar"] = _foto_guardable(update_data.avatar)
     if update_data.fotoVehiculo:
         if "perfil_conductor" not in user:
             user["perfil_conductor"] = {}
-        user["perfil_conductor"]["fotoVehiculo"] = update_data.fotoVehiculo
+        user["perfil_conductor"]["fotoVehiculo"] = _foto_guardable(update_data.fotoVehiculo)
     if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
 
     await persist_users_only()
@@ -4351,6 +4370,9 @@ class DocumentoSubida(BaseModel):
     nombre: str
     tipo: str
     base64: str
+    # Una foto de perfil no es un documento: no se sube en nombre de nadie y no
+    # se guarda en la carpeta de una unidad. Ver `CARPETA_AVATARES`.
+    foto_de_perfil: bool = False
 
 
 def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
@@ -4368,6 +4390,18 @@ def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
         if 1 <= len(cruda) <= 5 and cruda.isalnum():
             extension = f".{cruda}"
     return f"{carpeta}/{campo_limpio}{extension}"
+
+
+# Las fotos de perfil viven aparte de los documentos.
+#
+# Un documento es de una unidad y solo lo ve quien tiene que revisarlo. Una foto
+# de perfil la ve cualquiera que ya pueda ver ese perfil —el cliente ve la del
+# conductor de su ruta, y así era cuando iba incrustada en la fila—, así que
+# heredar el gateo por unidad la habría roto justo para quien más la mira.
+#
+# Sigue dentro del bucket privado y sigue necesitando sesión y URL firmada: lo
+# que se abre es a quién, no a todo el mundo.
+CARPETA_AVATARES = "avatares"
 
 
 def _carpeta_personal(identidad: Any) -> str:
@@ -4424,12 +4458,26 @@ def _carpeta_destino(actor: Optional[Dict[str, Any]], unidad_id: str) -> str:
     return carpetas[0]
 
 
+def _ruta_de_avatar(actor: Optional[Dict[str, Any]], nombre: str) -> str:
+    """Sitio de la foto de perfil de quien la sube.
+
+    Siempre la suya: a diferencia de un documento, administración no sube la
+    foto de otro. Por eso el destino no admite `unidad_id` y sale solo de la
+    sesión, y por eso un administrador —que no tiene unidad— también tiene
+    dónde ponerla.
+    """
+    identidad = _carpeta_personal(actor.get("email") or actor.get("identifier")) if actor else "anonimo"
+    return _ruta_de_documento(CARPETA_AVATARES, identidad, nombre)
+
+
 def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
     """Administración ve cualquier carpeta; un conductor, solo las suyas."""
     if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
         return True
     if actor.get("rol") in _ADMIN_ROLES:
         return True
+    if (unidad_id or "") == CARPETA_AVATARES:
+        return True  # ya hay sesión: ver una foto de perfil no pide más
     pedida = _owner_key(unidad_id)
     return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
@@ -4442,7 +4490,10 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
     que hacía que cada envío reescribiera una fila de casi diez megas.
     """
     actor = await require_any_session(session_token)
-    ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+    if datos.foto_de_perfil:
+        ruta = _ruta_de_avatar(actor, datos.nombre)
+    else:
+        ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
     # para el contenido de un DNI.

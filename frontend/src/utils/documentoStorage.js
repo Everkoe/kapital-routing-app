@@ -20,7 +20,7 @@ import { documentoABase64 } from './imageUtils';
  * reintroduciría el fallo que esto arregla, y encima de forma intermitente.
  * Si la subida no puede completarse, quien llama debe enterarse.
  */
-export const subirDocumento = async (file, { unidadId, campo }) => {
+export const subirDocumento = async (file, { unidadId, campo, fotoDePerfil = false }) => {
   const documento = await documentoABase64(file);
 
   const { path } = await apiFetch('/api/documentos/subir', {
@@ -31,10 +31,28 @@ export const subirDocumento = async (file, { unidadId, campo }) => {
       nombre: documento.name,
       tipo: documento.type,
       base64: documento.base64,
+      foto_de_perfil: fotoDePerfil,
     },
   });
 
   return { name: documento.name, size: documento.size, type: documento.type, path };
+};
+
+/**
+ * Lo que se guarda de una foto, sin la vista previa local.
+ *
+ * Mientras la foto sube se muestra el archivo del propio equipo, para que la
+ * vista previa aparezca al instante en vez de esperar una ida y vuelta. Esa
+ * `url` es un `blob:` que solo existe en esa pestaña: guardarla dejaría en la
+ * base un enlace que no lleva a ninguna parte.
+ */
+const SOLO_LOCAL = ['url', 'base64'];
+
+export const sinPrevisualizacion = (foto) => {
+  if (!foto || typeof foto !== 'object') return foto;
+  return Object.fromEntries(
+    Object.entries(foto).filter(([clave]) => !SOLO_LOCAL.includes(clave)),
+  );
 };
 
 /** Un documento guardado en Storage se reconoce por su ruta. */

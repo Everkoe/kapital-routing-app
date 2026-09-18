@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import { apiFetch } from './utils/apiClient';
+import ImagenGuardada from './components/ImagenGuardada';
 
 const ClientPortal = ({ usuario, onLogout }) => {
   const [rutas, setRutas] = useState([]);
@@ -144,7 +145,7 @@ const ClientPortal = ({ usuario, onLogout }) => {
                 <div className="profile-left">
                   <div className="driver-photo">
                     {conductorInfo.usuario.avatar ? (
-                      <img src={conductorInfo.usuario.avatar} alt="Conductor" />
+                      <ImagenGuardada imagen={conductorInfo.usuario.avatar} alt="Conductor" />
                     ) : (
                       <div className="avatar-placeholder">👤</div>
                     )}

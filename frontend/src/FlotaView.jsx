@@ -838,7 +838,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                 <div className="profile-left">
                   <div className="driver-photo">
                     {conductorInfo.usuario.avatar ? (
-                      <img src={conductorInfo.usuario.avatar} alt="Conductor" />
+                      <ImagenGuardada imagen={conductorInfo.usuario.avatar} alt="Conductor" />
                     ) : (
                       <div className="avatar-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={40} strokeWidth={1.5} /></div>
                     )}
