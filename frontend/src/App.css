@@ -2303,3 +2303,30 @@ select.campo-pendiente {
 }
 .historial-pagina:disabled { cursor: default; opacity: 0.45; }
 .historial-salto { padding: 0 4px; color: var(--text-secondary); }
+
+/* Barra de vigencia al pie del visor: la fecha del documento, donde se esta
+   mirando el documento, en vez de obligar a cerrar e ir a buscarla. */
+.doc-viewer-pie {
+  flex-shrink: 0;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+.doc-viewer-vigencia .campo-editable {
+  justify-content: flex-start;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.doc-viewer-vigencia input { max-width: 190px; }
+
+/* Las vigencias de la unidad, cada una con su etiqueta encima: con tres
+   columnas y etiquetas de largos distintos, en linea quedaban descuadradas. */
+/* La etiqueta ocupa su propia linea y el valor con su lapiz van juntos debajo:
+   en columna, el lapiz caia en una tercera linea, lejos de lo que edita. */
+.vigencias-unidad-lista .campo-editable { justify-content: flex-start; gap: 6px; }
+.vigencias-unidad-lista .campo-editable strong {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.vigencias-unidad-lista .campo-editable.campo-editable-abierto strong { flex: 0 0 auto; }

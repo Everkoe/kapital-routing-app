@@ -84,6 +84,22 @@ export const claveCompleto = (key) => `${key}${SUFIJO_COMPLETO}`;
 /** Un documento de dos caras admite reverso; uno de papel, no. */
 export const admiteReverso = (documento) => documento?.tipo === TIPO_TARJETA;
 
+/**
+ * Vencimiento de la unidad que corresponde a cada documento.
+ *
+ * El archivo y su fecha son cosas distintas —uno vive en Storage, la otra en la
+ * ficha de la unidad— pero para quien revisa son lo mismo: mira el SOAT y
+ * quiere saber hasta cuándo vale. Este mapa deja abrir la fecha junto a la
+ * imagen en vez de obligar a cerrar el visor e ir a buscarla.
+ */
+export const VIGENCIA_POR_DOCUMENTO = {
+  soat: { campo: 'soat', etiqueta: 'Vencimiento del SOAT' },
+  revisionTecnica: { campo: 'revision', etiqueta: 'Vencimiento de la revisión técnica' },
+  licenciaConducir: { campo: 'licencia', etiqueta: 'Vencimiento de la licencia MTC' },
+};
+
+export const vigenciaDeDocumento = (key) => VIGENCIA_POR_DOCUMENTO[key] || null;
+
 export const documentoPorClave = (key) =>
   DOCUMENTOS_CONDUCTOR.find((documento) => documento.key === key) || null;
 

@@ -15,7 +15,7 @@ import { urlFirmada } from '../utils/documentoStorage';
  * `data:application/pdf`, así que el visor ofrece la descarga en su lugar.
  */
 
-const DocumentViewer = ({ documento, onClose }) => {
+const DocumentViewer = ({ documento, onClose, pie = null }) => {
   // El estado arranca en la primera cara y se reinicia solo: quien monta este
   // visor le pasa un `key` por documento, así React lo remonta al abrir otro.
   // Reiniciarlo con un efecto sería el antipatrón que la regla de hooks señala.
@@ -119,6 +119,9 @@ const DocumentViewer = ({ documento, onClose }) => {
             <img src={src} alt={titulo} className="doc-image" />
           )}
         </div>
+
+        {/* La vigencia del documento, donde se está mirando el documento. */}
+        {pie && <div className="doc-viewer-pie">{pie}</div>}
       </div>
     </div>
   );
