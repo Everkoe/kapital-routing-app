@@ -737,9 +737,18 @@ Responde siempre de manera concisa, profesional, y directa (sin introducciones r
 
 PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 310_000
+# Cifrar al escribir viene activado.
+#
+# Nació apagado a propósito: hasta que la lectura compatible —la que entiende
+# tanto un hash como el texto plano de antes— no estuviera desplegada, cifrar
+# habría dejado fuera a todo el mundo en un rollback. Esa lectura lleva
+# desplegada desde el PR #3, así que la precondición ya no existe y mantenerlo
+# apagado solo significaba guardar contraseñas en claro.
+#
+# La variable sigue mandando: `KAPITAL_PASSWORD_HASH_WRITE=false` lo apaga.
 PASSWORD_HASH_WRITE_ENABLED = os.environ.get(
     "KAPITAL_PASSWORD_HASH_WRITE",
-    "false",
+    "true",
 ).strip().lower() in {"1", "true", "yes", "on"}
 SESSION_COOKIE_NAME = "kapital_session"
 SESSION_TTL_HOURS = int(os.environ.get("KAPITAL_SESSION_TTL_HOURS", "12"))
@@ -2239,15 +2248,14 @@ def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[
     if include_defaults and not has_canonical_flota and not has_legacy_flota:
         if decoded["flota"] is _MISSING or not decoded["flota"]:
             decoded["flota"] = _default_fleet()
-    if "TELEPERFORMANCE" not in usuarios:
-        usuarios["TELEPERFORMANCE"] = {
-            "identifier": "TELEPERFORMANCE",
-            "password": "1234",
-            "nombre": "Cliente Teleperformance",
-            "rol": "Cliente",
-            "empresa_id": "TELEPERFORMANCE",
-            "estado": "Activo",
-        }
+    # Aquí se sembraba una cuenta «TELEPERFORMANCE» con la contraseña «1234»
+    # escrita en el código, en cada lectura del estado y en los dos decodificadores.
+    # Era una credencial conocida sobre una cuenta real y en uso, y como se
+    # reinyectaba siempre, borrarla no servía de nada: volvía sola.
+    #
+    # La cuenta existe en la fila con su propio historial, así que quitar la
+    # siembra no se la lleva por delante; solo impide que resucite. Una cuenta
+    # nueva se da de alta como cualquier otra, no apareciendo de la nada.
     return decoded
 
 
@@ -2428,15 +2436,14 @@ def _compat_users_from_projection(value: Any, operation: str) -> Dict[str, Dict[
             for identifier, user in value.items()
             if not str(identifier).startswith("__") and isinstance(user, dict)
         }
-    if "TELEPERFORMANCE" not in users:
-        users["TELEPERFORMANCE"] = {
-            "identifier": "TELEPERFORMANCE",
-            "password": "1234",
-            "nombre": "Cliente Teleperformance",
-            "rol": "Cliente",
-            "empresa_id": "TELEPERFORMANCE",
-            "estado": "Activo",
-        }
+    # Aquí se sembraba una cuenta «TELEPERFORMANCE» con la contraseña «1234»
+    # escrita en el código, en cada lectura del estado y en los dos decodificadores.
+    # Era una credencial conocida sobre una cuenta real y en uso, y como se
+    # reinyectaba siempre, borrarla no servía de nada: volvía sola.
+    #
+    # La cuenta existe en la fila con su propio historial, así que quitar la
+    # siembra no se la lleva por delante; solo impide que resucite. Una cuenta
+    # nueva se da de alta como cualquier otra, no apareciendo de la nada.
     return users
 
 
