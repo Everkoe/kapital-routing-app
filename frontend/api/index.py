@@ -5,7 +5,7 @@ from fastapi import Request
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Annotated, Dict, Any, List, Optional, Mapping
+from typing import Annotated, Dict, Any, List, Optional, Mapping, Union
 
 import asyncio
 import httpx
@@ -1169,8 +1169,13 @@ def _invalidate_db_cache() -> None:
 def _reset_db_runtime_state() -> None:
     """Reset cache/circuit state for tests and controlled local diagnostics."""
     global _db_io_lock, _db_io_lock_loop, _db_circuit_failures, _db_circuit_open_until
-    global _normalized_snapshot_ids, _normalized_snapshot_ready
+    global _normalized_snapshot_ids, _normalized_snapshot_ready, login_index
+    global _login_index_loaded_at
     _invalidate_db_cache()
+    # El índice de acceso vive en memoria entre peticiones de una misma
+    # instancia: sin limpiarlo, una prueba arrastraría el de la anterior.
+    login_index = {}
+    _login_index_loaded_at = None
     _db_io_lock = None
     _db_io_lock_loop = None
     with _db_circuit_state_lock:
@@ -1365,6 +1370,7 @@ def _state_row_or_raise(response, operation: str = "load") -> Dict[str, Any]:
         "__flota__": dict,
         "__notifications__": list,
         "__actividad__": list,
+        "__login__": dict,
     }
     for key, expected_type in reserved_shapes.items():
         if key in data["usuarios"] and not isinstance(data["usuarios"][key], expected_type):
@@ -1784,7 +1790,7 @@ def _normalized_snapshot_keys(rows_by_resource: Mapping[str, List[Dict[str, Any]
 async def _load_normalized_state_locked() -> None:
     """Load V2 resources once and atomically rebuild the legacy globals."""
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
-    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db
+    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db, login_index
     global session_index
     global _normalized_snapshot_ids, _normalized_snapshot_ready
     rows_by_resource = await _fetch_normalized_snapshot()
@@ -1797,6 +1803,7 @@ async def _load_normalized_state_locked() -> None:
     notifications_db = decoded["notifications"]
     actividad_db = decoded.get("actividad", [])
     session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
+    login_index = decoded.get("login_index") if isinstance(decoded.get("login_index"), dict) else {}
     conductores_db = decoded["flota"]
     _normalized_snapshot_ids = _normalized_snapshot_keys(rows_by_resource)
     _normalized_snapshot_ready = True
@@ -2225,6 +2232,7 @@ def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[
         "actividad": usuarios.pop("__actividad__", []),
         "flota": usuarios.pop("__flota__", data.get("flota", _MISSING)),
         "sessions": usuarios.pop("__sessions__", {}) or {},
+        "login_index": usuarios.pop("__login__", {}) or {},
         "has_canonical_flota": has_canonical_flota,
         "has_legacy_flota": has_legacy_flota,
     }
@@ -2249,7 +2257,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
         await _load_normalized_state_locked()
         return
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
-    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db
+    global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db, login_index
     global session_index
     response = await _db_http_request(
         "GET",
@@ -2270,6 +2278,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     notifications_db = decoded["notifications"]
     actividad_db = decoded.get("actividad", [])
     session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
+    login_index = decoded.get("login_index") if isinstance(decoded.get("login_index"), dict) else {}
     if decoded["flota"] is not _MISSING:
         conductores_db = decoded["flota"]
     db_loaded = True
@@ -2510,6 +2519,127 @@ async def _load_compat_users(*, force: bool = False) -> None:
         _raise_database_unavailable("load_users_projection", error=exc)
 
 
+# --- Índice de acceso ---------------------------------------------------------
+
+# Un login descargaba el bloque entero de usuarios —678 KB— para comprobar una
+# contraseña. PostgREST sí sabe devolver un solo usuario (`usuarios->"clave"`,
+# con comillas dobles: sin ellas rechaza los correos y trata los DNI como
+# índices de array), pero la clave del diccionario no siempre es lo que la
+# persona teclea: los 108 conductores importados tienen por clave un correo
+# inventado y entran con su DNI o con su correo real.
+#
+# Este índice resuelve eso: identificador -> clave de la cuenta. No guarda
+# contraseñas, ni roles, ni estados. Solo dónde mirar. La credencial se lee
+# siempre del usuario real y recién traído, así que un índice desactualizado no
+# puede dejar entrar a nadie de más: en el peor caso no encuentra la clave y se
+# cae a la lectura completa de siempre.
+login_index: Dict[str, str] = {}
+
+# El índice vive en memoria entre peticiones de una misma instancia, así que
+# caduca como el resto de cachés: si otra instancia da de alta un conductor,
+# esta lo ve en cuanto expire en vez de mandarlo a la lectura completa siempre.
+_login_index_loaded_at: Optional[float] = None
+
+
+def _alias_de_login(clave: str, usuario: Dict[str, Any]) -> List[str]:
+    """Todo lo que alguien podría teclear para entrar como este usuario."""
+    perfil = usuario.get("perfil_conductor")
+    valores = [
+        clave,
+        usuario.get("identifier"),
+        usuario.get("email"),
+        usuario.get("dni"),
+        usuario.get("login_identifier"),
+        perfil.get("numDoc") if isinstance(perfil, dict) else None,
+    ]
+    vistos = []
+    for valor in valores:
+        texto = str(valor).strip().lower() if valor is not None else ""
+        if texto and texto not in vistos:
+            vistos.append(texto)
+    return vistos
+
+
+def construir_indice_login() -> Dict[str, str]:
+    """Reconstruye el índice desde los usuarios en memoria.
+
+    Se rehace entero en cada escritura en vez de mantenerse a mano: así no hay
+    forma de que se desvíe por olvidar actualizarlo en una ruta nueva.
+    """
+    indice: Dict[str, str] = {}
+    for clave, usuario in usuarios_db.items():
+        if not isinstance(usuario, dict) or clave.startswith("__"):
+            continue
+        for alias in _alias_de_login(clave, usuario):
+            # El primero gana: si dos cuentas comparten un alias, la lectura
+            # completa desempata como lo hace hoy `get_user_by_identifier`.
+            indice.setdefault(alias, clave)
+    return indice
+
+
+async def _fetch_proyeccion_sin_respaldo(clave: str, operation: str) -> Any:
+    """Una clave reservada del bloque, o `_MISSING` si no se puede."""
+    respuesta = await _db_http_request(
+        "GET",
+        _app_state_url(select=f'usuarios->"{clave}"'),
+        operation=operation,
+        headers=HEADERS,
+        timeout=10.0,
+    )
+    if respuesta.status_code != 200:
+        return _MISSING
+    filas = respuesta.json()
+    if not isinstance(filas, list) or not filas:
+        return _MISSING
+    return _projection_value(filas[0], clave)
+
+
+async def _fetch_usuario_por_clave(clave: str) -> Any:
+    """Trae un solo usuario del bloque, sin descargar el resto.
+
+    Las comillas dobles son imprescindibles: sin ellas PostgREST rechaza las
+    claves con punto o arroba y trata un DNI como índice de un array.
+    """
+    valor = await _fetch_proyeccion_sin_respaldo(clave.replace('"', ''), "load_login_user")
+    return valor if isinstance(valor, dict) else _MISSING
+
+
+async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
+    """Resuelve un login en dos saltos pequeños, o `None` si no puede.
+
+    `None` no significa «no existe»: significa «no lo he resuelto por el atajo».
+    Quien llama debe caer entonces a la lectura completa.
+    """
+    global login_index, _login_index_loaded_at
+    buscado = str(identificador or "").strip().lower()
+    if not buscado:
+        return None
+    try:
+        if not login_index or not _cache_is_fresh(_login_index_loaded_at):
+            # Proyección directa, sin el respaldo de `_fetch_projection_value`:
+            # ese respaldo descarga el bloque entero, y entonces el atajo
+            # costaría más que el camino que intenta evitar. Si el índice no
+            # está —la primera vez, antes de la primera escritura— se abandona
+            # tras una petición de diecinueve bytes.
+            valor = await _fetch_proyeccion_sin_respaldo("__login__", "load_login_index")
+            login_index = valor if isinstance(valor, dict) else {}
+            _login_index_loaded_at = time.monotonic()
+        clave = login_index.get(buscado)
+        if not clave:
+            return None
+        usuario = await _fetch_usuario_por_clave(clave)
+        if usuario is _MISSING:
+            return None
+        # El usuario entra en memoria bajo su clave real para que el resto del
+        # endpoint —sesión, último acceso, persistencia— funcione igual.
+        usuarios_db[clave] = usuario
+        return usuario
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 - el atajo nunca debe impedir entrar
+        return None
+
+
 async def _load_compat_user(identifier: str) -> Optional[Dict[str, Any]]:
     """Load a user from the users-only compatibility projection.
 
@@ -2524,6 +2654,13 @@ async def _load_compat_user(identifier: str) -> Optional[Dict[str, Any]]:
         return get_user_by_identifier(identifier)
     if _full_cache_is_fresh() or _users_projection_is_fresh():
         return get_user_by_identifier(identifier)
+
+    # Atajo: índice de acceso más el usuario suelto, ~10 KB en vez de 678.
+    # Si no resuelve, sigue el camino de siempre.
+    por_indice = await _usuario_por_indice(identifier)
+    if por_indice is not None:
+        return por_indice
+
     try:
         await _load_compat_users()
         return get_user_by_identifier(identifier)
@@ -2926,13 +3063,25 @@ async def persist():
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
-        "__actividad__": actividad_db,
             "__actividad__": actividad_db,
             "__sessions__": session_index,
+            "__login__": _refrescar_indice_login(),
         },
         "rutas": rutas_estado_actual,
     }
     await _persist_app_state(payload, "persist")
+
+
+def _refrescar_indice_login() -> Dict[str, str]:
+    """Índice recién hecho, y de paso al día en esta instancia.
+
+    Se recalcula entero en cada escritura en vez de mantenerse a mano: así no
+    hay forma de que se desvíe por olvidar actualizarlo en una ruta nueva.
+    """
+    global login_index, _login_index_loaded_at
+    login_index = construir_indice_login()
+    _login_index_loaded_at = time.monotonic()
+    return login_index
 
 
 async def _ensure_compat_users_for_write() -> None:
@@ -2974,9 +3123,9 @@ async def persist_users_only():
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
-        "__actividad__": actividad_db,
             "__actividad__": actividad_db,
             "__sessions__": session_index,
+            "__login__": _refrescar_indice_login(),
         },
     }
     await _persist_app_state(payload, "persist_users")
@@ -2995,9 +3144,9 @@ async def persist_routes_summary(summary: list):
             "__lock__": next_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
-        "__actividad__": actividad_db,
             "__actividad__": actividad_db,
             "__sessions__": session_index,
+            "__login__": _refrescar_indice_login(),
         },
     }
     if _is_normalized_storage():
@@ -3163,10 +3312,29 @@ class UsuarioUpdate(BaseModel):
     nombre: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
-    avatar: Optional[str] = None
-    fotoVehiculo: Optional[str] = None
+    # Una foto llega como `{name, size, type, path}` desde que vive en Storage.
+    # Se sigue admitiendo la cadena base64 de antes para no romper una pestaña
+    # que lleve abierta desde el despliegue anterior.
+    avatar: Optional[Union[str, Dict[str, Any]]] = None
+    fotoVehiculo: Optional[Union[str, Dict[str, Any]]] = None
     unidad_id: Optional[str] = None
     rol: Optional[str] = None
+
+def _foto_guardable(foto: Any) -> Any:
+    """Lo que de una foto se puede guardar en la fila.
+
+    De un objeto se conserva la referencia al archivo y se descartan los bytes:
+    `base64` volvería a engordar la fila —que es justo lo que se arregló al
+    llevarlas al bucket— y `url` es una vista previa local que solo existe en la
+    pestaña que la creó, así que guardarla dejaría un enlace muerto.
+
+    Una cadena se deja pasar tal cual. Es el formato viejo, y rechazarlo
+    rompería a quien todavía tenga cargada la versión anterior de la página.
+    """
+    if not isinstance(foto, dict):
+        return foto
+    return {k: v for k, v in foto.items() if k not in ("base64", "url")}
+
 
 class ChangePasswordRequest(BaseModel):
     identifier: str
@@ -3607,11 +3775,11 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
         user["password"] = password_for_storage(update_data.new_password)
 
     if update_data.nombre: user["nombre"] = update_data.nombre
-    if update_data.avatar: user["avatar"] = update_data.avatar
+    if update_data.avatar: user["avatar"] = _foto_guardable(update_data.avatar)
     if update_data.fotoVehiculo:
         if "perfil_conductor" not in user:
             user["perfil_conductor"] = {}
-        user["perfil_conductor"]["fotoVehiculo"] = update_data.fotoVehiculo
+        user["perfil_conductor"]["fotoVehiculo"] = _foto_guardable(update_data.fotoVehiculo)
     if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
 
     await persist_users_only()
@@ -4202,6 +4370,9 @@ class DocumentoSubida(BaseModel):
     nombre: str
     tipo: str
     base64: str
+    # Una foto de perfil no es un documento: no se sube en nombre de nadie y no
+    # se guarda en la carpeta de una unidad. Ver `CARPETA_AVATARES`.
+    foto_de_perfil: bool = False
 
 
 def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
@@ -4219,6 +4390,18 @@ def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
         if 1 <= len(cruda) <= 5 and cruda.isalnum():
             extension = f".{cruda}"
     return f"{carpeta}/{campo_limpio}{extension}"
+
+
+# Las fotos de perfil viven aparte de los documentos.
+#
+# Un documento es de una unidad y solo lo ve quien tiene que revisarlo. Una foto
+# de perfil la ve cualquiera que ya pueda ver ese perfil —el cliente ve la del
+# conductor de su ruta, y así era cuando iba incrustada en la fila—, así que
+# heredar el gateo por unidad la habría roto justo para quien más la mira.
+#
+# Sigue dentro del bucket privado y sigue necesitando sesión y URL firmada: lo
+# que se abre es a quién, no a todo el mundo.
+CARPETA_AVATARES = "avatares"
 
 
 def _carpeta_personal(identidad: Any) -> str:
@@ -4275,12 +4458,26 @@ def _carpeta_destino(actor: Optional[Dict[str, Any]], unidad_id: str) -> str:
     return carpetas[0]
 
 
+def _ruta_de_avatar(actor: Optional[Dict[str, Any]], nombre: str) -> str:
+    """Sitio de la foto de perfil de quien la sube.
+
+    Siempre la suya: a diferencia de un documento, administración no sube la
+    foto de otro. Por eso el destino no admite `unidad_id` y sale solo de la
+    sesión, y por eso un administrador —que no tiene unidad— también tiene
+    dónde ponerla.
+    """
+    identidad = _carpeta_personal(actor.get("email") or actor.get("identifier")) if actor else "anonimo"
+    return _ruta_de_documento(CARPETA_AVATARES, identidad, nombre)
+
+
 def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
     """Administración ve cualquier carpeta; un conductor, solo las suyas."""
     if actor is None:  # exigencia desactivada: se conserva el rollback de fase 1
         return True
     if actor.get("rol") in _ADMIN_ROLES:
         return True
+    if (unidad_id or "") == CARPETA_AVATARES:
+        return True  # ya hay sesión: ver una foto de perfil no pide más
     pedida = _owner_key(unidad_id)
     return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
@@ -4293,7 +4490,10 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
     que hacía que cada envío reescribiera una fila de casi diez megas.
     """
     actor = await require_any_session(session_token)
-    ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+    if datos.foto_de_perfil:
+        ruta = _ruta_de_avatar(actor, datos.nombre)
+    else:
+        ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
     # para el contenido de un DNI.
@@ -4893,9 +5093,9 @@ async def publish_routes_summary(rutas: list = Body(...), session_token: Session
             "__lock__": next_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
-        "__actividad__": actividad_db,
             "__actividad__": actividad_db,
             "__sessions__": session_index,
+            "__login__": _refrescar_indice_login(),
         },
     }
     if _is_normalized_storage():
@@ -5312,9 +5512,9 @@ async def _persist_and_verify_fleet(
             "__lock__": board_lock,
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
-        "__actividad__": actividad_db,
             "__actividad__": actividad_db,
             "__sessions__": session_index,
+            "__login__": _refrescar_indice_login(),
         },
     }, "persist_fleet")
     await _load_compat_fleet(force=True)
