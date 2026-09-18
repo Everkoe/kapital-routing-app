@@ -3632,7 +3632,6 @@ _ETIQUETA_FLOTA = {
     "capacidad": "Capacidad",
     "soat": "Vencimiento SOAT",
     "revision": "Vencimiento revisión técnica",
-    "atu": "Vencimiento T.U.C. (ATU)",
     "licencia": "Vencimiento licencia MTC",
 }
 
@@ -5242,7 +5241,9 @@ async def get_conductor_info(unidad_id: str):
     }
 
 
-_FLEET_EXPIRY_FIELDS = ("soat", "revision", "atu", "licencia")
+# El T.U.C. (ATU) se retira del seguimiento: la operación dejó de usarlo. Los
+# valores ya guardados siguen en la fila pero no se leen ni se muestran.
+_FLEET_EXPIRY_FIELDS = ("soat", "revision", "licencia")
 _FLEET_EDITABLE_FIELDS = (
     "capacidad", "tipo", "chofer", "telefono", *_FLEET_EXPIRY_FIELDS,
 )
@@ -5341,7 +5342,7 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     })
     # Uploads remain accepted for the independent new-unit flow. They are not
     # part of FlotaUpdate and therefore cannot be changed from the pencil modal.
-    for field in ("soat_doc", "revision_doc", "atu_doc", "licencia_doc"):
+    for field in ("soat_doc", "revision_doc", "licencia_doc"):
         value = getattr(flota, field)
         if value is not None:
             values[field] = value

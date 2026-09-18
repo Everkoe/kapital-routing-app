@@ -1328,6 +1328,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             response = await backend.update_flota("K-027", backend.FlotaUpdate(
                 soat="2027-05-20", revision="2026-09-30",
                 atu="2028-01-01", licencia="2029-12-31", capacidad=18,
+                # El ATU se manda a propósito: un cliente viejo puede seguir
+                # enviándolo y no debe guardarse ni romper el resto.
             ))
 
         reload_db.assert_awaited_once_with(force=True)
@@ -1336,7 +1338,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         stored = payload["usuarios"]["__flota__"]["K-027"]
         self.assertEqual(stored["soat"], "2027-05-20")
         self.assertEqual(stored["revision"], "2026-09-30")
-        self.assertEqual(stored["atu"], "2028-01-01")
+        self.assertEqual(stored.get("atu", ""), "", "el T.U.C. (ATU) ya no se guarda")
         self.assertEqual(stored["licencia"], "2029-12-31")
         self.assertEqual(stored["soat_doc"], "private://soat")
         self.assertEqual(stored["metadata"], {"source": "migration"})
@@ -1405,7 +1407,10 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ))
         persist_state.assert_awaited_once()
         self.assertEqual(response["unidad"]["soat"], "")
-        self.assertEqual(response["unidad"]["atu"], "")
+        self.assertEqual(response["unidad"]["licencia"], "")
+        # El T.U.C. (ATU) se retiró del seguimiento: aunque venga en la
+        # petición, la unidad no lo guarda.
+        self.assertNotIn("atu", response["unidad"])
 
     # --- Lote 4: endpoints administrativos y de coste ---
 

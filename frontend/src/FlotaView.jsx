@@ -19,7 +19,6 @@ import './App.css';
 const VIGENCIAS_DE_UNIDAD = [
   { campo: 'soat', etiqueta: 'SOAT' },
   { campo: 'revision', etiqueta: 'Revisión Técnica' },
-  { campo: 'atu', etiqueta: 'T.U.C. (ATU)' },
   { campo: 'licencia', etiqueta: 'Licencia MTC' },
 ];
 
@@ -103,8 +102,8 @@ const FlotaView = ({ usuario, initialBase }) => {
   
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
-    placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '',
-    soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
+    placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', licencia: '',
+    soat_doc: '', revision_doc: '', licencia_doc: ''
   });
   const [isEditing, setIsEditing] = useState(false);
   const [editingUnitId, setEditingUnitId] = useState('');
@@ -434,7 +433,7 @@ const FlotaView = ({ usuario, initialBase }) => {
 
 
   const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
+    setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', licencia: '', soat_doc: '', revision_doc: '', licencia_doc: '' });
     setIsEditing(false);
     setEditingUnitId('');
     setInitialEditData(null);
@@ -487,7 +486,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     const editPayload = {
       capacidad: formData.capacidad, tipo: formData.tipo,
       chofer: formData.chofer, telefono: formData.telefono || '',
-      soat: formData.soat || '', revision: formData.revision || '', atu: formData.atu || '', licencia: formData.licencia || '',
+      soat: formData.soat || '', revision: formData.revision || '', licencia: formData.licencia || '',
     };
     // El padrón viaja por su propio endpoint, así que se compara aparte de los
     // campos que edita el PUT.
@@ -559,7 +558,7 @@ const FlotaView = ({ usuario, initialBase }) => {
           <div className="flota-header-left" style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1 1 300px' }}>
             <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
-              Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
+              Monitoreo en tiempo real de la documentación y gestión del padrón de flota.
             </p>
           </div>
           
@@ -748,7 +747,6 @@ const FlotaView = ({ usuario, initialBase }) => {
             {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
-            <th>T.U.C (ATU)</th>
             <th>Licencia MTC</th>
             {!isCliente && <th>Acciones</th>}
           </tr>
@@ -802,7 +800,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                 )}
                 <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
                 <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
-                <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>
                 <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc)}</td>
                 {!isCliente && (
                 <td>
@@ -1264,19 +1261,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                       📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
                     </label>
                     {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
-                  </div>}
-                </div>
-              </div>
-              <div className="form-row">
-                <label>Vencimiento T.U.C. / ATU</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" value={formData.atu || ''} onChange={e => setFormData({...formData, atu: e.target.value})} />
-                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <label className="custom-file-upload">
-                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
-                      📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
-                    </label>
-                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
                   </div>}
                 </div>
               </div>
