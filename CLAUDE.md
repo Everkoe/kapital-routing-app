@@ -33,9 +33,15 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **Migración de configuración en curso**: `SUPABASE_URL`/`SUPABASE_KEY` ya priorizan variables de entorno,
   pero conservan valores fallback temporalmente para no interrumpir Vercel. El fallback se retirará después de
   verificar las variables del despliegue. `JSON_PE_TOKEN` y `GEMINI_API_KEY` también están documentados en `.env.example`.
-- **Migración de contraseñas preparada, todavía no activada**: el backend lee hashes PBKDF2 y texto plano. Solo
-  escribe/migra hashes cuando `KAPITAL_PASSWORD_HASH_WRITE=true`; mantenerla en `false` durante el primer despliegue
-  compatible para conservar un rollback seguro.
+- **Migración de contraseñas hecha**: el backend lee hashes PBKDF2 y texto plano, y **cifra al escribir por
+  defecto** (`KAPITAL_PASSWORD_HASH_WRITE`, hoy `true`). Nació apagado para que un rollback anterior a la lectura
+  compatible no dejara fuera a nadie; esa lectura está desplegada desde el PR #3, así que la precondición ya no
+  existe. Las 115 contraseñas que quedaban en claro se cifraron de una vez con
+  `scripts/cifrar_contrasenas.py` — esperar al login de cada persona habría dejado casi toda la base en claro,
+  porque 103 de esas cuentas no habían entrado nunca. **Ya no se puede leer una contraseña de la base**: no hay
+  acción de reinicio en Administración y `/api/auth/change-password` exige la actual, así que un olvido hoy se
+  resuelve solo con la copia de accesos que tenga el administrador fuera. Construir ese reinicio es el siguiente
+  paso natural.
 - **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
   `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual:
@@ -112,7 +118,7 @@ KAPITAL_V2_SUPABASE_KEY       # solo backend, solo en el header `apikey`
 KAPITAL_V2_ENABLED / _REMOTE_ENABLED / _READ_ONLY
 KAPITAL_AUTH_ENFORCED         # default true desde el PR #2 (ver §2)
 KAPITAL_SESSION_TTL_HOURS     # 12 por defecto
-KAPITAL_PASSWORD_HASH_WRITE   # mantener en false hasta desplegar la lectura compatible
+KAPITAL_PASSWORD_HASH_WRITE   # true por defecto; solo se pone en false para volver atrás
 SUPABASE_URL / SUPABASE_KEY   # proyecto original, ruta heredada
 GEMINI_API_KEY
 JSON_PE_TOKEN                 # tiene un literal como fallback en el código: rotar y retirar

@@ -1,5 +1,6 @@
 import copy
 import asyncio
+from pathlib import Path
 import hashlib
 import io
 import random
@@ -1235,6 +1236,48 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # Y las claves reservadas tampoco: son el tablero, la flota y el resto.
         self.assertEqual(escrito["__flota__"], estado_completo["usuarios"]["__flota__"])
 
+    def test_passwords_are_hashed_on_write_by_default(self):
+        """Guardar en claro tiene que ser una decisión explícita, no el defecto.
+
+        Estuvo apagado por seguridad de rollback: cifrar antes de desplegar la
+        lectura compatible habría dejado fuera a todo el mundo. Esa lectura
+        lleva desplegada desde el PR #3, así que apagado solo significaba
+        contraseñas en claro.
+        """
+        self.assertTrue(backend.PASSWORD_HASH_WRITE_ENABLED,
+                        "el valor por defecto debe cifrar")
+
+        guardada = backend.password_for_storage("una-clave")
+        self.assertTrue(guardada.startswith(f"{backend.PASSWORD_SCHEME}$"))
+        self.assertNotIn("una-clave", guardada)
+        self.assertTrue(backend.verify_password("una-clave", guardada))
+        self.assertFalse(backend.verify_password("otra-clave", guardada))
+
+        # Y lo de antes se sigue leyendo: nadie se queda fuera por la migración.
+        self.assertTrue(backend.verify_password("vieja", "vieja"))
+
+    def test_no_account_is_conjured_out_of_a_hardcoded_password(self):
+        """Ninguna cuenta puede nacer de una contraseña escrita en el código.
+
+        Los dos decodificadores sembraban «TELEPERFORMANCE» con la clave
+        «1234» en cada lectura del estado. Era una credencial conocida sobre
+        una cuenta real y en uso, y como se reinyectaba siempre, borrarla no
+        servía de nada: volvía sola en la siguiente lectura.
+        """
+        fila = {"usuarios": {"real@kapital.com": {"identifier": "real@kapital.com",
+                                                  "password": "x", "rol": "Conductor"}}}
+
+        decodificado = backend._decode_full_state(fila, include_defaults=True)
+        self.assertEqual(list(decodificado["usuarios"]), ["real@kapital.com"])
+
+        proyectado = backend._compat_users_from_projection(fila["usuarios"], "prueba")
+        self.assertEqual(list(proyectado), ["real@kapital.com"])
+
+        # Y por si alguien la reintroduce con otro nombre: ninguna contraseña
+        # puede estar escrita en el módulo.
+        fuente = Path(backend.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('"password": "1234"', fuente)
+
     async def test_compat_profile_and_admin_users_use_users_projection(self):
         users = {
             "admin@example.com": {
@@ -1272,7 +1315,11 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             listing = await backend.get_all_users("admin@example.com")
 
         self.assertEqual(profile["identifier"], "driver@example.com")
-        self.assertEqual(len(listing["usuarios"]), 3)  # includes legacy client sentinel
+        # Solo los dos de la fila. Antes salían tres: el decodificador sembraba
+        # una cuenta «TELEPERFORMANCE» con la contraseña escrita en el código.
+        self.assertEqual(len(listing["usuarios"]), 2)
+        self.assertNotIn("TELEPERFORMANCE", {u.get("identifier") for u in listing["usuarios"]},
+                         "ninguna cuenta puede aparecer de la nada")
         # Dos lecturas: el tanteo del índice de acceso —que en una fila sin él
         # no devuelve nada y se abandona— y la del bloque de usuarios, que
         # queda cacheada para la segunda llamada.
