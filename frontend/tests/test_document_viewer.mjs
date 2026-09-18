@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../src/utils/documentoArchivo.js';
+import { VIGENCIA_POR_DOCUMENTO, vigenciaDeDocumento } from '../src/constants/documentosConductor.js';
+import { FLEET_DOCUMENT_FIELDS } from '../src/utils/flotaDocumentStatus.js';
 
 test('reconoce un PDF tanto por extensión como por data URL', () => {
   assert.equal(esPdf('data:application/pdf;base64,AAAA'), true);
@@ -65,4 +67,29 @@ test('un documento de una sola cara conserva su ruta de Storage', () => {
   const [cara] = carasDe({ name: 'Licencia', src: '', path: 'K-027/licencia.jpg' });
   assert.equal(cara.path, 'K-027/licencia.jpg');
   assert.equal(caraTieneDocumento(cara), true);
+});
+
+test('solo tres documentos llevan un vencimiento de la unidad', () => {
+  // El archivo y su fecha son cosas distintas, pero para quien revisa son lo
+  // mismo. El resto de documentos no tiene vencimiento que enseñar.
+  assert.equal(vigenciaDeDocumento('soat').campo, 'soat');
+  assert.equal(vigenciaDeDocumento('revisionTecnica').campo, 'revision');
+  assert.equal(vigenciaDeDocumento('licenciaConducir').campo, 'licencia');
+
+  for (const clave of ['dniScaneado', 'antecedentesPoliciales', 'cv', 'tarjetaPropiedad',
+                       'comprobanteDomicilio', 'recordConductor']) {
+    assert.equal(vigenciaDeDocumento(clave), null, clave);
+  }
+  assert.equal(vigenciaDeDocumento(undefined), null);
+});
+
+test('cada vencimiento apunta a un campo real de la unidad', () => {
+  // Si apuntara a un campo retirado —como el T.U.C. (ATU)— la barra editaría
+  // algo que ya nadie lee.
+  for (const clave of Object.keys(VIGENCIA_POR_DOCUMENTO)) {
+    assert.ok(
+      FLEET_DOCUMENT_FIELDS.includes(vigenciaDeDocumento(clave).campo),
+      `${clave} apunta a un campo que la flota ya no sigue`,
+    );
+  }
 });

@@ -1,4 +1,7 @@
-export const FLEET_DOCUMENT_FIELDS = Object.freeze(['soat', 'revision', 'atu', 'licencia']);
+// El T.U.C. (ATU) se retira: la operación dejó de usarlo y seguía contando
+// para el estado de documentación, que es lo que alimenta los indicadores del
+// panel. Los valores ya guardados se quedan donde están, sin leerse.
+export const FLEET_DOCUMENT_FIELDS = Object.freeze(['soat', 'revision', 'licencia']);
 
 export const getFleetUnitId = (vehicle) => {
   const unitId = vehicle?.unidad_id;

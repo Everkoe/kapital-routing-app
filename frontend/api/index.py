@@ -3106,7 +3106,19 @@ class EmergencyRequest(BaseModel):
     horario: str
 
 class FlotaRegistro(BaseModel):
-    placa: str
+    # `padron` es el identificador interno con el que Kapital nombra la unidad
+    # (K-027) y `placa` la matrícula del vehículo (BUR-628). El formulario los
+    # mandaba en el mismo campo, así que las unidades creadas a mano se
+    # quedaban sin matrícula y su padrón viajaba en el campo equivocado.
+    # `padron` es opcional para que un cliente viejo, que solo manda `placa`,
+    # siga registrando unidades como hasta ahora.
+    padron: Optional[str] = None
+    placa: str = ""
+    # Cuenta del conductor que maneja la unidad. Opcionales para no romper a un
+    # cliente viejo, pero el formulario las pide: sin ellas la unidad queda sin
+    # nadie que pueda entrar a subir su documentación.
+    dni: Optional[str] = None
+    password: Optional[str] = None
     capacidad: int
     tipo: str
     chofer: str
@@ -3128,6 +3140,7 @@ class FlotaUpdate(BaseModel):
     ignores old clients' extra ``*_doc`` fields, while the merge performed by
     the endpoint preserves the values already stored for the driver dossier.
     """
+    placa: Optional[str] = None
     capacidad: Optional[int] = None
     tipo: Optional[str] = None
     chofer: Optional[str] = None
@@ -3629,10 +3642,10 @@ _ETIQUETA_FLOTA = {
     "chofer": "Nombre del chofer",
     "telefono": "Teléfono",
     "tipo": "Tipo de vehículo",
+    "placa": "Placa del vehículo",
     "capacidad": "Capacidad",
     "soat": "Vencimiento SOAT",
     "revision": "Vencimiento revisión técnica",
-    "atu": "Vencimiento T.U.C. (ATU)",
     "licencia": "Vencimiento licencia MTC",
 }
 
@@ -5242,9 +5255,11 @@ async def get_conductor_info(unidad_id: str):
     }
 
 
-_FLEET_EXPIRY_FIELDS = ("soat", "revision", "atu", "licencia")
+# El T.U.C. (ATU) se retira del seguimiento: la operación dejó de usarlo. Los
+# valores ya guardados siguen en la fila pero no se leen ni se muestran.
+_FLEET_EXPIRY_FIELDS = ("soat", "revision", "licencia")
 _FLEET_EDITABLE_FIELDS = (
-    "capacidad", "tipo", "chofer", "telefono", *_FLEET_EXPIRY_FIELDS,
+    "capacidad", "tipo", "chofer", "telefono", "placa", *_FLEET_EXPIRY_FIELDS,
 )
 
 
@@ -5328,28 +5343,84 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     # exigía el blob de usuarios; el índice de sesiones del lote anterior
     # eliminó esa dependencia, así que `require_admin_session` resuelve sin
     # cookie en cero lecturas y con cookie contra el índice.
-    await require_admin_session(session_token)
+    actor_admin = await require_admin_session(session_token)
     await reload_db(force=True)
     global conductores_db
-    unit_id = flota.placa.strip()
+    # Sin `padron` se usa `placa`, que es lo que mandaba el formulario antiguo.
+    unit_id = (flota.padron or flota.placa or "").strip().upper()
     if not unit_id:
         raise HTTPException(status_code=400, detail="El padrón de la unidad no puede estar vacío.")
     if unit_id in conductores_db:
-        raise HTTPException(status_code=409, detail="La unidad ya existe.")
+        raise HTTPException(status_code=409, detail=f"Ya existe una unidad con el padrón {unit_id}.")
+
+    matricula = (flota.placa or "").strip().upper() if flota.padron else ""
+    if matricula:
+        duplicada = next(
+            (uid for uid, u in conductores_db.items()
+             if isinstance(u, dict) and str(u.get("placa") or "").strip().upper() == matricula),
+            None,
+        )
+        if duplicada:
+            raise HTTPException(status_code=409, detail=f"La placa {matricula} ya está en la unidad {duplicada}.")
+
     values = _normalize_fleet_expiries({
         key: getattr(flota, key) for key in _FLEET_EDITABLE_FIELDS
     })
+    if matricula:
+        values["placa"] = matricula
+
+    # La cuenta del conductor se crea con la unidad, no después: dar de alta una
+    # unidad cuyo conductor no puede entrar deja su documentación en el aire.
+    dni = (flota.dni or "").strip()
+    conductor_nuevo = None
+    if dni or flota.password:
+        if not dni:
+            raise HTTPException(status_code=400, detail="Falta el DNI del conductor.")
+        if not flota.password or len(flota.password) < 4:
+            raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres.")
+        if get_user_by_identifier(dni):
+            raise HTTPException(status_code=409, detail=f"Ya existe una cuenta con el documento {dni}.")
+        conductor_nuevo = {
+            "identifier": dni,
+            "email": None,
+            "dni": dni,
+            "password": password_for_storage(flota.password),
+            "nombre": (flota.chofer or "").strip() or "Conductor",
+            "rol": "Conductor",
+            "telefono": (flota.telefono or "").strip(),
+            "unidad_id": unit_id,
+            "empresa_id": None,
+            "avatar": None,
+            "estado": "Activo",
+            # La contraseña la pone Administración, así que es provisional: el
+            # conductor tiene que cambiarla la primera vez que entre para que
+            # nadie más la conozca.
+            "needs_password_change": True,
+        }
+        usuarios_db[dni] = conductor_nuevo
     # Uploads remain accepted for the independent new-unit flow. They are not
     # part of FlotaUpdate and therefore cannot be changed from the pencil modal.
-    for field in ("soat_doc", "revision_doc", "atu_doc", "licencia_doc"):
+    for field in ("soat_doc", "revision_doc", "licencia_doc"):
         value = getattr(flota, field)
         if value is not None:
             values[field] = value
     conductores_db[unit_id] = values
+    if conductor_nuevo:
+        registrar_actividad(
+            "Unidad creada",
+            actor=actor_admin,
+            entity_type="unidad",
+            entity_id=unit_id,
+            entity_label=unit_id,
+            description=f"Alta de la unidad con la cuenta del conductor {dni}.",
+            status="success",
+        )
     try:
         stored = await _persist_and_verify_fleet(unit_id, values)
     except Exception:
         conductores_db.pop(unit_id, None)
+        if conductor_nuevo:
+            usuarios_db.pop(dni, None)
         raise
     return {"message": "Unidad agregada exitosamente", "unidad": {"unidad_id": unit_id, **stored}, "flota": conductores_db}
 

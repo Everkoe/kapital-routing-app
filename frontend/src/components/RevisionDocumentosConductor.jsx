@@ -7,7 +7,9 @@ import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import { subirDocumento } from '../utils/documentoStorage';
 import { validarArchivoDocumento } from '../utils/validacionDocumento';
-import { DOCUMENTOS_CONDUCTOR } from '../constants/documentosConductor';
+import { DOCUMENTOS_CONDUCTOR, vigenciaDeDocumento } from '../constants/documentosConductor';
+import { getDocumentStatus } from '../utils/flotaDocumentStatus';
+import CampoEditable from './CampoEditable';
 
 /**
  * Revisión de los documentos de un conductor, con su visor.
@@ -31,6 +33,11 @@ const RevisionDocumentosConductor = ({
   adminEmail = '',
   titulo = 'Revisión de Documentos del Conductor',
   onDocumentoSubido,
+  // Vencimientos de la unidad y cómo guardarlos. Solo los tiene Gestión de
+  // Flota: en Accesos el conductor todavía no tiene unidad, así que la barra
+  // no aparece en vez de mostrar una fecha que no existe.
+  vigencias = null,
+  onGuardarVigencia = null,
 }) => {
   const [revisiones, setRevisiones] = useState({});
   const [cargando, setCargando] = useState({});
@@ -86,6 +93,41 @@ const RevisionDocumentosConductor = ({
     }
   };
 
+  /**
+   * Barra con el vencimiento del documento abierto.
+   *
+   * Vive dentro del visor y no en la tarjeta a propósito: quien revisa primero
+   * comprueba que el archivo está subido y es el que dice ser, y solo entonces
+   * corrobora hasta cuándo vale. La fecha fuera, junto a un documento que aún
+   * no ha mirado, invita a darla por buena antes de tiempo.
+   *
+   * Solo para los tres que tienen uno —SOAT, revisión técnica y licencia—, y
+   * solo cuando quien usa el componente sabe guardarlo.
+   */
+  const barraDeVigencia = (clave) => {
+    const vigencia = vigenciaDeDocumento(clave);
+    if (!vigencia || !vigencias || !onGuardarVigencia) return null;
+
+    const valor = vigencias[vigencia.campo] || '';
+    const { status, text } = getDocumentStatus(valor);
+    return (
+      <div className="doc-viewer-vigencia">
+        <CampoEditable
+          etiqueta={vigencia.etiqueta}
+          valor={valor}
+          tipo="date"
+          vacio="Sin fecha"
+          onGuardar={(nuevo) => onGuardarVigencia(vigencia.campo, nuevo)}
+        >
+          <span className="campo-editable-vigencia">
+            {valor || 'Sin fecha'}
+            <span className={`status-badge status-${status}`}><span className="dot"></span>{text}</span>
+          </span>
+        </CampoEditable>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="review-docs-section">
@@ -103,13 +145,18 @@ const RevisionDocumentosConductor = ({
               accept={ACCEPT}
               onUpload={subirEnNombreDelConductor}
               onReview={revisarDocumento}
-              onView={setViendo}
+              onView={(abierto) => setViendo({ ...abierto, clave: documento.key })}
             />
           ))}
         </div>
       </div>
 
-      <DocumentViewer key={viendo?.name} documento={viendo} onClose={() => setViendo(null)} />
+      <DocumentViewer
+        key={viendo?.name}
+        documento={viendo}
+        onClose={() => setViendo(null)}
+        pie={barraDeVigencia(viendo?.clave)}
+      />
     </>
   );
 };

@@ -173,7 +173,6 @@ export default function AdminDashboard({ onNavigate, usuario }) {
     [
       { name: 'SOAT', date: v.soat },
       { name: 'Rev. Técnica', date: v.revision },
-      { name: 'T.U.C (ATU)', date: v.atu },
       { name: 'Licencia MTC', date: v.licencia },
     ].forEach(doc => {
       const s = getDocStatus(doc.date);

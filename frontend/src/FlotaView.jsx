@@ -1,32 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
+import { Paperclip, MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import CampoEditable from './components/CampoEditable';
+import RegistroDeUnidad from './components/RegistroDeUnidad';
+import DocumentViewer from './components/DocumentViewer';
 import ImagenGuardada from './components/ImagenGuardada';
-import FileUploadZone from './components/FileUploadZone';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
-import { validarArchivoDocumento } from './utils/validacionDocumento';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
 import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
-import { documentoABase64 } from './utils/imageUtils';
 import './App.css';
-
-/** Vigencias de la unidad: fecha y nada más, sin archivo que revisar. */
-const VIGENCIAS_DE_UNIDAD = [
-  { campo: 'soat', etiqueta: 'SOAT' },
-  { campo: 'revision', etiqueta: 'Revisión Técnica' },
-  { campo: 'atu', etiqueta: 'T.U.C. (ATU)' },
-  { campo: 'licencia', etiqueta: 'Licencia MTC' },
-];
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
 const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
-const DEFAULT_DOCUMENT_ACCEPT = FileUploadZone.DEFAULT_DOCUMENT_ACCEPT;
-const DOCUMENT_ACCEPT_ATTRIBUTE = Object.keys(DEFAULT_DOCUMENT_ACCEPT).join(',');
 
 const announceAdminWebSocketState = (connected) => {
   if (typeof window === 'undefined') return;
@@ -102,14 +91,8 @@ const FlotaView = ({ usuario, initialBase }) => {
   }, []);
   
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({
-    placa: '', capacidad: 10, tipo: 'Van', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '',
-    soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: ''
-  });
-  const [isEditing, setIsEditing] = useState(false);
-  const [editingUnitId, setEditingUnitId] = useState('');
-  const [initialEditData, setInitialEditData] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [viendoDocumento, setViendoDocumento] = useState(null);
+
 
   // Conductor Modal state
   const [isConductorModalOpen, setIsConductorModalOpen] = useState(false);
@@ -401,7 +384,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     return () => { document.body.style.overflow = 'unset'; };
   }, [showModal]);
 
-  const renderBadge = (dateString, docUrl) => {
+  const renderBadge = (dateString, documento, etiqueta = 'documento') => {
     const { status, text, daysRemaining } = getDocumentStatus(dateString);
     const title = daysRemaining === null ? 'Sin fecha de vencimiento' : `${dateString} · ${daysRemaining} día${daysRemaining === 1 ? '' : 's'} restante${daysRemaining === 1 ? '' : 's'}`;
     return (
@@ -410,10 +393,26 @@ const FlotaView = ({ usuario, initialBase }) => {
           <span className="dot"></span>
           {text}
         </div>
-        {docUrl && (
-          <a href={docUrl} target="_blank" rel="noreferrer" title="Ver Documento Adjunto" style={{ textDecoration: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>
-            📎
-          </a>
+        {/* El adjunto se abre en el visor compartido. Antes era un enlace a la
+            cadena guardada, que desde que los documentos viven en Storage ya no
+            es una URL sino una ruta: el enlace llevaba a ninguna parte. */}
+        {documento && (
+          <button
+            type="button"
+            className="btn-icon-sutil"
+            title="Ver el documento adjunto"
+            aria-label={`Ver el documento de ${etiqueta}`}
+            onClick={() => setViendoDocumento({
+              name: etiqueta,
+              caras: [{
+                nombre: null,
+                src: typeof documento === 'string' ? documento : (documento.base64 || documento.url || ''),
+                path: typeof documento === 'object' ? documento.path || null : null,
+              }],
+            })}
+          >
+            <Paperclip size={14} />
+          </button>
         )}
       </div>
     );
@@ -433,27 +432,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   };
 
 
-  const handleCreate = () => {
-    setFormData({ placa: '', capacidad: 10, tipo: 'AUTO', chofer: '', telefono: '', soat: '', revision: '', atu: '', licencia: '', soat_doc: '', revision_doc: '', atu_doc: '', licencia_doc: '' });
-    setIsEditing(false);
-    setEditingUnitId('');
-    setInitialEditData(null);
-    setShowModal(true);
-  };
-
-  const handleFileUpload = (e, field) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const validationError = validarArchivoDocumento(file);
-    if (validationError) {
-      toast.error(validationError);
-      e.target.value = '';
-      return;
-    }
-    documentoABase64(file)
-      .then(({ base64 }) => setFormData(prev => ({ ...prev, [field]: base64 })))
-      .catch(() => toast.error('No se pudo leer el documento. Intenta nuevamente.'));
-  };
+  const handleCreate = () => setShowModal(true);
 
   // Delega la generación al backend, que rellena la plantilla oficial
   // (BASE MASIVO 2026 / BASE REMISSE 2026) con datos frescos de Supabase.
@@ -477,57 +456,6 @@ const FlotaView = ({ usuario, initialBase }) => {
       toast.success(`Descargado: ${filename}`, { id: toastId });
     } catch (err) {
       toast.error(`No se pudo exportar: ${err.message || err}`, { id: toastId });
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (isSaving) return;
-
-    const editPayload = {
-      capacidad: formData.capacidad, tipo: formData.tipo,
-      chofer: formData.chofer, telefono: formData.telefono || '',
-      soat: formData.soat || '', revision: formData.revision || '', atu: formData.atu || '', licencia: formData.licencia || '',
-    };
-    // El padrón viaja por su propio endpoint, así que se compara aparte de los
-    // campos que edita el PUT.
-    const padronIntacto = !isEditing || (formData.placa || '').trim() === editingUnitId;
-    const camposIntactos = initialEditData
-      && Object.keys(editPayload).every(clave => editPayload[clave] === initialEditData[clave]);
-
-    if (isEditing && padronIntacto && camposIntactos) {
-      setShowModal(false);
-      toast('No hay cambios para guardar.');
-      return;
-    }
-
-    const nuevoPadron = (formData.placa || '').trim();
-    const renombra = isEditing && puedeRenombrar && nuevoPadron && nuevoPadron !== editingUnitId;
-
-    setIsSaving(true);
-    try {
-      // El renombrado va primero para que la edición de los demás campos
-      // apunte ya a la clave nueva; si falla, no se toca nada más.
-      let unidadDestino = editingUnitId;
-      if (renombra) {
-        await apiFetch(`/api/flota/${encodeURIComponent(editingUnitId)}/renombrar`, {
-          method: 'POST',
-          json: { nuevo_id: nuevoPadron },
-        });
-        unidadDestino = nuevoPadron;
-        setEditingUnitId(nuevoPadron);
-      }
-
-      const method = isEditing ? 'PUT' : 'POST';
-      const url = isEditing ? `/api/flota/${encodeURIComponent(unidadDestino)}` : '/api/flota';
-      await apiFetch(url, { method, json: isEditing ? editPayload : formData });
-      setShowModal(false);
-      await fetchFlota();
-      toast.success(isEditing ? 'Unidad actualizada.' : 'Unidad registrada.');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -559,7 +487,7 @@ const FlotaView = ({ usuario, initialBase }) => {
           <div className="flota-header-left" style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1 1 300px' }}>
             <h2 style={{ margin: 0 }}>Control de Conformidad Legal y Flota</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', margin: 0 }}>
-              Monitoreo en tiempo real de requerimientos ATU y MTC y gestión del padrón de flota.
+              Monitoreo en tiempo real de la documentación y gestión del padrón de flota.
             </p>
           </div>
           
@@ -748,7 +676,6 @@ const FlotaView = ({ usuario, initialBase }) => {
             {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
-            <th>T.U.C (ATU)</th>
             <th>Licencia MTC</th>
             {!isCliente && <th>Acciones</th>}
           </tr>
@@ -800,10 +727,9 @@ const FlotaView = ({ usuario, initialBase }) => {
                     {' '}({vehiculo.capacidad ? `${vehiculo.capacidad} pax` : 'sin capacidad'})
                   </td>
                 )}
-                <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc)}</td>
-                <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc)}</td>
-                <td>{renderBadge(vehiculo.atu, vehiculo.atu_doc)}</td>
-                <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc)}</td>
+                <td>{renderBadge(vehiculo.soat, vehiculo.soat_doc, 'SOAT')}</td>
+                <td>{renderBadge(vehiculo.revision, vehiculo.revision_doc, 'Revisión técnica')}</td>
+                <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc, 'Licencia MTC')}</td>
                 {!isCliente && (
                 <td>
                   <div style={{ display: 'flex', gap: '5px' }}>
@@ -1019,34 +945,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                     )}
                   </div>
 
-                  {/* Las vigencias, en su propia caja y a lo ancho. Dentro de la
-                      tarjeta del vehículo caían en una columna estrecha, con la
-                      fecha y su estado partidos en dos líneas. Y no son del
-                      vehículo que declaró el conductor: son de la unidad. */}
-                  <div className="info-section vigencias-unidad">
-                    <h4>Vigencias de la unidad</h4>
-                    <div className="vigencias-unidad-lista">
-                      {VIGENCIAS_DE_UNIDAD.map(({ campo, etiqueta }) => {
-                        const { status, text } = getDocumentStatus(conductorInfo.flota?.[campo]);
-                        return (
-                          <CampoEditable
-                            key={campo}
-                            etiqueta={etiqueta}
-                            valor={conductorInfo.flota?.[campo]}
-                            tipo="date"
-                            vacio="Sin fecha"
-                            onGuardar={(valor) => guardarCampoUnidad(campo, valor)}
-                          >
-                            <span className="campo-editable-vigencia">
-                              {conductorInfo.flota?.[campo] || 'Sin fecha'}
-                              <span className={`status-badge status-${status}`}><span className="dot"></span>{text}</span>
-                            </span>
-                          </CampoEditable>
-                        );
-                      })}
-                    </div>
-                  </div>
-
 
                   {/* DATA UPDATE REQUESTS PANEL */}
                   {conductorInfo?.usuario?.perfil_conductor?.solicitudes_cambio && Object.entries(conductorInfo.usuario.perfil_conductor.solicitudes_cambio || {}).filter(([_, req]) => req?.status === 'pendiente').length > 0 && (
@@ -1129,6 +1027,8 @@ const FlotaView = ({ usuario, initialBase }) => {
                       componente para las dos pantallas. */}
                   <div className="docs-section">
                     <RevisionDocumentosConductor
+                      vigencias={conductorInfo.flota}
+                      onGuardarVigencia={guardarCampoUnidad}
                       conductor={conductorInfo.usuario}
                       unidadId={conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || ''}
                       adminEmail={usuario?.email || usuario?.identifier || ''}
@@ -1190,117 +1090,20 @@ const FlotaView = ({ usuario, initialBase }) => {
         </div>
       )}
 
+      {/* El alta vive en su propio componente: era un formulario estrecho con
+          scroll interno y un único campo «Placa/ID» que mezclaba el padrón con
+          la matrícula. */}
+      <DocumentViewer
+        key={viendoDocumento?.name}
+        documento={viendoDocumento}
+        onClose={() => setViendoDocumento(null)}
+      />
+
       {showModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3>{isEditing ? 'Editar Unidad' : 'Registrar Nueva Unidad'}</h3>
-            <form onSubmit={handleSubmit} className="flota-form">
-              <div className="form-scroll-area">
-              <div className="form-section-title">Datos del conductor / unidad</div>
-              <div className="form-row">
-                <label>{isEditing ? 'Padrón / ID de unidad' : 'Placa/ID'}</label>
-                <input
-                  required
-                  disabled={isEditing && !puedeRenombrar}
-                  value={isEditing ? (formData.placa ?? editingUnitId) : formData.placa}
-                  onChange={e => setFormData({ ...formData, placa: e.target.value })}
-                  placeholder="Ej. KAP-008"
-                />
-                {isEditing && puedeRenombrar && (
-                  <small className="form-hint">
-                    Cambiarlo migra también al conductor asociado y su sesión abierta.
-                  </small>
-                )}
-              </div>
-              <div className="form-row">
-                <label>Nombre Chofer</label>
-                <input required value={formData.chofer} onChange={e => setFormData({...formData, chofer: e.target.value})} placeholder="Nombre completo" />
-              </div>
-              <div className="form-row">
-                <label>Teléfono WhatsApp (Opcional)</label>
-                <input value={formData.telefono || ''} onChange={e => setFormData({...formData, telefono: e.target.value})} placeholder="Ej. 51987654321" />
-              </div>
-              <div className="form-row">
-                <label>Tipo</label>
-                {/* Los tipos salen de los que la flota usa de verdad. Los
-                    anteriores —Sprinter, Auto (Remisse), Moto (Courier)— no
-                    existían en ninguna unidad, así que editar una le cambiaba
-                    el tipo por un valor inventado. La base (Masivo/Remisse) es
-                    un campo propio y no se mezcla aquí. */}
-                <select value={formData.tipo} onChange={e => setFormData({...formData, tipo: e.target.value})}>
-                  {TIPOS_DE_UNIDAD.map(tipo => <option key={tipo}>{tipo}</option>)}
-                  {formData.tipo && !TIPOS_DE_UNIDAD.includes(formData.tipo) && (
-                    // Una unidad con un tipo fuera de la lista conserva el suyo
-                    // en vez de que abrir el formulario se lo cambie en silencio.
-                    <option>{formData.tipo}</option>
-                  )}
-                </select>
-              </div>
-              <div className="form-row">
-                <label>Capacidad (Pax)</label>
-                <input type="number" required value={formData.capacidad} onChange={e => setFormData({...formData, capacidad: parseInt(e.target.value)})} min="1" />
-              </div>
-              <div className="form-section-title">Documentación</div>
-              <div className="form-row">
-                <label>Vencimiento SOAT</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" value={formData.soat || ''} onChange={e => setFormData({...formData, soat: e.target.value})} />
-                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <label className="custom-file-upload">
-                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'soat_doc')} style={{ display: 'none' }} />
-                      📎 {formData.soat_doc ? 'Reemplazar' : 'Adjuntar Documento'}
-                    </label>
-                    {formData.soat_doc && <a href={formData.soat_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver SOAT</a>}
-                  </div>}
-                </div>
-              </div>
-              <div className="form-row">
-                <label>Vencimiento Revisión Técnica</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" value={formData.revision || ''} onChange={e => setFormData({...formData, revision: e.target.value})} />
-                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <label className="custom-file-upload">
-                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'revision_doc')} style={{ display: 'none' }} />
-                      📎 {formData.revision_doc ? 'Reemplazar' : 'Adjuntar Documento'}
-                    </label>
-                    {formData.revision_doc && <a href={formData.revision_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Revisión</a>}
-                  </div>}
-                </div>
-              </div>
-              <div className="form-row">
-                <label>Vencimiento T.U.C. / ATU</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" value={formData.atu || ''} onChange={e => setFormData({...formData, atu: e.target.value})} />
-                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <label className="custom-file-upload">
-                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'atu_doc')} style={{ display: 'none' }} />
-                      📎 {formData.atu_doc ? 'Reemplazar' : 'Adjuntar Documento'}
-                    </label>
-                    {formData.atu_doc && <a href={formData.atu_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver ATU</a>}
-                  </div>}
-                </div>
-              </div>
-              <div className="form-row">
-                <label>Vencimiento Licencia MTC</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <input type="date" value={formData.licencia || ''} onChange={e => setFormData({...formData, licencia: e.target.value})} />
-                  {!isEditing && <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <label className="custom-file-upload">
-                      <input type="file" accept={DOCUMENT_ACCEPT_ATTRIBUTE} onChange={e => handleFileUpload(e, 'licencia_doc')} style={{ display: 'none' }} />
-                      📎 {formData.licencia_doc ? 'Reemplazar' : 'Adjuntar Documento'}
-                    </label>
-                    {formData.licencia_doc && <a href={formData.licencia_doc} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--kapital-blue-deep)', fontWeight: 'bold' }}>Ver Licencia</a>}
-                  </div>}
-                </div>
-              </div>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)} disabled={isSaving}>Cancelar</button>
-                <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? 'Guardando...' : 'Guardar'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <RegistroDeUnidad
+          onCerrar={() => setShowModal(false)}
+          onRegistrada={() => fetchFlota()}
+        />
       )}
 
 
