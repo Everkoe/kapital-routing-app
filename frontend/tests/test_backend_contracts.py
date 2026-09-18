@@ -1134,9 +1134,12 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         client = AsyncMock()
         client.__aenter__.return_value = client
         client.__aexit__.return_value = None
-        # The first read is users-only.  The second read is mandatory before
-        # the PATCH because it hydrates every reserved compatibility key.
+        # Primero se tantea el índice de acceso, que en una fila sin él
+        # devuelve nulo y se abandona en diecinueve bytes. Después la lectura
+        # de usuarios, y la del estado completo que hidrata las claves
+        # reservadas antes del PATCH.
         client.get.side_effect = [
+            httpx.Response(200, json=[{"usuarios": None}]),
             httpx.Response(200, json=[{"usuarios": {"admin@example.com": user}}]),
             httpx.Response(200, json=[canonical_state]),
         ]
@@ -1149,7 +1152,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(response["identifier"], "admin@example.com")
-        self.assertEqual(client.get.await_count, 2)
+        self.assertEqual(client.get.await_count, 3)  # índice + usuarios + estado completo
         patch_payload = client.patch.call_args.kwargs["json"]["usuarios"]
         for reserved_key in (
             "__routes_summary__",
@@ -1199,8 +1202,12 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(profile["identifier"], "driver@example.com")
         self.assertEqual(len(listing["usuarios"]), 3)  # includes legacy client sentinel
-        self.assertEqual(client.get.await_count, 1)
-        self.assertIn("select=usuarios", client.get.call_args_list[0].args[0])
+        # Dos lecturas: el tanteo del índice de acceso —que en una fila sin él
+        # no devuelve nada y se abandona— y la del bloque de usuarios, que
+        # queda cacheada para la segunda llamada.
+        self.assertEqual(client.get.await_count, 2)
+        self.assertIn("select=usuarios->%22__login__%22", client.get.call_args_list[0].args[0])
+        self.assertIn("select=usuarios", client.get.call_args_list[1].args[0])
 
     async def test_compat_fleet_uses_reserved_fleet_projection(self):
         fleet = {"K-001": {"placa": "PLATE-001", "capacidad": 15, "tipo": "Sprinter"}}
@@ -2330,6 +2337,64 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             guardada = backend.conductores_db["K-502"]
         self.assertNotIn("atu", guardada)
         self.assertIn("soat", guardada)
+
+    def test_the_login_index_maps_every_way_a_person_can_identify(self):
+        """Los 108 importados entran con su DNI, pero su clave es otro correo."""
+        usuarios = {
+            "de.los@kapital.com": {
+                "rol": "Conductor", "email": "richard@gmail.com",
+                "perfil_conductor": {"numDoc": "09876543"},
+            },
+            "77777777": {"rol": "Conductor", "identifier": "77777777", "dni": "77777777"},
+            "__flota__": {"K-001": {}},
+        }
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True):
+            indice = backend.construir_indice_login()
+
+        # Cualquiera de sus identificadores lleva a la misma clave.
+        for alias in ("de.los@kapital.com", "richard@gmail.com", "09876543"):
+            self.assertEqual(indice[alias], "de.los@kapital.com", alias)
+        self.assertEqual(indice["77777777"], "77777777")
+        # Las pseudo-claves no son cuentas.
+        self.assertNotIn("__flota__", indice)
+
+    def test_the_login_index_is_case_insensitive_like_the_full_lookup(self):
+        usuarios = {"Admin@Kapital.com": {"rol": "Administrador", "email": "Admin@Kapital.com"}}
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True):
+            indice = backend.construir_indice_login()
+        self.assertEqual(indice["admin@kapital.com"], "Admin@Kapital.com")
+
+    def test_the_login_index_never_holds_credentials_or_permissions(self):
+        """Solo dice dónde mirar. La contraseña se lee del usuario real."""
+        usuarios = {"77777777": {
+            "rol": "Administrador", "estado": "Activo", "password": "kap9810", "dni": "77777777",
+        }}
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True):
+            indice = backend.construir_indice_login()
+        serializado = json.dumps(indice)
+        self.assertNotIn("kap9810", serializado)
+        self.assertNotIn("Administrador", serializado)
+        self.assertNotIn("Activo", serializado)
+
+    def test_a_missing_or_broken_index_still_lets_everyone_in(self):
+        """El atajo es un atajo: si no resuelve, se sigue por el camino largo."""
+        async def ejecutar(valor_del_indice):
+            with mock.patch.dict(backend.login_index, {}, clear=True),                     mock.patch.object(backend, "_fetch_proyeccion_sin_respaldo",
+                                      new=AsyncMock(return_value=valor_del_indice)):
+                return await backend._usuario_por_indice("77777777")
+
+        # Índice ausente, vacío, de otro tipo, o sin ese identificador.
+        for valor in (backend._MISSING, {}, [], "no-soy-un-indice", {"otro": "K-1"}):
+            self.assertIsNone(asyncio.run(ejecutar(valor)), repr(valor))
+
+    def test_the_shortcut_never_breaks_a_login_when_the_provider_misbehaves(self):
+        async def ejecutar():
+            with mock.patch.object(backend, "_fetch_proyeccion_sin_respaldo",
+                                   new=AsyncMock(return_value={"77777777": "77777777"})),                     mock.patch.object(backend, "_fetch_usuario_por_clave",
+                                      new=AsyncMock(side_effect=RuntimeError("boom"))):
+                return await backend._usuario_por_indice("77777777")
+
+        self.assertIsNone(asyncio.run(ejecutar()), "un fallo del atajo devuelve None, no revienta")
 
     def test_the_activity_log_never_grows_past_its_cap(self):
         """Todo el estado vive en una fila: un historial sin tope la hincharía."""
