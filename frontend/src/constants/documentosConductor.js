@@ -156,3 +156,20 @@ export const caraDestinoParaArrastre = (caras) => {
   if (lista.length === 0) return null;
   return (lista.find((cara) => !cara.tieneArchivo) || lista[0]).campo;
 };
+
+/**
+ * Cara por la que se abre la tarjeta.
+ *
+ * No es lo mismo que el destino de un arrastre: allí se decide dónde cae un
+ * archivo, y aquí qué se le enseña a quien llega. Si ya hay una imagen con
+ * ambas caras el documento está resuelto, así que se abre por ella. Abrir por
+ * el anverso vacío pedía subir algo que el conductor ya había entregado.
+ */
+export const caraInicial = (caras) => {
+  const lista = Array.isArray(caras) ? caras.filter(Boolean) : [];
+  if (lista.length === 0) return null;
+  const completo = lista.find(
+    (cara) => String(cara.campo).endsWith(SUFIJO_COMPLETO) && cara.tieneArchivo,
+  );
+  return completo ? completo.campo : caraDestinoParaArrastre(lista);
+};

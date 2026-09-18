@@ -14,6 +14,8 @@
  * problema: eso todavía no está listo.
  */
 
+import { admiteReverso, claveCompleto, documentoPorClave } from './documentosConductor.js';
+
 export const ESTADO_OK = 'ok';
 export const ESTADO_FALTA = 'falta';
 export const ESTADO_INVALIDO = 'invalido';
@@ -36,6 +38,27 @@ const hayArchivo = (valor) => {
   if (typeof valor === 'string') return valor.trim().length > 0;
   return Boolean(valor.name || valor.path || valor.base64 || valor.size);
 };
+
+/**
+ * Campos cuyo archivo da por entregado este documento.
+ *
+ * Un documento de dos caras se escanea muchas veces en una sola imagen, y ese
+ * archivo vive en su campo hermano `...Completo`. Mirar solo el anverso hacía
+ * que el formulario siguiera pidiendo en ámbar —y el botón de enviar siguiera
+ * bloqueado— por algo que el conductor ya había subido.
+ */
+export const camposQueEntregan = (campo) => (
+  admiteReverso(documentoPorClave(campo)) ? [campo, claveCompleto(campo)] : [campo]
+);
+
+/**
+ * Si este documento está entregado, mire quien lo mire.
+ *
+ * Tres pantallas lo resolvían por su cuenta con `!perfil[campo]` y las tres se
+ * equivocaban igual con el documento completo.
+ */
+export const documentoEntregado = (campo, datos) =>
+  camposQueEntregan(campo).some((clave) => hayArchivo(datos?.[clave]));
 
 export const CAMPOS_ONBOARDING = [
   { campo: 'nombres', seccion: 'personales', etiqueta: 'Nombres y apellidos' },
@@ -132,8 +155,9 @@ export const estadoDeCampo = (campo, datos) => {
   if (!regla) return ESTADO_OK;
 
   const valor = datos?.[regla.campo];
-  const presente = regla.presente || (regla.archivo ? hayArchivo : conTexto);
-  const lleno = presente(valor);
+  const lleno = regla.presente
+    ? regla.presente(valor)
+    : (regla.archivo ? documentoEntregado(regla.campo, datos) : conTexto(valor));
   if (!lleno) return regla.requerido === false ? ESTADO_OK : ESTADO_FALTA;
   if (regla.valido && !regla.valido(valor, datos)) return ESTADO_INVALIDO;
   return ESTADO_OK;

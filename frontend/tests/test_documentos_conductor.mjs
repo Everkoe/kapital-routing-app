@@ -9,6 +9,7 @@ import {
   admiteReverso,
   CARA_COMPLETO,
   caraDestinoParaArrastre,
+  caraInicial,
   carasDeDocumento,
   claveCompleto,
   claveReverso,
@@ -164,4 +165,31 @@ test('la clave del archivo completo no choca con ninguna otra', () => {
   assert.ok(claves.includes(claveCompleto('dniScaneado')));
   assert.equal(claveCompleto('dniScaneado'), 'dniScaneadoCompleto');
   assert.notEqual(claveCompleto('dniScaneado'), claveReverso('dniScaneado'));
+});
+
+test('con la imagen completa subida, la tarjeta abre por ella', () => {
+  // Lo que se veía: subir «Completo» dejaba la tarjeta abierta en un anverso
+  // vacío, pidiendo algo que el conductor ya había entregado.
+  const caras = [
+    { campo: 'dniScaneado', tieneArchivo: false },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+    { campo: 'dniScaneadoCompleto', tieneArchivo: true },
+  ];
+
+  assert.equal(caraInicial(caras), 'dniScaneadoCompleto');
+  // El destino de un arrastre no cambia: ahí sigue mandando el primer hueco,
+  // y de eso depende también la tarjeta del administrador.
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneado');
+});
+
+test('sin imagen completa, la tarjeta abre por donde falta', () => {
+  const caras = [
+    { campo: 'dniScaneado', tieneArchivo: true },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+    { campo: 'dniScaneadoCompleto', tieneArchivo: false },
+  ];
+
+  assert.equal(caraInicial(caras), 'dniScaneadoReverso');
+  assert.equal(caraInicial([]), null);
+  assert.equal(caraInicial(null), null);
 });
