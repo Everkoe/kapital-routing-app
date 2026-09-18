@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { urlFirmada } from '../utils/documentoStorage';
+import { urlFirmada, urlFirmadaEnCache } from '../utils/documentoStorage';
 import { tieneContenido } from '../utils/documentoArchivo';
 
 /**
@@ -30,12 +30,19 @@ const rutaEnStorage = (valor) => (
 const ImagenGuardada = ({ imagen, alt, className, style, onError }) => {
   const directa = fuenteDirecta(imagen);
   const ruta = rutaEnStorage(imagen);
-  const [firmada, setFirmada] = useState('');
+  // Si esta ruta ya se firmó hace poco se parte de ella, y la imagen aparece
+  // en el primer fotograma en vez de tras una ida y vuelta.
+  const [firmada, setFirmada] = useState(() => urlFirmadaEnCache(ruta));
 
   useEffect(() => {
     if (!ruta) return undefined;
     let vigente = true;
-    setFirmada('');
+    const enCache = urlFirmadaEnCache(ruta);
+    setFirmada(enCache);
+    // Con una vigente no hace falta pedir nada; sin ella se deja lo que haya
+    // —normalmente nada— hasta que llegue la nueva, para no vaciar una imagen
+    // que se está viendo.
+    if (enCache) return () => { vigente = false; };
     urlFirmada(ruta)
       .then((url) => { if (vigente) setFirmada(url); })
       .catch(() => {});

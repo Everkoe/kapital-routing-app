@@ -1,5 +1,5 @@
-import { apiFetch } from './apiClient';
-import { documentoABase64 } from './imageUtils';
+import { apiFetch } from './apiClient.js';
+import { documentoABase64 } from './imageUtils.js';
 
 /**
  * Sube un documento a Supabase Storage y devuelve lo que se guarda en el perfil.
@@ -62,10 +62,54 @@ export const esDocumentoEnStorage = (documento) =>
 /**
  * URL temporal para ver un documento del bucket.
  *
- * Se pide en el momento de abrirlo y no se guarda: caduca en minutos, así que
- * conservarla sería guardar un enlace roto.
+ * Se guarda mientras dure, y ni un segundo más.
+ *
+ * Cada foto necesita una ida y vuelta antes de poder dibujarse, y eso se veía:
+ * el avatar de la lista aparecía con un parpadeo, un círculo vacío durante un
+ * instante. Pedirla de nuevo en cada montaje repetía el parpadeo al cambiar de
+ * pestaña o de página, para la misma imagen de siempre.
+ *
+ * El servidor las firma por `DOCUMENT_URL_TTL_SECONDS` —cinco minutos—, así
+ * que se reutilizan durante algo menos, con margen para que ninguna caduque
+ * entre que se entrega y se usa. Se guarda la promesa y no solo el resultado:
+ * así una lista con la misma foto repetida hace una sola petición en vez de
+ * una por tarjeta.
  */
+const VIDA_DE_LA_FIRMA_MS = 5 * 60 * 1000;
+const MARGEN_MS = 30 * 1000;
+
+const firmadas = new Map();
+
+/**
+ * La URL ya resuelta, si la hay, sin esperar a nadie.
+ *
+ * Permite pintar la imagen en el primer fotograma cuando ya se pidió antes,
+ * que es lo que quita el parpadeo al volver a una pantalla.
+ */
+export const urlFirmadaEnCache = (path) => {
+  const guardada = firmadas.get(path);
+  return guardada && guardada.expira > Date.now() ? guardada.url : '';
+};
+
+/** Se olvida todo al cerrar sesión: una firma es un permiso, y ya no lo hay. */
+export const olvidarUrlsFirmadas = () => firmadas.clear();
+
 export const urlFirmada = async (path) => {
-  const { url } = await apiFetch(`/api/documentos/url?path=${encodeURIComponent(path)}`);
-  return url;
+  const guardada = firmadas.get(path);
+  if (guardada && guardada.expira > Date.now()) return guardada.promesa;
+
+  const promesa = apiFetch(`/api/documentos/url?path=${encodeURIComponent(path)}`)
+    .then(({ url }) => {
+      const entrada = firmadas.get(path);
+      if (entrada && entrada.promesa === promesa) entrada.url = url;
+      return url;
+    });
+
+  // Un fallo no se queda guardado: el siguiente intento vuelve a pedirla.
+  promesa.catch(() => {
+    if (firmadas.get(path)?.promesa === promesa) firmadas.delete(path);
+  });
+
+  firmadas.set(path, { promesa, url: '', expira: Date.now() + VIDA_DE_LA_FIRMA_MS - MARGEN_MS });
+  return promesa;
 };
