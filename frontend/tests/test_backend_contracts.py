@@ -2234,6 +2234,56 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(datos["tipos"], ["Unidad actualizada", "Usuario inició sesión"])
         self.assertEqual(datos["responsables"], ["admin@kapital.com", "gerente@kapital.com"])
 
+    async def _alta(self, **campos):
+        with (
+            patch.object(backend, "require_admin_session", new=AsyncMock(return_value={})),
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_and_verify_fleet", new=AsyncMock(side_effect=lambda uid, v: v)),
+        ):
+            return await backend.add_flota(backend.FlotaRegistro(**campos))
+
+    def test_the_padron_and_the_plate_are_stored_apart(self):
+        """El formulario mandaba el padrón en el campo de la placa.
+
+        Resultado: la unidad se llamaba bien pero se quedaba sin matrícula.
+        """
+        with mock.patch.dict(backend.conductores_db, {}, clear=True):
+            respuesta = asyncio.run(self._alta(
+                padron="k-500", placa="bur-628", chofer="JUAN PEREZ", tipo="AUTO", capacidad=4,
+            ))
+            guardada = backend.conductores_db["K-500"]
+
+        self.assertEqual(respuesta["unidad"]["unidad_id"], "K-500", "el padrón identifica la unidad")
+        self.assertEqual(guardada["placa"], "BUR-628", "y la matrícula se guarda aparte")
+        self.assertEqual(guardada["chofer"], "JUAN PEREZ")
+
+    def test_an_old_client_that_only_sends_the_plate_still_registers(self):
+        """El formulario anterior mandaba solo `placa`, con el padrón dentro."""
+        with mock.patch.dict(backend.conductores_db, {}, clear=True):
+            asyncio.run(self._alta(placa="K-501", chofer="X", tipo="AUTO", capacidad=4))
+            self.assertIn("K-501", backend.conductores_db)
+
+    def test_a_duplicated_padron_or_plate_is_refused_by_name(self):
+        existente = {"K-500": {"chofer": "Otro", "placa": "BUR-628"}}
+        with mock.patch.dict(backend.conductores_db, existente, clear=True):
+            with self.assertRaises(HTTPException) as padron:
+                asyncio.run(self._alta(padron="K-500", placa="XYZ-111", chofer="X", tipo="AUTO", capacidad=4))
+            with self.assertRaises(HTTPException) as placa:
+                asyncio.run(self._alta(padron="K-999", placa="bur-628", chofer="X", tipo="AUTO", capacidad=4))
+
+        self.assertEqual(padron.exception.status_code, 409)
+        self.assertIn("K-500", padron.exception.detail)
+        self.assertEqual(placa.exception.status_code, 409)
+        self.assertIn("BUR-628", placa.exception.detail)
+        self.assertIn("K-500", placa.exception.detail, "dice en qué unidad está esa placa")
+
+    def test_registering_a_unit_no_longer_asks_for_the_atu(self):
+        with mock.patch.dict(backend.conductores_db, {}, clear=True):
+            asyncio.run(self._alta(padron="K-502", placa="AAA-111", chofer="X", tipo="AUTO", capacidad=4))
+            guardada = backend.conductores_db["K-502"]
+        self.assertNotIn("atu", guardada)
+        self.assertIn("soat", guardada)
+
     def test_the_activity_log_never_grows_past_its_cap(self):
         """Todo el estado vive en una fila: un historial sin tope la hincharía."""
         with mock.patch.object(backend, "actividad_db", []):

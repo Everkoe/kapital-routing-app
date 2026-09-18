@@ -3106,7 +3106,14 @@ class EmergencyRequest(BaseModel):
     horario: str
 
 class FlotaRegistro(BaseModel):
-    placa: str
+    # `padron` es el identificador interno con el que Kapital nombra la unidad
+    # (K-027) y `placa` la matrícula del vehículo (BUR-628). El formulario los
+    # mandaba en el mismo campo, así que las unidades creadas a mano se
+    # quedaban sin matrícula y su padrón viajaba en el campo equivocado.
+    # `padron` es opcional para que un cliente viejo, que solo manda `placa`,
+    # siga registrando unidades como hasta ahora.
+    padron: Optional[str] = None
+    placa: str = ""
     capacidad: int
     tipo: str
     chofer: str
@@ -3128,6 +3135,7 @@ class FlotaUpdate(BaseModel):
     ignores old clients' extra ``*_doc`` fields, while the merge performed by
     the endpoint preserves the values already stored for the driver dossier.
     """
+    placa: Optional[str] = None
     capacidad: Optional[int] = None
     tipo: Optional[str] = None
     chofer: Optional[str] = None
@@ -3629,6 +3637,7 @@ _ETIQUETA_FLOTA = {
     "chofer": "Nombre del chofer",
     "telefono": "Teléfono",
     "tipo": "Tipo de vehículo",
+    "placa": "Placa del vehículo",
     "capacidad": "Capacidad",
     "soat": "Vencimiento SOAT",
     "revision": "Vencimiento revisión técnica",
@@ -5245,7 +5254,7 @@ async def get_conductor_info(unidad_id: str):
 # valores ya guardados siguen en la fila pero no se leen ni se muestran.
 _FLEET_EXPIRY_FIELDS = ("soat", "revision", "licencia")
 _FLEET_EDITABLE_FIELDS = (
-    "capacidad", "tipo", "chofer", "telefono", *_FLEET_EXPIRY_FIELDS,
+    "capacidad", "tipo", "chofer", "telefono", "placa", *_FLEET_EXPIRY_FIELDS,
 )
 
 
@@ -5332,14 +5341,28 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     await require_admin_session(session_token)
     await reload_db(force=True)
     global conductores_db
-    unit_id = flota.placa.strip()
+    # Sin `padron` se usa `placa`, que es lo que mandaba el formulario antiguo.
+    unit_id = (flota.padron or flota.placa or "").strip().upper()
     if not unit_id:
         raise HTTPException(status_code=400, detail="El padrón de la unidad no puede estar vacío.")
     if unit_id in conductores_db:
-        raise HTTPException(status_code=409, detail="La unidad ya existe.")
+        raise HTTPException(status_code=409, detail=f"Ya existe una unidad con el padrón {unit_id}.")
+
+    matricula = (flota.placa or "").strip().upper() if flota.padron else ""
+    if matricula:
+        duplicada = next(
+            (uid for uid, u in conductores_db.items()
+             if isinstance(u, dict) and str(u.get("placa") or "").strip().upper() == matricula),
+            None,
+        )
+        if duplicada:
+            raise HTTPException(status_code=409, detail=f"La placa {matricula} ya está en la unidad {duplicada}.")
+
     values = _normalize_fleet_expiries({
         key: getattr(flota, key) for key in _FLEET_EDITABLE_FIELDS
     })
+    if matricula:
+        values["placa"] = matricula
     # Uploads remain accepted for the independent new-unit flow. They are not
     # part of FlotaUpdate and therefore cannot be changed from the pencil modal.
     for field in ("soat_doc", "revision_doc", "licencia_doc"):
