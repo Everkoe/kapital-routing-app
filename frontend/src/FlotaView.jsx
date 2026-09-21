@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { Paperclip, MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
+import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import CampoEditable from './components/CampoEditable';
@@ -418,18 +418,11 @@ const FlotaView = ({ usuario, initialBase }) => {
     );
   };
 
-  const handleDelete = async (unitId) => {
-    if (!unitId || !window.confirm(`¿Estás seguro de eliminar la unidad ${unitId}?`)) return;
-    try {
-      // apiFetch propaga el `detail` del backend (sesión expirada, rol sin
-      // permiso) en vez de un fallo genérico que el admin no puede accionar.
-      await apiFetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
-      await fetchFlota();
-      toast.success('Unidad eliminada.');
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
+  // Aquí había un botón de eliminar la unidad. Se retiró porque dar de baja a
+  // alguien ya se hace en Accesos, donde está junto a desactivar y con su
+  // confirmación: tener una segunda puerta en la tabla de flota solo repartía
+  // la misma decisión en dos sitios, y esta era la que estaba a un clic de
+  // distancia en cada fila. El endpoint sigue existiendo.
 
 
   const handleCreate = () => setShowModal(true);
@@ -748,7 +741,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                         <MessageCircle size={15} />
                       </a>
                     )}
-                    <button className="btn-icon" onClick={() => handleDelete(getFleetUnitId(vehiculo))} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
                   </div>
                 </td>
                 )}
