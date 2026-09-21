@@ -1097,6 +1097,21 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 
 /* --- Estilos Responsive para FlotaView --- */
+/* Cabeceras de tarjeta alineadas a la izquierda.
+ *
+ * `#root` trae `text-align: center` de la plantilla de Vite y todo lo hereda,
+ * así que un título sin alineación propia sale centrado dentro de su columna
+ * aunque la columna esté a la izquierda: el título quedaba desplazado y su
+ * subtítulo no. No se corrige en la raíz porque medio panel —las tarjetas de
+ * KPI, los estados vacíos— sí quiere ese centrado y se movería entero.
+ *
+ * La versión móvil vuelve a centrarlas a propósito, y manda porque usa
+ * `!important`. */
+.flota-header-left,
+.panel-cabecera {
+  text-align: left;
+}
+
 @media (max-width: 768px) {
   .flota-header-container {
     flex-direction: column !important;
