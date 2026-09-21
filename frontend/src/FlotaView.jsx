@@ -725,15 +725,16 @@ const FlotaView = ({ usuario, initialBase }) => {
                 <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc, 'Licencia MTC')}</td>
                 {!isCliente && (
                 <td>
-                  {/* El número se enseña, no se esconde detrás del icono. La
-                      columna se llamaba «Acciones» y ya solo queda una, así que
-                      en vez de un icono suelto en una celda ancha va el dato:
-                      quien mira la tabla sabe a quién llamar sin pasar el ratón
-                      por encima ni abrir la ficha.
+                  {/* La acción lleva su nombre escrito, pero no el número.
+                      Un icono suelto dejaba la celda vacía y obligaba a pasar
+                      el ratón para saber qué hacía; enseñar el teléfono lo
+                      arreglaba, pero ponía los 112 a la vista de cualquiera que
+                      mire la pantalla o la fotografíe, y para ahorrar un clic:
+                      el número sigue estando en la ficha del conductor.
 
                       El número casi siempre viene del perfil del conductor y no
-                      del registro de flota: mirar solo `telefono` lo escondía en
-                      108 de 109 unidades. */}
+                      del registro de flota: mirar solo `telefono` escondía este
+                      botón en 108 de 109 unidades. */}
                   {whatsappDeUnidad(vehiculo) ? (
                     <a
                       href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
@@ -743,7 +744,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                       title={`Escribir por WhatsApp a ${vehiculo.chofer || 'el conductor'}`}
                     >
                       <MessageCircle size={14} aria-hidden="true" />
-                      <span>{telefonoDeUnidad(vehiculo)}</span>
+                      <span>Escribir</span>
                     </a>
                   ) : (
                     <span className="unidad-sin-contacto">Sin teléfono</span>
