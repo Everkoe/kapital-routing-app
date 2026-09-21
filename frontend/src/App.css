@@ -2502,3 +2502,33 @@ select.campo-pendiente {
   font-weight: 700; font-size: 0.9rem; transition: opacity 0.18s;
 }
 .provisional-listo:hover { opacity: 0.88; }
+
+/* --- Contacto de la unidad en la tabla de flota ----------------------------
+   La columna se llamaba «Acciones» con una sola acción dentro: un icono
+   pequeño perdido en una celda ancha. Ahora enseña el número, que es lo que
+   hacía falta para decidir a quién escribir. */
+.unidad-contacto {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+.unidad-contacto:hover {
+  color: var(--primary);
+  background: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.35);
+}
+.unidad-sin-contacto {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}

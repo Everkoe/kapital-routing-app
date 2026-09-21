@@ -670,7 +670,7 @@ const FlotaView = ({ usuario, initialBase }) => {
             <th>SOAT</th>
             <th>Rev. Técnica</th>
             <th>Licencia MTC</th>
-            {!isCliente && <th>Acciones</th>}
+            {!isCliente && <th>Contacto</th>}
           </tr>
         </thead>
         <tbody>
@@ -725,23 +725,29 @@ const FlotaView = ({ usuario, initialBase }) => {
                 <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc, 'Licencia MTC')}</td>
                 {!isCliente && (
                 <td>
-                  <div style={{ display: 'flex', gap: '5px' }}>
-                    {/* El número casi siempre viene del perfil del conductor, no
-                        del registro de flota: mirar solo `telefono` escondía este
-                        botón en 108 de 109 unidades. */}
-                    {whatsappDeUnidad(vehiculo) && (
-                      <a
-                        href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-icon"
-                        title={`Contactar por WhatsApp (${telefonoDeUnidad(vehiculo)})`}
-                        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <MessageCircle size={15} />
-                      </a>
-                    )}
-                  </div>
+                  {/* El número se enseña, no se esconde detrás del icono. La
+                      columna se llamaba «Acciones» y ya solo queda una, así que
+                      en vez de un icono suelto en una celda ancha va el dato:
+                      quien mira la tabla sabe a quién llamar sin pasar el ratón
+                      por encima ni abrir la ficha.
+
+                      El número casi siempre viene del perfil del conductor y no
+                      del registro de flota: mirar solo `telefono` lo escondía en
+                      108 de 109 unidades. */}
+                  {whatsappDeUnidad(vehiculo) ? (
+                    <a
+                      href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="unidad-contacto"
+                      title={`Escribir por WhatsApp a ${vehiculo.chofer || 'el conductor'}`}
+                    >
+                      <MessageCircle size={14} aria-hidden="true" />
+                      <span>{telefonoDeUnidad(vehiculo)}</span>
+                    </a>
+                  ) : (
+                    <span className="unidad-sin-contacto">Sin teléfono</span>
+                  )}
                 </td>
                 )}
               </tr>
