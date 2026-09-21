@@ -16,8 +16,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   histórico; no asumir que es el activo. El backend accede vía REST directo con `httpx` (sin SDK `supabase-py`).
   Todo el estado vive en **una sola fila**: `public.app_state` con `id = 1`, donde `usuarios` contiene los
   usuarios reales más las pseudo-claves `__flota__`, `__notifications__`, `__routes_summary__`,
-  `__historial_rutas__` y `__lock__`. Snapshot completo ≈ 3,95 MB (solo `usuarios` ≈ 3,42 MB): el egress es
-  una restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas.
+  `__historial_rutas__`, `__lock__`, `__sessions__`, `__actividad__` y `__login__`. El egress es una
+  restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas. La fila llegó a pesar
+  3,95 MB; hoy son **228 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
+  entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
+  (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 238 KB, y lo que queda es la escritura de la sesión,
+  que obliga a bajar la columna antes de reescribirla porque PostgREST no sabe hacer escrituras parciales).
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -38,10 +42,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   compatible no dejara fuera a nadie; esa lectura está desplegada desde el PR #3, así que la precondición ya no
   existe. Las 115 contraseñas que quedaban en claro se cifraron de una vez con
   `scripts/cifrar_contrasenas.py` — esperar al login de cada persona habría dejado casi toda la base en claro,
-  porque 103 de esas cuentas no habían entrado nunca. **Ya no se puede leer una contraseña de la base**: no hay
-  acción de reinicio en Administración y `/api/auth/change-password` exige la actual, así que un olvido hoy se
-  resuelve solo con la copia de accesos que tenga el administrador fuera. Construir ese reinicio es el siguiente
-  paso natural.
+  porque 103 de esas cuentas no habían entrado nunca. **Ya no se puede leer una contraseña de la base**, así que
+  un olvido se resuelve con `POST /api/admin/users/reset-password` y su botón en Accesos: entrega una
+  provisional una sola vez —no se guarda en ningún otro sitio, tampoco en el historial—, marca
+  `needs_password_change` y cierra las sesiones abiertas de esa cuenta. Un gerente puede reiniciar la de un
+  conductor o un cliente, pero no la de otra cuenta de administración ni la suya propia: sería tomarla.
 - **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
   `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual:
@@ -64,7 +69,7 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
 - `framer-motion` — animaciones
 
-**Backend** (`frontend/api/index.py`, FastAPI/Python, ~4625 líneas y 46 endpoints en un solo archivo —
+**Backend** (`frontend/api/index.py`, FastAPI/Python, ~6170 líneas y 54 endpoints en un solo archivo —
 muy por encima del techo de 800; su modularización es el P2 del PR #1)
 - `fastapi`, `uvicorn`, `pandas`, `openpyxl`, `httpx`, `python-dotenv`
 - WebSockets nativos para eventos en tiempo real (`WebSocketManager`, broadcast por rol)
@@ -153,8 +158,9 @@ Contexto que no cambia con cada lote:
    Programador de rutas (casos `RTE` de `docs/phase-0/regression-matrix.md`). No optimizar por iniciativa propia.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
    El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
-   Lo que falta es cerrar los 11 endpoints de lectura restantes, el handshake del WebSocket, y retirar el
-   usuario sembrado con contraseña por defecto que inyecta `_decode_full_state`.
+   Lo que falta es cerrar los 11 endpoints de lectura restantes y el handshake del WebSocket. El usuario
+   sembrado con contraseña por defecto que inyectaba `_decode_full_state` ya está retirado, y hay una prueba
+   que falla si vuelve a aparecer una contraseña escrita en el módulo.
 4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.
 5. **Separar backend y frontend en dos repositorios: evaluado el 2026-09-15 y descartado por ahora.**
    El mismo origen es carga estructural: sostiene la cookie `SameSite=Lax` (que hoy neutraliza el CORS
