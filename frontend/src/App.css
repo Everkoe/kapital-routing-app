@@ -1097,6 +1097,21 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 
 /* --- Estilos Responsive para FlotaView --- */
+/* Cabeceras de tarjeta alineadas a la izquierda.
+ *
+ * `#root` trae `text-align: center` de la plantilla de Vite y todo lo hereda,
+ * así que un título sin alineación propia sale centrado dentro de su columna
+ * aunque la columna esté a la izquierda: el título quedaba desplazado y su
+ * subtítulo no. No se corrige en la raíz porque medio panel —las tarjetas de
+ * KPI, los estados vacíos— sí quiere ese centrado y se movería entero.
+ *
+ * La versión móvil vuelve a centrarlas a propósito, y manda porque usa
+ * `!important`. */
+.flota-header-left,
+.panel-cabecera {
+  text-align: left;
+}
+
 @media (max-width: 768px) {
   .flota-header-container {
     flex-direction: column !important;
@@ -2502,3 +2517,34 @@ select.campo-pendiente {
   font-weight: 700; font-size: 0.9rem; transition: opacity 0.18s;
 }
 .provisional-listo:hover { opacity: 0.88; }
+
+/* --- Contacto de la unidad en la tabla de flota ----------------------------
+   La columna se llamaba «Acciones» con una sola acción dentro: un icono
+   pequeño perdido en una celda ancha. Ahora la acción lleva su nombre escrito
+   —pero no el teléfono: son 112 números a la vista de quien mire la pantalla,
+   y solo para ahorrar el clic que lleva a la ficha del conductor—. */
+.unidad-contacto {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+.unidad-contacto:hover {
+  color: var(--primary);
+  background: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.35);
+}
+.unidad-sin-contacto {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { Paperclip, MessageCircle, Trash2, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
+import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import CampoEditable from './components/CampoEditable';
@@ -418,18 +418,11 @@ const FlotaView = ({ usuario, initialBase }) => {
     );
   };
 
-  const handleDelete = async (unitId) => {
-    if (!unitId || !window.confirm(`¿Estás seguro de eliminar la unidad ${unitId}?`)) return;
-    try {
-      // apiFetch propaga el `detail` del backend (sesión expirada, rol sin
-      // permiso) en vez de un fallo genérico que el admin no puede accionar.
-      await apiFetch(`/api/flota/${encodeURIComponent(unitId)}`, { method: 'DELETE' });
-      await fetchFlota();
-      toast.success('Unidad eliminada.');
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
+  // Aquí había un botón de eliminar la unidad. Se retiró porque dar de baja a
+  // alguien ya se hace en Accesos, donde está junto a desactivar y con su
+  // confirmación: tener una segunda puerta en la tabla de flota solo repartía
+  // la misma decisión en dos sitios, y esta era la que estaba a un clic de
+  // distancia en cada fila. El endpoint sigue existiendo.
 
 
   const handleCreate = () => setShowModal(true);
@@ -677,7 +670,7 @@ const FlotaView = ({ usuario, initialBase }) => {
             <th>SOAT</th>
             <th>Rev. Técnica</th>
             <th>Licencia MTC</th>
-            {!isCliente && <th>Acciones</th>}
+            {!isCliente && <th>Contacto</th>}
           </tr>
         </thead>
         <tbody>
@@ -732,24 +725,30 @@ const FlotaView = ({ usuario, initialBase }) => {
                 <td>{renderBadge(vehiculo.licencia, vehiculo.licencia_doc, 'Licencia MTC')}</td>
                 {!isCliente && (
                 <td>
-                  <div style={{ display: 'flex', gap: '5px' }}>
-                    {/* El número casi siempre viene del perfil del conductor, no
-                        del registro de flota: mirar solo `telefono` escondía este
-                        botón en 108 de 109 unidades. */}
-                    {whatsappDeUnidad(vehiculo) && (
-                      <a
-                        href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-icon"
-                        title={`Contactar por WhatsApp (${telefonoDeUnidad(vehiculo)})`}
-                        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <MessageCircle size={15} />
-                      </a>
-                    )}
-                    <button className="btn-icon" onClick={() => handleDelete(getFleetUnitId(vehiculo))} title="Eliminar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} /></button>
-                  </div>
+                  {/* La acción lleva su nombre escrito, pero no el número.
+                      Un icono suelto dejaba la celda vacía y obligaba a pasar
+                      el ratón para saber qué hacía; enseñar el teléfono lo
+                      arreglaba, pero ponía los 112 a la vista de cualquiera que
+                      mire la pantalla o la fotografíe, y para ahorrar un clic:
+                      el número sigue estando en la ficha del conductor.
+
+                      El número casi siempre viene del perfil del conductor y no
+                      del registro de flota: mirar solo `telefono` escondía este
+                      botón en 108 de 109 unidades. */}
+                  {whatsappDeUnidad(vehiculo) ? (
+                    <a
+                      href={`https://wa.me/${whatsappDeUnidad(vehiculo)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="unidad-contacto"
+                      title={`Escribir por WhatsApp a ${vehiculo.chofer || 'el conductor'}`}
+                    >
+                      <MessageCircle size={14} aria-hidden="true" />
+                      <span>Escribir</span>
+                    </a>
+                  ) : (
+                    <span className="unidad-sin-contacto">Sin teléfono</span>
+                  )}
                 </td>
                 )}
               </tr>

@@ -307,7 +307,7 @@ export default function AdminDashboard({ onNavigate, usuario }) {
 
       {/* HEADER */}
       <div style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
+        <div className="panel-cabecera">
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.6rem', fontWeight: 700 }}>Panel de Control</h2>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
             Vista general del sistema en tiempo real. Datos actualizados al momento de la carga.

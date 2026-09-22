@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download } from 'lucide-react';
+import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download, UploadCloud } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
@@ -40,6 +40,7 @@ const ProgramadorWorkbench = React.lazy(() => import('./programador/ProgramadorW
 const ProgramadorFlota = React.lazy(() => import('./programador/FlotaProgramador'));
 const ProgramadorAnalisis = React.lazy(() => import('./programador/AnalisisView'));
 const ProgramadorConfig = React.lazy(() => import('./programador/ConfiguracionView'));
+const ProgramadorHistorico = React.lazy(() => import('./programador/HistoricoView'));
 
 // --- Componente de Autenticación ---
 const PantallaAuth = ({ onLogin }) => {
@@ -293,6 +294,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
           {usuarioActual?.rol === 'Programador de rutas' && (
             <>
               <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Operación</a>
+              <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>Histórico</a>
               <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Flota</a>
               <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Análisis</a>
               <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
@@ -348,6 +350,10 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
               <LayoutDashboard size={20} />
               <span>Operación</span>
+            </a>
+            <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>
+              <UploadCloud size={20} />
+              <span>Histórico</span>
             </a>
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
               <Truck size={20} />
@@ -1251,6 +1257,19 @@ function App() {
     }
 
     switch (vistaActual) {
+      case 'historico':
+        // La carga del reporte diario es del Programador: es quien lo descarga
+        // de la intranet. La vista solo se enlaza desde su menú; si otro rol
+        // llega aquí a mano, se le deja en la flota en vez de dibujarle un
+        // panel con props que no le corresponden.
+        if (usuarioActual?.rol !== 'Programador de rutas') {
+          return <FlotaView usuario={usuarioActual} />;
+        }
+        return (
+          <React.Suspense fallback={<GlobalLoader text="Cargando histórico..." />}>
+            <ProgramadorHistorico />
+          </React.Suspense>
+        );
       case 'flota':
         // Para el Programador, la flota es consulta de capacidad. `FlotaView`
         // resuelve otro problema —documentos, altas y bajas— y son operaciones

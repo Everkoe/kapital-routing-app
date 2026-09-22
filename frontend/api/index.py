@@ -1,5 +1,13 @@
 # api/index.py
 import pandas as pd
+
+# Lectura del reporte de la intranet. Vive aparte porque lo comparten este
+# endpoint y el script de carga masiva, y porque este archivo ya pasa de las
+# seis mil lineas.
+try:
+    from api import historico_intranet
+except ImportError:  # ejecucion desde dentro de `api/`
+    import historico_intranet
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi import Request
 import math
@@ -5163,6 +5171,165 @@ def native_kmeans(points, k, max_iters=10):
         
     return labels
 
+
+
+# --- Histórico de la intranet ------------------------------------------------
+
+# Filas por petición a PostgREST. Un mes son 21.271, que caben en 43 viajes;
+# mandarlas de una sola vez agota el tiempo de la función serverless.
+LOTE_HISTORICO = 500
+
+
+def _tabla_url(nombre: str) -> str:
+    return f"{str(STORAGE_CONFIG.url).rstrip('/')}/{nombre}"
+
+
+async def _upsert_tabla(cliente: httpx.AsyncClient, tabla: str,
+                        filas: List[Dict[str, Any]], conflicto: str) -> int:
+    """Escribe en lotes resolviendo duplicados sobre la clave natural.
+
+    `merge-duplicates` es lo que hace repetible la carga: volver a subir el
+    mismo día no duplica nada, y subir uno nuevo solo añade. El Programador
+    sube el reporte a diario y a veces repite el de ayer.
+    """
+    cabeceras = {
+        **HEADERS,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    escritas = 0
+    for inicio in range(0, len(filas), LOTE_HISTORICO):
+        trozo = filas[inicio:inicio + LOTE_HISTORICO]
+        respuesta = await cliente.post(
+            _tabla_url(tabla), params={"on_conflict": conflicto},
+            headers=cabeceras, json=trozo,
+        )
+        if respuesta.status_code not in (200, 201, 204):
+            print(f"[Kapital] {tabla} rechazó el lote: {respuesta.status_code}")
+            _raise_database_unavailable(f"upsert_{tabla}",
+                                        detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+        escritas += len(trozo)
+    return escritas
+
+
+@app.post("/api/programador/historico")
+async def cargar_historico_intranet(
+    file: UploadFile = File(...),
+    session_token: SessionCookie = None,
+):
+    """Recibe el reporte diario de la intranet y lo incorpora al histórico.
+
+    Es la puerta por la que entra lo que realmente ocurrió. De aquí salen las
+    tres cosas que el Programador necesita y que hasta ahora no existían: dónde
+    vive cada pasajero, cuánto tarda de verdad cada ruta, y qué direcciones no
+    se pueden situar y necesitan una persona.
+
+    No calcula ni propone rutas. Solo registra.
+    """
+    actor = await require_admin_session(session_token)
+
+    contenido = await file.read()
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
+
+    try:
+        datos = historico_intranet.leer_reporte(io.BytesIO(contenido))
+        declarados, deducidos = historico_intranet.construir_padron(datos)
+        servicios = historico_intranet.construir_historico(datos)
+        duraciones = historico_intranet.construir_duraciones(datos)
+    except historico_intranet.ReporteInvalido as exc:
+        # El motivo se devuelve tal cual: quien sube el archivo equivocado
+        # necesita saber cuál era el correcto, no un fallo genérico.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Kapital] reporte ilegible: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer el archivo. ¿Es el reporte «Detalle» de la intranet?",
+        ) from exc
+
+    if not servicios:
+        raise HTTPException(
+            status_code=400,
+            detail="El reporte no trae ningún servicio con fecha y turno legibles.",
+        )
+
+    async with httpx.AsyncClient(timeout=90.0) as cliente:
+        # Los dos grupos van por separado a propósito. Quien no declara
+        # coordenada se escribe sin las columnas de ubicación, de modo que lo
+        # que ya se sabía de él sobreviva: un reporte de un día no tiene puntos
+        # suficientes y sobrescribirlo degradaba domicilios resueltos con meses
+        # de historia.
+        if declarados:
+            await _upsert_tabla(cliente, "pasajeros", declarados, "dni")
+        if deducidos:
+            await _upsert_tabla(cliente, "pasajeros", deducidos, "dni")
+        await _upsert_tabla(cliente, "servicios_historicos", servicios,
+                            "fecha_ejecutada,codigo_vehiculo,turno,dni,modalidad")
+        if duraciones:
+            await _upsert_tabla(cliente, "duraciones_base", duraciones,
+                                "cobertura,modalidad,turno")
+
+        # El domicilio se deduce del histórico acumulado y dentro de la base:
+        # mover veinte mil filas para sacar una mediana sería pagar egress por
+        # algo que Postgres resuelve donde están los datos. Cada carga solo
+        # puede mejorarlo, porque añade puntos.
+        ubicaciones = {}
+        recalculo = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/recalcular_ubicaciones",
+            headers={**HEADERS, "Content-Type": "application/json"}, json={},
+        )
+        if recalculo.status_code == 200:
+            filas = recalculo.json()
+            if isinstance(filas, list) and filas:
+                ubicaciones = filas[0]
+        else:
+            # No se aborta: los servicios ya están guardados y son lo valioso.
+            # El recálculo se repite en la siguiente carga.
+            print(f"[Kapital] recalcular_ubicaciones devolvió {recalculo.status_code}")
+
+    resumen = historico_intranet.resumen(
+        len(declarados) + len(deducidos), servicios, duraciones, ubicaciones)
+    registrar_actividad(
+        "Histórico cargado",
+        actor=actor,
+        entity_type="historico",
+        entity_id=resumen.get("hasta") or "",
+        entity_label=f"{resumen['servicios']} servicios",
+        description=(
+            f"Reporte de la intranet del {resumen['desde']} al {resumen['hasta']}: "
+            f"{resumen['pasajeros']} pasajeros, {resumen['ubicacion_pendiente']} sin ubicar."
+        ),
+    )
+    await persist_users_only()
+    return resumen
+
+
+@app.get("/api/programador/estado-historico")
+async def estado_historico(session_token: SessionCookie = None):
+    """Qué hay cargado hoy: sirve para saber si falta subir el reporte."""
+    await require_admin_session(session_token)
+    cabeceras = {**HEADERS, "Prefer": "count=exact", "Range": "0-0"}
+    async with httpx.AsyncClient(timeout=30.0) as cliente:
+        async def cuenta(tabla, params=None):
+            r = await cliente.get(_tabla_url(tabla), headers=cabeceras,
+                                  params={"select": "*", **(params or {})})
+            rango = r.headers.get("content-range", "*/0")
+            return int(rango.split("/")[-1]) if rango.split("/")[-1].isdigit() else 0
+
+        ultimo = await cliente.get(
+            _tabla_url("servicios_historicos"), headers=HEADERS,
+            params={"select": "fecha_ejecutada", "order": "fecha_ejecutada.desc", "limit": 1},
+        )
+        filas = ultimo.json() if ultimo.status_code == 200 else []
+        return {
+            "servicios": await cuenta("servicios_historicos"),
+            "pasajeros": await cuenta("pasajeros"),
+            "sin_ubicar": await cuenta("pasajeros",
+                                       {"estado_ubicacion": "eq.no_resuelta"}),
+            "duraciones": await cuenta("duraciones_base"),
+            "ultimo_dia": filas[0]["fecha_ejecutada"] if filas else None,
+        }
 
 
 @app.get("/api/routes")
