@@ -22,6 +22,17 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
   (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 238 KB, y lo que queda es la escritura de la sesión,
   que obliga a bajar la columna antes de reescribirla porque PostgREST no sabe hacer escrituras parciales).
+- **Programador de rutas — tablas propias, fuera de `app_state`**: desde 2026-09-22 existen
+  `public.pasajeros`, `public.servicios_historicos` y `public.duraciones_base`, con RLS activada, sin
+  políticas y con permisos solo para `service_role`. El histórico son 21.271 filas al mes y no cabe en la
+  fila única. Esquema en [supabase/001_programador_rutas.sql](supabase/001_programador_rutas.sql), carga con
+  `scripts/cargar_historico.py` (repetible, upsert sobre clave natural). **No hay tabla de vehículos**: la
+  flota sigue en `app_state.__flota__` y duplicarla crearía dos verdades que sincronizar.
+  El domicilio de cada pasajero lo resuelve `scripts/geocodificar_pasajeros.py`, y **no con un
+  geocodificador** —falla en el 88% de estas direcciones, que usan notación de manzana y lote— sino con la
+  mediana del GPS de sus recojos: 29 m de error mediano contra domicilios conocidos. Los umbrales de
+  confianza están calibrados contra esos domicilios, no elegidos a ojo; `--calibrar` reproduce la medición.
+  Cobertura actual: 768 fiables, 33 dudosos, 310 a revisión humana de 1.111.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -154,8 +165,17 @@ Contexto que no cambia con cada lote:
 
 1. ~~Migrar a DB en la nube~~ — **hecho** (Supabase V2 en modo compat). Pendiente decidir si el estado en
    memoria restante se elimina o se formaliza como caché intencional.
-2. Algoritmos de optimización real de rutas — no implementado, y **congelado a propósito** junto con el rol
-   Programador de rutas (casos `RTE` de `docs/phase-0/regression-matrix.md`). No optimizar por iniciativa propia.
+2. Algoritmos de optimización real de rutas — **descongelado el 2026-09-22** por decisión del usuario, que
+   pasó contexto propio (VROOM + CatBoost + OSRM). Lo hecho hasta ahora es solo la base de datos; **no hay
+   ningún motor de optimización instalado y no debe añadirse por iniciativa propia**.
+   Dos conclusiones medidas que conviene no volver a discutir desde cero:
+   - **La ruta de un pasajero es 100% estable** (cobertura + turno + modalidad); lo que rota es el vehículo,
+     solo 64% estable. La variación diaria real es del 22%, no del 10%: 88 altas y 76 bajas sobre 738.
+   - Descompuesto por día × turno × modalidad × cobertura, el problema diario tiene **una mediana de un
+     pasajero y un vehículo por celda**. Eso es una inserción con comprobación de factibilidad, no un VRP:
+     un solver ahí sería desproporcionado y además pelea con el requisito de continuidad del usuario
+     («seguir el orden anterior, aplicar solo las novedades»). VROOM tiene sentido para reconstruir
+     plantillas desde cero, que es un problema distinto y no urgente.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
    El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
    Lo que falta es cerrar los 11 endpoints de lectura restantes y el handshake del WebSocket. El usuario
