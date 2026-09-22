@@ -839,6 +839,28 @@
 }
 .historico-pendiente strong { color: inherit; }
 
+/* `.pw-header-titles` es una fila: sirve para el titulo con sus etiquetas al
+   lado, que es como lo usa la mesa de trabajo. Aqui lo que acompana al titulo
+   es una frase, no una etiqueta, y en fila salia pegada a su derecha. */
+.historico-titulos {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* El bloque de texto del indicador: valor, etiqueta y nota, uno bajo otro.
+   `.pw-kpi` es una fila, asi que sin este contenedor los tres se repartian en
+   horizontal y la nota se salia de la tarjeta. `min-width: 0` permite que el
+   texto largo se ajuste en vez de empujar la caja. */
+.pw-kpi-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.pw-kpi-texto .pw-kpi-label,
+.pw-kpi-texto .pw-kpi-note { line-height: 1.35; }
+
 /* Un indicador en ámbar cuando lo que cuenta es trabajo pendiente. */
 .pw-kpi-alerta { border-color: rgba(245, 158, 11, 0.35); }
 .pw-kpi-alerta .pw-kpi-icon { color: var(--warning, #f59e0b); }

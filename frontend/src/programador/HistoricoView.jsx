@@ -31,12 +31,19 @@ const fecha = (iso) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE');
 };
 
+/**
+ * Un indicador con la forma que espera `.pw-kpi`: el icono y **un solo**
+ * bloque al lado. Con el valor, la etiqueta y la nota sueltos, la tarjeta los
+ * repartía en horizontal —es una fila— y el texto se salía por la derecha.
+ */
 const Indicador = ({ Icono, valor, etiqueta, nota, alerta }) => (
   <div className={`pw-kpi${alerta ? ' pw-kpi-alerta' : ''}`}>
-    <span className="pw-kpi-icon"><Icono size={18} /></span>
-    <strong className="pw-kpi-value">{valor}</strong>
-    <span className="pw-kpi-label">{etiqueta}</span>
-    {nota && <span className="pw-kpi-note">{nota}</span>}
+    <span className="pw-kpi-icon"><Icono size={19} aria-hidden="true" /></span>
+    <span className="pw-kpi-texto">
+      <strong className="pw-kpi-value">{valor}</strong>
+      <span className="pw-kpi-label">{etiqueta}</span>
+      {nota && <span className="pw-kpi-note">{nota}</span>}
+    </span>
   </div>
 );
 
@@ -88,7 +95,7 @@ const HistoricoView = () => {
   return (
     <div className="pw-root">
       <header className="pw-header">
-        <div className="pw-header-titles">
+        <div className="pw-header-titles historico-titulos">
           <h1 className="pw-title">Histórico de la operación</h1>
           <p className="pw-meta">
             Sube cada día el reporte «Detalle» de la intranet. De aquí salen las
