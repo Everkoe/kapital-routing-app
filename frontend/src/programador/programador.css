@@ -787,3 +787,58 @@
 
 /* Una unidad con registros de más se reconoce por su marca, no por el fondo. */
 .pw-table tr[data-duplicado='true'] td:first-child { border-left: 2px solid var(--kapital-accent-orange); }
+
+/* --- Carga del histórico ---------------------------------------------------
+   La zona de arrastre es grande a propósito: es la acción que el Programador
+   repite cada día, y con el tablero vacío es lo único que hay que hacer. */
+.historico-zona {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 20px;
+  margin: 4px 0 0;
+  border: 2px dashed var(--kapital-border);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  transition: border-color 0.18s, background 0.18s;
+}
+.historico-zona.arrastrando {
+  border-color: var(--primary);
+  background: rgba(20, 184, 166, 0.06);
+}
+.historico-zona.ocupada { opacity: 0.6; pointer-events: none; }
+.historico-zona p { margin: 0; font-weight: 600; color: var(--text-primary); }
+.historico-zona small { margin: 0; font-size: 0.78rem; line-height: 1.5; max-width: 420px; }
+
+.historico-nota {
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.historico-resultado {
+  margin: 0;
+  padding: 4px 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 0.89rem;
+  line-height: 1.5;
+}
+.historico-resultado strong { color: var(--text-primary); }
+.historico-pendiente {
+  list-style: none;
+  margin-left: -18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--warning, #f59e0b);
+}
+.historico-pendiente strong { color: inherit; }
+
+/* Un indicador en ámbar cuando lo que cuenta es trabajo pendiente. */
+.pw-kpi-alerta { border-color: rgba(245, 158, 11, 0.35); }
+.pw-kpi-alerta .pw-kpi-icon { color: var(--warning, #f59e0b); }

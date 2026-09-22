@@ -33,6 +33,15 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   mediana del GPS de sus recojos: 29 m de error mediano contra domicilios conocidos. Los umbrales de
   confianza están calibrados contra esos domicilios, no elegidos a ojo; `--calibrar` reproduce la medición.
   Cobertura actual: 768 fiables, 33 dudosos, 310 a revisión humana de 1.111.
+- **Carga diaria del histórico**: el Programador sube el reporte de la intranet desde su sección
+  **Histórico** (`POST /api/programador/historico`, ~3,6 s para un día de ~830 servicios). La lectura vive en
+  [frontend/api/historico_intranet.py](frontend/api/historico_intranet.py) y la comparten el endpoint y
+  `scripts/cargar_historico.py`, que es para importar meses enteros (~22 s, por encima de lo que aguanta una
+  función serverless). **La ubicación NO sale del archivo subido**: la recalcula la función de Postgres
+  `recalcular_ubicaciones()` sobre el histórico acumulado. Hacerlo desde el archivo degradaba domicilios ya
+  resueltos —medido: una carga de un solo día bajó de 768 buenos a 481, porque un día no llega a los tres
+  puntos GPS que exige el umbral—. Por eso el padrón se escribe en dos grupos y quien no declara coordenada
+  va **sin** las columnas de ubicación, para que lo ya aprendido sobreviva.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -41,8 +50,8 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   tenerlo en cuenta al debuggear "datos que desaparecen".
 - **Gemini AI — descartado como producto, vivo como endpoint**: se construyó "Kapital Copilot", un asistente
   conversacional para el Programador de rutas, vía REST puro (sin SDK, "para ahorrar espacio en Vercel").
-  **Ya no forma parte de la aplicación**: `frontend/src/CopilotChat.jsx` existe (268 líneas) pero **ningún
-  componente lo importa ni lo renderiza** — es código muerto pendiente de retirar. El backend sí conserva
+  **Ya no forma parte de la aplicación**: `CopilotChat.jsx` se retiró el 2026-09-22 (eran 268 líneas que
+  ningún componente importaba). El backend sí conserva
   `POST /api/chat` y su `SYSTEM_PROMPT` en `api/index.py`, gateado con sesión porque consume cuota de pago.
   No asumir que el Copilot es una función disponible al rediseñar el portal del Programador.
 - **Migración de configuración en curso**: `SUPABASE_URL`/`SUPABASE_KEY` ya priorizan variables de entorno,
