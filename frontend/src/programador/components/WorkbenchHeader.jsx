@@ -30,6 +30,14 @@ import PreviewAction from './PreviewAction.jsx';
  * `Guardar` sigue siendo `PreviewAction` porque su backend sí está por hacer.
  */
 
+/** Una fecha ISO en el formato que se lee en Perú. */
+const fechaCorta = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE',
+    { weekday: 'short', day: '2-digit', month: 'short' });
+};
+
 const Kpi = ({ Icon, value, label, note, tone }) => (
   <div className="pw-kpi">
     <span className="pw-kpi-icon" data-tone={tone}><Icon size={19} aria-hidden="true" /></span>
@@ -51,13 +59,26 @@ const WorkbenchHeader = ({
   onExport,
   canExport,
   onIrACargar,
+  dia,
+  dias,
+  onCambiarDia,
 }) => (
   <>
     <header className="pw-header">
       <div className="pw-header-titles">
         <h1 className="pw-title">Programación de rutas</h1>
         <span className="pw-chip">{operacion}</span>
-        <span className="pw-meta"><Calendar size={15} aria-hidden="true" />{fechaPlanificacion}</span>
+        <span className="pw-meta">
+          <Calendar size={15} aria-hidden="true" />
+          {dias?.length > 0 ? (
+            <select className="pw-select pw-select-inline" value={dia}
+              aria-label="Día de la programación"
+              onChange={(e) => onCambiarDia?.(e.target.value)}>
+              <option value="">Último cargado{fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}</option>
+              {dias.map((d) => <option key={d} value={d}>{fechaCorta(d)}</option>)}
+            </select>
+          ) : (fechaPlanificacion ? fechaCorta(fechaPlanificacion) : 'Sin día cargado')}
+        </span>
         <span className="pw-meta"><Clock size={15} aria-hidden="true" />{ventanaOperativa}</span>
       </div>
 

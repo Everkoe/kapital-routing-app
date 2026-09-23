@@ -5378,6 +5378,35 @@ async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
     return encontradas
 
 
+@app.get("/api/programador/programacion")
+async def programacion_del_dia(fecha: Optional[str] = None,
+                               session_token: SessionCookie = None):
+    """La programación de un día, tal como se ejecutó.
+
+    Sustituye a `/api/routes` como fuente de la mesa del Programador. Ese
+    endpoint devuelve `[]` desde que la programación dejó de escribirse en
+    `app_state`, así que el tablero estaba vacío y no había forma de llenarlo:
+    lo que el Programador carga entra en las tablas del histórico.
+
+    No propone rutas ni asigna nada —para eso hace falta un motor que no
+    existe—, sino que enseña lo que de verdad ocurrió, que es el punto de
+    partida del trabajo: seguir el orden anterior y aplicar las novedades.
+
+    Sin `fecha` devuelve el último día cargado.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/programacion_del_dia",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json={"dia": fecha} if fecha else {},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] programacion_del_dia devolvió {respuesta.status_code}")
+        _raise_database_unavailable("programacion_del_dia")
+    return respuesta.json()
+
+
 @app.get("/api/programador/vehiculos")
 async def ocupacion_de_vehiculos(session_token: SessionCookie = None):
     """Cuánto llevó de verdad cada vehículo, según el histórico.

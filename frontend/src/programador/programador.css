@@ -1144,3 +1144,23 @@
   background: var(--primary);
 }
 .an-dias small { font-size: 0.66rem; color: var(--kapital-text-secondary); }
+
+/* El selector de día vive dentro de la línea de metadatos del encabezado, así
+   que no debe parecer un campo de formulario: sin caja, con el alto del texto
+   que lo rodea. */
+.pw-select-inline {
+  width: auto;
+  min-width: 0;
+  padding: 0 22px 0 4px;
+  border: none;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  height: auto;
+}
+.pw-select-inline:hover { color: var(--kapital-text-primary); }
+
+/* La nota que acompaña a la duración: el margen y los casos que la sostienen.
+   Va en la misma línea porque sin el p90 la mediana sola invita a planificar
+   al límite. */
+.pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }

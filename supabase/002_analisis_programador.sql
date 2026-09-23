@@ -142,3 +142,98 @@ $$;
 
 revoke all on function public.resumen_vehiculos() from public;
 grant execute on function public.resumen_vehiculos() to service_role;
+
+
+-- La programación de un día, con la forma que ya consume la mesa de trabajo.
+--
+-- El tablero leía `/api/routes`, que devuelve una lista vacía desde que la
+-- programación dejó de escribirse en `app_state`. Esto lo sustituye por lo que
+-- el Programador carga cada día.
+--
+-- No propone rutas ni asigna nada —eso necesita un motor que no existe— sino
+-- que enseña lo que de verdad se ejecutó, que es el punto de partida del
+-- trabajo: se sigue el orden anterior y se aplican las novedades.
+--
+-- Un servicio es un vehículo en una fecha, turno y modalidad. La forma de
+-- salida (`conductor`, `micro_zona`, `horario`, `agentes`) es la del contrato
+-- anterior a propósito: así las tarjetas, los filtros, la búsqueda y la
+-- exportación siguen funcionando sin tocarlas.
+--
+-- La duración se busca primero en la celda con turno y, si esa combinación no
+-- tiene casos suficientes, cae al nivel grueso. Casi la mitad de las celdas
+-- con turno tienen menos de cinco casos en un mes; sin el respaldo, la mayoría
+-- de las tarjetas se quedarían sin duración. Medido: 130 de 135 la reciben.
+create or replace function public.programacion_del_dia(dia date default null)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with elegido as (
+    select coalesce(dia, (select max(fecha_ejecutada) from servicios_historicos)) as fecha
+  ),
+  servicios as (
+    select
+      s.codigo_vehiculo, s.turno, s.modalidad, s.cobertura, s.dni,
+      s.hora_inicio, s.incidencia, p.nombre, p.direccion
+    from servicios_historicos s
+    left join pasajeros p on p.dni = s.dni
+    where s.fecha_ejecutada = (select fecha from elegido)
+      and s.codigo_vehiculo is not null
+      and btrim(s.codigo_vehiculo) <> ''
+  ),
+  agrupados as (
+    select
+      codigo_vehiculo,
+      turno,
+      modalidad,
+      -- Una unidad puede tocar dos zonas en el mismo turno; manda la primera,
+      -- y la tarjeta enseña esa.
+      (array_agg(cobertura order by cobertura))[1] as cobertura,
+      jsonb_agg(jsonb_build_object(
+        'id', dni,
+        'nombre', coalesce(nombre, 'Sin nombre'),
+        'direccion', direccion,
+        'hora', hora_inicio,
+        'incidencia', incidencia
+      ) order by hora_inicio nulls last, dni) as agentes
+    from servicios
+    group by codigo_vehiculo, turno, modalidad
+  ),
+  con_duracion as (
+    select
+      a.*,
+      coalesce(fino.p50_minutos, grueso.p50_minutos) as p50,
+      coalesce(fino.p90_minutos, grueso.p90_minutos) as p90,
+      coalesce(fino.n_casos, grueso.n_casos) as casos,
+      (fino.p50_minutos is not null) as con_turno
+    from agrupados a
+    left join duraciones_base fino
+      on fino.cobertura = a.cobertura and fino.modalidad = a.modalidad
+     and fino.turno = a.turno
+    left join duraciones_base grueso
+      on grueso.cobertura = a.cobertura and grueso.modalidad = a.modalidad
+     and grueso.turno = ''
+  )
+  select jsonb_build_object(
+    'fecha', (select fecha from elegido),
+    'dias_disponibles', coalesce((
+      select jsonb_agg(f order by f desc)
+      from (select distinct fecha_ejecutada as f from servicios_historicos
+            order by fecha_ejecutada desc limit 60) d), '[]'::jsonb),
+    'rutas', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'conductor', codigo_vehiculo,
+               'micro_zona', cobertura,
+               'horario', turno || ' ' || lower(modalidad),
+               'duracion', case when p50 is null then null else jsonb_build_object(
+                 'p50', p50, 'p90', p90, 'casos', casos, 'con_turno', con_turno) end,
+               'agentes', agentes)
+             order by turno, codigo_vehiculo)
+      from con_duracion), '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.programacion_del_dia(date) from public;
+grant execute on function public.programacion_del_dia(date) to service_role;

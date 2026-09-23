@@ -192,12 +192,22 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               </dd>
             </div>
             <div className="pw-detail-item">
-              <dt>Duración estimada</dt>
-              <dd className="pw-muted">Con el orden de recogida</dd>
+              <dt>Duración medida</dt>
+              {service.duracion ? (
+                <dd>
+                  {Math.round(service.duracion.p50)} min
+                  <small className="pw-detail-nota">
+                    {' '}· hasta {Math.round(service.duracion.p90)} min en el 10% peor
+                    {' '}· {service.duracion.casos} casos
+                  </small>
+                </dd>
+              ) : (
+                <dd className="pw-muted">Sin casos suficientes en el histórico</dd>
+              )}
             </div>
             <div className="pw-detail-item">
-              <dt>Llegada a destino</dt>
-              <dd className="pw-muted">Con el orden de recogida</dd>
+              <dt>Orden de recogida</dt>
+              <dd className="pw-muted">Por la hora real del histórico</dd>
             </div>
           </dl>
 

@@ -20,15 +20,21 @@ import './programador.css';
 /**
  * Mesa de trabajo del Programador de Rutas.
  *
- * Primera entrega: tablero de lectura y revisión sobre el contrato de rutas que
- * el backend ya expone. No introduce endpoints nuevos ni toca el motor de
- * asignación, que sigue congelado.
+ * **Qué enseña.** La programación de un día tal como se ejecutó, reconstruida
+ * del histórico que se carga en «Cargar datos». Hasta ahora leía `/api/routes`,
+ * que devuelve una lista vacía desde que la programación dejó de escribirse en
+ * `app_state`: el tablero estaba vacío y no había forma de llenarlo, porque el
+ * Excel que sube el Programador entra en otras tablas.
+ *
+ * Eso la convierte en el punto de partida del trabajo real —seguir el orden
+ * anterior y aplicar solo las novedades—, no en una propuesta: aquí no se
+ * calcula ninguna ruta.
  *
  * Lo que deliberadamente NO está, porque hoy no existe el dato que lo sostenga:
  *
- * - Orden de recogida y hora de paso por agente. El backend agrupa pasajeros
- *   pero no secuencia paradas; la columna `#` del detalle es número de fila y
- *   está rotulada como tal.
+ * - Orden de recogida propuesto. El histórico trae la hora real de cada recojo
+ *   y por ahí se ordenan los agentes, pero nadie secuencia paradas todavía; la
+ *   columna `#` del detalle es número de fila y está rotulada como tal.
  * - Guardado versionado. Necesita una decisión sobre dónde se persiste la
  *   sesión de planificación (`docs/planning/route-programmer-contracts.md` §5).
  * - Estados de propuesta, aprobación y rechazo. Requieren un motor que proponga
@@ -42,9 +48,6 @@ import './programador.css';
 const VENTANA_OPERATIVA = '11:00 — 07:00';
 const OPERACION = 'TP';
 
-const formatToday = () =>
-  new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
-
 const Placeholder = ({ Icon, title, children, accion }) => (
   <div className="pw-placeholder">
     <Icon size={34} aria-hidden="true" />
@@ -55,10 +58,13 @@ const Placeholder = ({ Icon, title, children, accion }) => (
 );
 
 const ProgramadorWorkbench = ({ onIrACargar }) => {
-  // Los datos los sirve el cargador compartido: las cuatro secciones del
-  // Programador leen el mismo tablero y volver a descargarlo en cada cambio de
-  // pestaña costaría ~493 KB de egress sin aportar nada.
-  const { services, isLoading, error, refresh } = useBoardData();
+  // El día que se está mirando. Vacío significa «el último cargado», que es
+  // lo que el Programador quiere ver al entrar.
+  const [dia, setDia] = useState('');
+  // Los datos los sirve el cargador compartido: las secciones del Programador
+  // leen el mismo tablero y volver a descargarlo en cada cambio de pestaña
+  // costaría ~96 KB de egress sin aportar nada.
+  const { services, isLoading, error, refresh, fecha, dias } = useBoardData(dia);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -113,13 +119,16 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       <WorkbenchHeader
         kpis={kpis}
         operacion={OPERACION}
-        fechaPlanificacion={formatToday()}
+        fechaPlanificacion={fecha}
         ventanaOperativa={VENTANA_OPERATIVA}
         isLoading={isLoading}
         onRefresh={refresh}
         onExport={handleExport}
         canExport={!isLoading && visibleServices.length > 0}
         onIrACargar={onIrACargar}
+        dia={dia}
+        dias={dias}
+        onCambiarDia={setDia}
       />
 
       {error && (
@@ -145,7 +154,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           <div className="pw-panel-body">
             {isLoading && (
               <Placeholder Icon={ClipboardList} title="Cargando programación…">
-                Leyendo las rutas vigentes del servidor.
+                Leyendo del histórico el día seleccionado.
               </Placeholder>
             )}
 
@@ -164,9 +173,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   </button>
                 )}
               >
-                Los Excel se suben en <strong>Cargar datos</strong>: el reporte «Detalle»
-                de la intranet, en la pestaña «Histórico de la operación»; el archivo de
-                novedades que manda el cliente, en «Novedades del cliente».
+                Este tablero sale del histórico. Los Excel se suben en
+                <strong> Cargar datos</strong>: el reporte «Detalle» de la intranet, en la
+                pestaña «Histórico de la operación»; el archivo de novedades que manda el
+                cliente, en «Novedades del cliente».
               </Placeholder>
             )}
 

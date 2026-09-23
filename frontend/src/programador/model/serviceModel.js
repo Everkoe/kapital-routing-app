@@ -23,6 +23,16 @@ export const UNASSIGNED = 'SIN ASIGNAR';
 /** Normaliza un texto para comparar y para construir claves estables. */
 const norm = (value) => String(value ?? '').trim();
 
+/**
+ * Clave de una unidad, comparable entre las dos fuentes.
+ *
+ * La flota guarda «K-027» y el histórico de la intranet registra «K027». El
+ * nombre que se enseña es el que venga; lo que se normaliza es solo la clave
+ * de búsqueda, o la capacidad declarada no se encontraría nunca y la mesa
+ * mostraría toda la flota sin denominador.
+ */
+export const fleetKey = (value) => norm(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 /** Clave de negocio de un servicio, previa a desambiguar duplicados. */
 const businessKey = (route) =>
   [norm(route?.conductor) || UNASSIGNED, norm(route?.micro_zona), norm(route?.horario)].join('|');
@@ -38,7 +48,7 @@ export const indexFleet = (payload) => {
     const id = norm(unit?.unidad_id) || norm(unit?.placa);
     if (!id) return acc;
     const capacidad = Number(unit?.capacidad);
-    acc[id] = {
+    acc[fleetKey(id)] = {
       unidad_id: id,
       capacidad: Number.isFinite(capacidad) && capacidad > 0 ? capacidad : null,
       chofer: norm(unit?.chofer) || null,
@@ -55,7 +65,7 @@ export const indexFleet = (payload) => {
  * mostrar `11 agentes`, sin que ninguna capa tenga que inventar un número.
  */
 export const resolveCapacity = (conductor, used, fleetIndex = {}) => {
-  const unit = fleetIndex[norm(conductor)];
+  const unit = fleetIndex[fleetKey(conductor)];
   const total = unit?.capacidad ?? null;
   if (total === null) {
     return { used, total: null, free: null, known: false, full: false, over: false };
@@ -140,6 +150,10 @@ export const buildServices = (routes, fleetIndex = {}) => {
       agentes,
       agentCount: agentes.length,
       capacity,
+      // Minutos medidos sobre el histórico, o `null` si esa ruta no acumula
+      // casos suficientes. No se estima: una cifra inventada aquí se
+      // convertiría en una promesa de hora de llegada.
+      duracion: route.duracion ?? null,
       estado: serviceState({ conductor, capacity, agentCount: agentes.length }),
     });
     return acc;
