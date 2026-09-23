@@ -42,6 +42,7 @@ const fetchBoard = async (dia) => {
   return {
     routes: Array.isArray(programacion?.rutas) ? programacion.rutas : [],
     fecha: programacion?.fecha ?? null,
+    comparadoCon: programacion?.comparado_con ?? null,
     dias: Array.isArray(programacion?.dias_disponibles)
       ? programacion.dias_disponibles : [],
     fleet: indexFleet(fleet),
@@ -76,7 +77,9 @@ export const resetBoardCache = () => {
   inFlight.clear();
 };
 
-const vacio = { routes: [], fleet: {}, fecha: null, dias: [], loadedAt: null };
+const vacio = {
+  routes: [], fleet: {}, fecha: null, comparadoCon: null, dias: [], loadedAt: null,
+};
 
 export const useBoardData = (dia = '') => {
   const [state, setState] = useState(() =>

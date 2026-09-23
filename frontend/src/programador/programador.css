@@ -1217,3 +1217,14 @@
   background: rgba(245, 158, 11, 0.15);
   color: var(--kapital-accent-orange);
 }
+
+/* La aclaración bajo el título del tablero: contra qué día se miden los
+   cambios. En bloque propio porque el título es una fila con su contador. */
+.pw-panel-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--kapital-text-secondary);
+  line-height: 1.4;
+}

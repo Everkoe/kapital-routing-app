@@ -11,6 +11,7 @@ import {
   filterOptions,
   sortServices,
 } from './model/workbenchSelectors.js';
+import { fecha as formatoFecha } from './fechas';
 import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
@@ -64,7 +65,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // Los datos los sirve el cargador compartido: las secciones del Programador
   // leen el mismo tablero y volver a descargarlo en cada cambio de pestaña
   // costaría ~96 KB de egress sin aportar nada.
-  const { services, isLoading, error, refresh, fecha, dias } = useBoardData(dia);
+  const {
+    services, isLoading, error, refresh, fecha, dias, comparadoCon,
+  } = useBoardData(dia);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -143,7 +146,18 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       <div className="pw-columns">
         <section className="pw-panel" aria-labelledby="pw-board-title">
           <div className="pw-panel-head">
-            <h2 className="pw-panel-title" id="pw-board-title">Programación</h2>
+            <h2 className="pw-panel-title" id="pw-board-title">
+              Programación
+              {comparadoCon && (
+                // Sin esto, «Cambió» no dice cambió respecto a qué, y el día
+                // de comparación no tiene por qué ser el natural anterior:
+                // es el último que se cargó.
+                <small className="pw-panel-sub">
+                  Los cambios se miden contra el {formatoFecha(comparadoCon)},
+                  que es el día anterior que tienes cargado.
+                </small>
+              )}
+            </h2>
             <span className="pw-panel-count">
               {visibleServices.length === services.length
                 ? `${services.length} servicios`
@@ -194,6 +208,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   ordinal={index + 1}
                   isOpen={openServiceId === service.id}
                   onToggle={toggleService}
+                  comparadoCon={comparadoCon ? formatoFecha(comparadoCon) : null}
                 />
               ))}
           </div>

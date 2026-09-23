@@ -5,7 +5,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  GripVertical,
   History,
   MapPin,
   UserPlus,
@@ -73,15 +72,16 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes }) => (
+const AgentTable = ({ agentes, comparadoCon }) => (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
         <tr>
-          {/* Número de fila, no secuencia de recogida: el backend todavía no
-              ordena las paradas. El orden llega con la entrega 3, y será
-              editable a mano. Ver docs/planning §1. */}
-          <th scope="col" title="Número de fila. El orden de recogida llega en la entrega 3.">#</th>
+          {/* Es el orden real en que se recogió a cada persona, según la hora
+              del histórico. No es una propuesta ni se puede reordenar: nadie
+              secuencia paradas todavía, y un asidero de arrastre que no
+              arrastra promete algo que no existe. */}
+          <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
           <th scope="col">Agente</th>
           <th scope="col">Documento</th>
           <th scope="col">Dirección</th>
@@ -93,18 +93,13 @@ const AgentTable = ({ agentes }) => (
       <tbody>
         {markDuplicates(agentes).map((agente, index) => (
           <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}>
-            <td className="pw-mono">
-              <span className="pw-row-grip">
-                <GripVertical size={13} aria-hidden="true" />
-                {String(index + 1).padStart(2, '0')}
-              </span>
-            </td>
+            <td className="pw-mono">{String(index + 1).padStart(2, '0')}</td>
             <td>
               {agente?.nombre || 'Sin nombre'}
               {agente?.nuevo && (
                 <span className="pw-state" data-tone="ok"
-                  title="No estaba en este servicio el día cargado anterior.">
-                  <UserPlus size={12} aria-hidden="true" />Nuevo
+                  title={`No viajaba en esta unidad y turno ${comparadoCon ? `el ${comparadoCon}` : 'el día cargado anterior'}.`}>
+                  <UserPlus size={12} aria-hidden="true" />Entró
                 </span>
               )}
             </td>
@@ -137,7 +132,7 @@ const AgentTable = ({ agentes }) => (
   </div>
 );
 
-const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
+const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -175,9 +170,11 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
         <span className="pw-cell">
           {service.modificado && (
             <span className="pw-tag pw-tag-cambio"
-              title="Este servicio cambió respecto al día cargado anterior.">
+              title={service.cambio?.servicio_nuevo
+                ? `Esta unidad no hacía este turno ${comparadoCon ? `el ${comparadoCon}` : 'el día cargado anterior'}.`
+                : `Entró o salió gente respecto ${comparadoCon ? `al ${comparadoCon}` : 'al día cargado anterior'}.`}>
               <History size={11} aria-hidden="true" />
-              {service.cambio?.servicio_nuevo ? 'Nuevo' : 'Modificado'}
+              {service.cambio?.servicio_nuevo ? 'Servicio nuevo' : 'Cambió'}
             </span>
           )}
           <ServiceStateBadge estado={service.estado} />
@@ -266,7 +263,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
           )}
 
           {service.agentes.length > 0 ? (
-            <AgentTable agentes={service.agentes} />
+            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AlertTriangle, CheckCircle2, GripVertical, Info, MapPin, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, MapPin, UserPlus } from 'lucide-react';
 import { NoveltyReasonBadge } from './estados.jsx';
 import PreviewAction from './PreviewAction.jsx';
 
@@ -83,9 +83,6 @@ const PendingPanel = ({ pending }) => {
           <>
             {visible.map((agent) => (
               <article className="pw-agent-card" key={agent.id}>
-                <span className="pw-drag-handle" aria-hidden="true" title="El arrastre llega con la asignación manual.">
-                  <GripVertical size={14} />
-                </span>
                 <span className="pw-avatar" aria-hidden="true">{initials(agent.nombre, agent.agenteId)}</span>
                 <div className="pw-agent-body">
                   <div className="pw-agent-name pw-truncate">{agent.nombre || agent.agenteId || 'Sin nombre'}</div>
@@ -120,11 +117,15 @@ const PendingPanel = ({ pending }) => {
         )}
       </div>
 
-      <div className="pw-dropzone" aria-hidden="true">
-        <UserPlus size={18} />
+      {/* Se enuncia como pendiente, no como instrucción: mientras no exista
+          la asignación manual, «arrastra agentes» es una orden que el usuario
+          no puede cumplir y se pasa un rato intentándolo. */}
+      <div className="pw-dropzone">
+        <UserPlus size={18} aria-hidden="true" />
         <span>
-          <strong>Arrastra agentes a un servicio compatible</strong>
-          Con la asignación manual se resaltarán los servicios con capacidad y cobertura.
+          <strong>La asignación manual todavía no está</strong>
+          Cuando llegue, se podrán mover agentes entre servicios y se
+          resaltarán los que tengan capacidad y cobertura.
         </span>
       </div>
     </section>
