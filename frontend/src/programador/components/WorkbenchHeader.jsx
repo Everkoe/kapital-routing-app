@@ -22,8 +22,12 @@ import PreviewAction from './PreviewAction.jsx';
  * cuántas quedaron fuera del cálculo, para que la cifra no se lea como un total
  * exacto cuando en realidad es parcial.
  *
- * `Importar archivos` y `Guardar` aparecen porque son la forma del producto y
- * deben poder revisarse, pero están deshabilitados: ver `PreviewAction`.
+ * `Cargar Excel` ya no es un control apagado: lleva a «Cargar datos», que es
+ * donde de verdad se suben los dos archivos. Estuvo deshabilitado mientras esa
+ * entrega no existía, y anunciarlo como pendiente cuando ya está hecho manda a
+ * la gente a buscar una función en el sitio equivocado.
+ *
+ * `Guardar` sigue siendo `PreviewAction` porque su backend sí está por hacer.
  */
 
 const Kpi = ({ Icon, value, label, note, tone }) => (
@@ -46,6 +50,7 @@ const WorkbenchHeader = ({
   onRefresh,
   onExport,
   canExport,
+  onIrACargar,
 }) => (
   <>
     <header className="pw-header">
@@ -57,9 +62,10 @@ const WorkbenchHeader = ({
       </div>
 
       <div className="pw-actions">
-        <PreviewAction Icon={Upload} entrega="Importación de los dos Excel">
-          Importar archivos
-        </PreviewAction>
+        <button type="button" className="pw-btn" onClick={onIrACargar}>
+          <Upload size={16} aria-hidden="true" />
+          Cargar Excel
+        </button>
         <PreviewAction Icon={Save} entrega="Guardado versionado">
           Guardar
         </PreviewAction>

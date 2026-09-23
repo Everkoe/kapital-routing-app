@@ -1312,7 +1312,7 @@ function App() {
         if (usuarioActual?.rol === 'Programador de rutas') {
           return (
             <React.Suspense fallback={<GlobalLoader text="Cargando programación..." />}>
-              <ProgramadorWorkbench />
+              <ProgramadorWorkbench onIrACargar={() => handleNavigate('historico')} />
             </React.Suspense>
           );
         }

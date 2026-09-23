@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardList, Inbox } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Inbox, Upload } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { buildPendingAgents } from './model/serviceModel.js';
@@ -29,9 +29,8 @@ import './programador.css';
  * - Orden de recogida y hora de paso por agente. El backend agrupa pasajeros
  *   pero no secuencia paradas; la columna `#` del detalle es número de fila y
  *   está rotulada como tal.
- * - Importación de los dos Excel y guardado versionado. Necesitan el contrato
- *   de `docs/planning/route-programmer-contracts.md` §4 y una decisión sobre
- *   dónde se persiste la sesión de planificación (§5).
+ * - Guardado versionado. Necesita una decisión sobre dónde se persiste la
+ *   sesión de planificación (`docs/planning/route-programmer-contracts.md` §5).
  * - Estados de propuesta, aprobación y rechazo. Requieren un motor que proponga
  *   algo que revisar.
  *
@@ -46,15 +45,16 @@ const OPERACION = 'TP';
 const formatToday = () =>
   new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 
-const Placeholder = ({ Icon, title, children }) => (
+const Placeholder = ({ Icon, title, children, accion }) => (
   <div className="pw-placeholder">
     <Icon size={34} aria-hidden="true" />
     <h3>{title}</h3>
     <p>{children}</p>
+    {accion}
   </div>
 );
 
-const ProgramadorWorkbench = () => {
+const ProgramadorWorkbench = ({ onIrACargar }) => {
   // Los datos los sirve el cargador compartido: las cuatro secciones del
   // Programador leen el mismo tablero y volver a descargarlo en cada cambio de
   // pestaña costaría ~493 KB de egress sin aportar nada.
@@ -119,6 +119,7 @@ const ProgramadorWorkbench = () => {
         onRefresh={refresh}
         onExport={handleExport}
         canExport={!isLoading && visibleServices.length > 0}
+        onIrACargar={onIrACargar}
       />
 
       {error && (
@@ -149,9 +150,23 @@ const ProgramadorWorkbench = () => {
             )}
 
             {!isLoading && services.length === 0 && !error && (
-              <Placeholder Icon={Inbox} title="No hay programación cargada">
-                El tablero está vacío. Cuando exista la importación de los dos Excel, la
-                programación del día aparecerá aquí.
+              // Un tablero vacío sin decir qué hacer deja a quien lo mira
+              // buscando el botón por toda la aplicación. Aquí se nombra la
+              // sección y los dos archivos, y se lleva de un clic.
+              <Placeholder
+                Icon={Inbox}
+                title="No hay programación cargada"
+                accion={(
+                  <button type="button" className="pw-btn pw-btn-primary"
+                    onClick={onIrACargar}>
+                    <Upload size={16} aria-hidden="true" />
+                    Ir a «Cargar datos»
+                  </button>
+                )}
+              >
+                Los Excel se suben en <strong>Cargar datos</strong>: el reporte «Detalle»
+                de la intranet, en la pestaña «Histórico de la operación»; el archivo de
+                novedades que manda el cliente, en «Novedades del cliente».
               </Placeholder>
             )}
 

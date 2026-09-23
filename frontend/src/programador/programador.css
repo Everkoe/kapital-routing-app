@@ -515,7 +515,11 @@
   color: var(--kapital-text-primary);
 }
 
-.pw-placeholder p { margin: 0; font-size: 0.86rem; max-width: 38ch; }
+.pw-placeholder p { margin: 0; font-size: 0.86rem; max-width: 46ch; line-height: 1.55; }
+.pw-placeholder p strong { color: var(--kapital-text-primary); }
+/* El boton del estado vacio: separado del texto para que se lea como
+   la salida y no como parte del parrafo. */
+.pw-placeholder .pw-btn { margin-top: 4px; }
 
 .pw-notice {
   display: flex;
