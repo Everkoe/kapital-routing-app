@@ -22,9 +22,21 @@ import PreviewAction from './PreviewAction.jsx';
  * cuántas quedaron fuera del cálculo, para que la cifra no se lea como un total
  * exacto cuando en realidad es parcial.
  *
- * `Importar archivos` y `Guardar` aparecen porque son la forma del producto y
- * deben poder revisarse, pero están deshabilitados: ver `PreviewAction`.
+ * `Cargar Excel` ya no es un control apagado: lleva a «Cargar datos», que es
+ * donde de verdad se suben los dos archivos. Estuvo deshabilitado mientras esa
+ * entrega no existía, y anunciarlo como pendiente cuando ya está hecho manda a
+ * la gente a buscar una función en el sitio equivocado.
+ *
+ * `Guardar` sigue siendo `PreviewAction` porque su backend sí está por hacer.
  */
+
+/** Una fecha ISO en el formato que se lee en Perú. */
+const fechaCorta = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE',
+    { weekday: 'short', day: '2-digit', month: 'short' });
+};
 
 const Kpi = ({ Icon, value, label, note, tone }) => (
   <div className="pw-kpi">
@@ -46,20 +58,35 @@ const WorkbenchHeader = ({
   onRefresh,
   onExport,
   canExport,
+  onIrACargar,
+  dia,
+  dias,
+  onCambiarDia,
 }) => (
   <>
     <header className="pw-header">
       <div className="pw-header-titles">
         <h1 className="pw-title">Programación de rutas</h1>
         <span className="pw-chip">{operacion}</span>
-        <span className="pw-meta"><Calendar size={15} aria-hidden="true" />{fechaPlanificacion}</span>
+        <span className="pw-meta">
+          <Calendar size={15} aria-hidden="true" />
+          {dias?.length > 0 ? (
+            <select className="pw-select pw-select-inline" value={dia}
+              aria-label="Día de la programación"
+              onChange={(e) => onCambiarDia?.(e.target.value)}>
+              <option value="">Último cargado{fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}</option>
+              {dias.map((d) => <option key={d} value={d}>{fechaCorta(d)}</option>)}
+            </select>
+          ) : (fechaPlanificacion ? fechaCorta(fechaPlanificacion) : 'Sin día cargado')}
+        </span>
         <span className="pw-meta"><Clock size={15} aria-hidden="true" />{ventanaOperativa}</span>
       </div>
 
       <div className="pw-actions">
-        <PreviewAction Icon={Upload} entrega="Importación de los dos Excel">
-          Importar archivos
-        </PreviewAction>
+        <button type="button" className="pw-btn" onClick={onIrACargar}>
+          <Upload size={16} aria-hidden="true" />
+          Cargar Excel
+        </button>
         <PreviewAction Icon={Save} entrega="Guardado versionado">
           Guardar
         </PreviewAction>

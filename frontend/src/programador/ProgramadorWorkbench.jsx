@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardList, Inbox } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Inbox, Upload } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { buildPendingAgents } from './model/serviceModel.js';
@@ -11,6 +11,7 @@ import {
   filterOptions,
   sortServices,
 } from './model/workbenchSelectors.js';
+import { fecha as formatoFecha } from './fechas';
 import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
@@ -20,18 +21,23 @@ import './programador.css';
 /**
  * Mesa de trabajo del Programador de Rutas.
  *
- * Primera entrega: tablero de lectura y revisión sobre el contrato de rutas que
- * el backend ya expone. No introduce endpoints nuevos ni toca el motor de
- * asignación, que sigue congelado.
+ * **Qué enseña.** La programación de un día tal como se ejecutó, reconstruida
+ * del histórico que se carga en «Cargar datos». Hasta ahora leía `/api/routes`,
+ * que devuelve una lista vacía desde que la programación dejó de escribirse en
+ * `app_state`: el tablero estaba vacío y no había forma de llenarlo, porque el
+ * Excel que sube el Programador entra en otras tablas.
+ *
+ * Eso la convierte en el punto de partida del trabajo real —seguir el orden
+ * anterior y aplicar solo las novedades—, no en una propuesta: aquí no se
+ * calcula ninguna ruta.
  *
  * Lo que deliberadamente NO está, porque hoy no existe el dato que lo sostenga:
  *
- * - Orden de recogida y hora de paso por agente. El backend agrupa pasajeros
- *   pero no secuencia paradas; la columna `#` del detalle es número de fila y
- *   está rotulada como tal.
- * - Importación de los dos Excel y guardado versionado. Necesitan el contrato
- *   de `docs/planning/route-programmer-contracts.md` §4 y una decisión sobre
- *   dónde se persiste la sesión de planificación (§5).
+ * - Orden de recogida propuesto. El histórico trae la hora real de cada recojo
+ *   y por ahí se ordenan los agentes, pero nadie secuencia paradas todavía; la
+ *   columna `#` del detalle es número de fila y está rotulada como tal.
+ * - Guardado versionado. Necesita una decisión sobre dónde se persiste la
+ *   sesión de planificación (`docs/planning/route-programmer-contracts.md` §5).
  * - Estados de propuesta, aprobación y rechazo. Requieren un motor que proponga
  *   algo que revisar.
  *
@@ -43,22 +49,25 @@ import './programador.css';
 const VENTANA_OPERATIVA = '11:00 — 07:00';
 const OPERACION = 'TP';
 
-const formatToday = () =>
-  new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
-
-const Placeholder = ({ Icon, title, children }) => (
+const Placeholder = ({ Icon, title, children, accion }) => (
   <div className="pw-placeholder">
     <Icon size={34} aria-hidden="true" />
     <h3>{title}</h3>
     <p>{children}</p>
+    {accion}
   </div>
 );
 
-const ProgramadorWorkbench = () => {
-  // Los datos los sirve el cargador compartido: las cuatro secciones del
-  // Programador leen el mismo tablero y volver a descargarlo en cada cambio de
-  // pestaña costaría ~493 KB de egress sin aportar nada.
-  const { services, isLoading, error, refresh } = useBoardData();
+const ProgramadorWorkbench = ({ onIrACargar }) => {
+  // El día que se está mirando. Vacío significa «el último cargado», que es
+  // lo que el Programador quiere ver al entrar.
+  const [dia, setDia] = useState('');
+  // Los datos los sirve el cargador compartido: las secciones del Programador
+  // leen el mismo tablero y volver a descargarlo en cada cambio de pestaña
+  // costaría ~96 KB de egress sin aportar nada.
+  const {
+    services, isLoading, error, refresh, fecha, dias, comparadoCon,
+  } = useBoardData(dia);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -113,12 +122,16 @@ const ProgramadorWorkbench = () => {
       <WorkbenchHeader
         kpis={kpis}
         operacion={OPERACION}
-        fechaPlanificacion={formatToday()}
+        fechaPlanificacion={fecha}
         ventanaOperativa={VENTANA_OPERATIVA}
         isLoading={isLoading}
         onRefresh={refresh}
         onExport={handleExport}
         canExport={!isLoading && visibleServices.length > 0}
+        onIrACargar={onIrACargar}
+        dia={dia}
+        dias={dias}
+        onCambiarDia={setDia}
       />
 
       {error && (
@@ -133,7 +146,18 @@ const ProgramadorWorkbench = () => {
       <div className="pw-columns">
         <section className="pw-panel" aria-labelledby="pw-board-title">
           <div className="pw-panel-head">
-            <h2 className="pw-panel-title" id="pw-board-title">Programación</h2>
+            <h2 className="pw-panel-title" id="pw-board-title">
+              Programación
+              {comparadoCon && (
+                // Sin esto, «Cambió» no dice cambió respecto a qué, y el día
+                // de comparación no tiene por qué ser el natural anterior:
+                // es el último que se cargó.
+                <small className="pw-panel-sub">
+                  Los cambios se miden contra el {formatoFecha(comparadoCon)},
+                  que es el día anterior que tienes cargado.
+                </small>
+              )}
+            </h2>
             <span className="pw-panel-count">
               {visibleServices.length === services.length
                 ? `${services.length} servicios`
@@ -144,14 +168,29 @@ const ProgramadorWorkbench = () => {
           <div className="pw-panel-body">
             {isLoading && (
               <Placeholder Icon={ClipboardList} title="Cargando programación…">
-                Leyendo las rutas vigentes del servidor.
+                Leyendo del histórico el día seleccionado.
               </Placeholder>
             )}
 
             {!isLoading && services.length === 0 && !error && (
-              <Placeholder Icon={Inbox} title="No hay programación cargada">
-                El tablero está vacío. Cuando exista la importación de los dos Excel, la
-                programación del día aparecerá aquí.
+              // Un tablero vacío sin decir qué hacer deja a quien lo mira
+              // buscando el botón por toda la aplicación. Aquí se nombra la
+              // sección y los dos archivos, y se lleva de un clic.
+              <Placeholder
+                Icon={Inbox}
+                title="No hay programación cargada"
+                accion={(
+                  <button type="button" className="pw-btn pw-btn-primary"
+                    onClick={onIrACargar}>
+                    <Upload size={16} aria-hidden="true" />
+                    Ir a «Cargar datos»
+                  </button>
+                )}
+              >
+                Este tablero sale del histórico. Los Excel se suben en
+                <strong> Cargar datos</strong>: el reporte «Detalle» de la intranet, en la
+                pestaña «Histórico de la operación»; el archivo de novedades que manda el
+                cliente, en «Novedades del cliente».
               </Placeholder>
             )}
 
@@ -169,6 +208,7 @@ const ProgramadorWorkbench = () => {
                   ordinal={index + 1}
                   isOpen={openServiceId === service.id}
                   onToggle={toggleService}
+                  comparadoCon={comparadoCon ? formatoFecha(comparadoCon) : null}
                 />
               ))}
           </div>

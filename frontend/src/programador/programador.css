@@ -515,7 +515,11 @@
   color: var(--kapital-text-primary);
 }
 
-.pw-placeholder p { margin: 0; font-size: 0.86rem; max-width: 38ch; }
+.pw-placeholder p { margin: 0; font-size: 0.86rem; max-width: 46ch; line-height: 1.55; }
+.pw-placeholder p strong { color: var(--kapital-text-primary); }
+/* El boton del estado vacio: separado del texto para que se lea como
+   la salida y no como parte del parrafo. */
+.pw-placeholder .pw-btn { margin-top: 4px; }
 
 .pw-notice {
   display: flex;
@@ -864,3 +868,363 @@
 /* Un indicador en ámbar cuando lo que cuenta es trabajo pendiente. */
 .pw-kpi-alerta { border-color: rgba(245, 158, 11, 0.35); }
 .pw-kpi-alerta .pw-kpi-icon { color: var(--warning, #f59e0b); }
+
+/* --- Pestañas de carga --------------------------------------------------- */
+
+.nov-pestanas {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--kapital-border);
+  margin-bottom: 4px;
+}
+
+.nov-pestana {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.16s, border-color 0.16s;
+}
+.nov-pestana:hover { color: var(--text-primary); }
+.nov-pestana.activa {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+.nov-pestana:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* --- Resultado de las novedades ------------------------------------------ */
+
+.nov-lista {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Una fila es el estado a la izquierda y todo lo demás en bloque a su
+   derecha: el detalle de un cambio son varias líneas y en horizontal se
+   salía de la tarjeta. `min-width: 0` en el cuerpo permite que el texto
+   largo se ajuste en lugar de empujar la caja. */
+.nov-fila {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--kapital-border);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--kapital-card-bg);
+}
+.nov-fila[data-tono='danger'] { border-left-color: var(--kapital-accent-red); }
+.nov-fila[data-tono='warn'] { border-left-color: var(--kapital-accent-orange); }
+.nov-fila[data-tono='ok'] { border-left-color: var(--kapital-accent-green); }
+.nov-fila[data-tono='neutral'] { border-left-color: var(--kapital-border); }
+
+.nov-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-width: 104px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.nov-fila[data-tono='danger'] .nov-estado { color: var(--kapital-accent-red); }
+.nov-fila[data-tono='warn'] .nov-estado { color: var(--kapital-accent-orange); }
+.nov-fila[data-tono='ok'] .nov-estado { color: var(--kapital-accent-green); }
+.nov-fila[data-tono='neutral'] .nov-estado { color: var(--text-muted); }
+
+.nov-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nov-persona {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+.nov-datos { color: var(--text-secondary); font-size: 0.8rem; }
+
+.nov-cambios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.nov-cambios li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.nov-cambio-tipo {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--kapital-badge-bg);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.nov-cambio-valores {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.nov-cambio-valores svg { flex-shrink: 0; color: var(--text-muted); }
+.nov-cambios small {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.nov-sin-senal,
+.nov-etiqueta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.nov-aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--kapital-accent-orange);
+  font-size: 0.79rem;
+  line-height: 1.45;
+}
+.nov-aviso svg { flex-shrink: 0; margin-top: 2px; }
+
+@media (max-width: 640px) {
+  .nov-fila { flex-direction: column; gap: 8px; }
+  .nov-estado { min-width: 0; }
+}
+
+/* --- Análisis del histórico ---------------------------------------------- */
+
+.an-metric-icon { color: var(--kapital-text-secondary); line-height: 0; }
+
+.an-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.an-lista li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.an-etiqueta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  color: var(--kapital-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.an-etiqueta small {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--kapital-text-secondary);
+  text-transform: lowercase;
+}
+
+.an-duracion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+.an-duracion strong { font-size: 1rem; color: var(--primary); }
+.an-duracion small { font-size: 0.72rem; color: var(--kapital-text-secondary); }
+
+/* La barra lleva dos capas: el fondo es el total programado y la parte llena
+   lo que de verdad viajó. Mostrar solo el total escondería justo el dato que
+   esta pantalla existe para enseñar. */
+.an-barra { flex: 1.2; min-width: 60px; display: flex; }
+.an-barra-fondo {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--kapital-badge-bg);
+  min-width: 3px;
+}
+.an-barra-llena {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--primary);
+}
+
+.an-cifra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  min-width: 48px;
+  color: var(--kapital-text-primary);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.an-cifra small { font-size: 0.72rem; font-weight: 400; color: var(--kapital-text-secondary); }
+
+.an-dias {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 130px;
+  overflow-x: auto;
+}
+.an-dias li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 1;
+  min-width: 14px;
+  height: 100%;
+}
+.an-dia-barra {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: var(--kapital-badge-bg);
+}
+.an-dia-llena {
+  display: block;
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+}
+.an-dias small { font-size: 0.66rem; color: var(--kapital-text-secondary); }
+
+/* El selector de día vive dentro de la línea de metadatos del encabezado, así
+   que no debe parecer un campo de formulario: sin caja, con el alto del texto
+   que lo rodea. */
+.pw-select-inline {
+  width: auto;
+  min-width: 0;
+  padding: 0 22px 0 4px;
+  border: none;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  height: auto;
+}
+.pw-select-inline:hover { color: var(--kapital-text-primary); }
+
+/* La nota que acompaña a la duración: el margen y los casos que la sostienen.
+   Va en la misma línea porque sin el p90 la mediana sola invita a planificar
+   al límite. */
+.pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }
+
+/* --- Mapa del servicio ---------------------------------------------------- */
+
+.pw-map { display: flex; flex-direction: column; gap: 8px; }
+.pw-map .leaflet-container {
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  /* El mapa se dibuja en su propia capa; sin esto se cuela por encima de los
+     desplegables de filtros al hacer scroll. */
+  z-index: 0;
+}
+.pw-map-nota {
+  margin: 0;
+  color: var(--kapital-text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+/* Un punto numerado con el orden de recogida. Verde si es alguien que no
+   estaba en este servicio el día anterior. */
+.pw-map-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--kapital-card-bg);
+  background: var(--primary);
+  color: var(--kapital-card-bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.pw-map-pin.es-nuevo { background: var(--kapital-accent-green); }
+
+.pw-map-vacio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 10px;
+  color: var(--kapital-text-secondary);
+}
+.pw-map-vacio p { margin: 0; font-size: 0.84rem; line-height: 1.5; }
+.pw-map-vacio svg { flex-shrink: 0; }
+
+/* El distintivo de «modificado» en la cabecera de la tarjeta. */
+.pw-tag-cambio {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--kapital-accent-orange);
+}
+
+/* La aclaración bajo el título del tablero: contra qué día se miden los
+   cambios. En bloque propio porque el título es una fila con su contador. */
+.pw-panel-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--kapital-text-secondary);
+  line-height: 1.4;
+}

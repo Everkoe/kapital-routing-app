@@ -5,9 +5,10 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import historico_intranet
+    from api import historico_intranet, novedades_intranet
 except ImportError:  # ejecucion desde dentro de `api/`
     import historico_intranet
+    import novedades_intranet
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi import Request
 import math
@@ -5330,6 +5331,176 @@ async def estado_historico(session_token: SessionCookie = None):
             "duraciones": await cuenta("duraciones_base"),
             "ultimo_dia": filas[0]["fecha_ejecutada"] if filas else None,
         }
+
+
+# Documentos por consulta al cruzar las novedades contra el historico. No es
+# por egress —son columnas cortas— sino por el largo de la URL: PostgREST
+# recibe los documentos en `in.(...)` y una lista sin trocear la desborda.
+LOTE_CONSULTA_DNI = 40
+
+# PostgREST no devuelve mas de mil filas por peticion, pida uno lo que pida.
+# Hay que recorrerlas con `offset` y parar en la tanda corta; dar por
+# terminada la lectura en la primera respuesta deja fuera lo que no cupo, y
+# un historial recortado convierte un cambio real en «sin novedad».
+PAGINA_POSTGREST = 1000
+
+
+def _clave_de_vehiculo(codigo: Any) -> str:
+    """El código de una unidad, comparable entre las dos fuentes.
+
+    La flota de `app_state` guarda «K-027» y la intranet registra «K027». Sin
+    normalizar no cruzaba ni una sola de las 110 unidades.
+    """
+    return re.sub(r"[^A-Z0-9]", "", str(codigo or "").upper())
+
+
+async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
+                         documentos: List[str]) -> List[Dict[str, Any]]:
+    """Las filas de esa tabla para esos documentos, en tandas y paginadas."""
+    encontradas: List[Dict[str, Any]] = []
+    for inicio in range(0, len(documentos), LOTE_CONSULTA_DNI):
+        trozo = documentos[inicio:inicio + LOTE_CONSULTA_DNI]
+        leidas = 0
+        while True:
+            respuesta = await cliente.get(
+                _tabla_url(tabla), headers=HEADERS,
+                params={"select": columnas, "dni": "in.(%s)" % ",".join(trozo),
+                        "order": "dni", "limit": PAGINA_POSTGREST, "offset": leidas},
+            )
+            if respuesta.status_code != 200:
+                print(f"[Kapital] {tabla} no respondió al cruce: {respuesta.status_code}")
+                _raise_database_unavailable(f"consulta_{tabla}")
+            pagina = respuesta.json()
+            encontradas.extend(pagina)
+            leidas += len(pagina)
+            if len(pagina) < PAGINA_POSTGREST:
+                break
+    return encontradas
+
+
+@app.get("/api/programador/programacion")
+async def programacion_del_dia(fecha: Optional[str] = None,
+                               session_token: SessionCookie = None):
+    """La programación de un día, tal como se ejecutó.
+
+    Sustituye a `/api/routes` como fuente de la mesa del Programador. Ese
+    endpoint devuelve `[]` desde que la programación dejó de escribirse en
+    `app_state`, así que el tablero estaba vacío y no había forma de llenarlo:
+    lo que el Programador carga entra en las tablas del histórico.
+
+    No propone rutas ni asigna nada —para eso hace falta un motor que no
+    existe—, sino que enseña lo que de verdad ocurrió, que es el punto de
+    partida del trabajo: seguir el orden anterior y aplicar las novedades.
+
+    Sin `fecha` devuelve el último día cargado.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/programacion_del_dia",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json={"dia": fecha} if fecha else {},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] programacion_del_dia devolvió {respuesta.status_code}")
+        _raise_database_unavailable("programacion_del_dia")
+    return respuesta.json()
+
+
+@app.get("/api/programador/vehiculos")
+async def ocupacion_de_vehiculos(session_token: SessionCookie = None):
+    """Cuánto llevó de verdad cada vehículo, según el histórico.
+
+    La pantalla de Flota enseñaba la carga derivada de `/api/routes`, que está
+    vacío: cuatro columnas a cero para las 110 unidades. Esto la sustituye por
+    lo medido.
+
+    La clave es el código normalizado sin guiones ni espacios: la flota guarda
+    «K-027» y la intranet registra «K027», y sin normalizar no cruzaba ninguna.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/resumen_vehiculos",
+            headers={**HEADERS, "Content-Type": "application/json"}, json={},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] resumen_vehiculos devolvió {respuesta.status_code}")
+        _raise_database_unavailable("resumen_vehiculos")
+    medidos = respuesta.json() or {}
+    return {_clave_de_vehiculo(codigo): datos for codigo, datos in medidos.items()}
+
+
+@app.get("/api/programador/analisis")
+async def analisis_del_historico(session_token: SessionCookie = None):
+    """Lo que dice el histórico cargado, resumido.
+
+    El cálculo vive en la función `resumen_analisis()` de Postgres, no aquí:
+    son 21.789 filas y subirlas para contarlas costaría medio mega de egress
+    cada vez que alguien abre la pestaña. Lo que viaja son ~4 KB.
+
+    Sustituye al análisis anterior, que derivaba del tablero de `/api/routes`.
+    Ese endpoint devuelve una lista vacía desde que la programación no se
+    escribe en `app_state`, así que la pantalla no podía enseñar nada.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/resumen_analisis",
+            headers={**HEADERS, "Content-Type": "application/json"}, json={},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] resumen_analisis devolvió {respuesta.status_code}")
+        _raise_database_unavailable("resumen_analisis")
+    return respuesta.json()
+
+
+@app.post("/api/programador/novedades")
+async def analizar_novedades(
+    file: UploadFile = File(...),
+    session_token: SessionCookie = None,
+):
+    """Lee las novedades del cliente y dice qué cambia de verdad.
+
+    No se fía de la columna «NOVEDAD» —está medido que se equivoca— sino que
+    contrasta cada fila con lo que esa persona venía haciendo según el
+    histórico. De la etiqueta solo toma si viaja o no, que es el único dato
+    que no está en ninguna otra parte.
+
+    No escribe nada: devuelve el resultado para que una persona lo mire. Las
+    altas y bajas de verdad las confirma el histórico del día siguiente.
+    """
+    await require_admin_session(session_token)
+
+    contenido = await file.read()
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
+
+    try:
+        marco = novedades_intranet.leer_novedades(contenido)
+    except novedades_intranet.ReporteInvalido as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Kapital] novedades ilegibles: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer el archivo. ¿Es el Excel de Novedades del cliente?",
+        ) from exc
+
+    documentos = sorted({d for d in marco["dni"] if d})
+    if not documentos:
+        raise HTTPException(status_code=400,
+                            detail="El archivo no trae ningún documento legible.")
+
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        servicios = await _filas_por_dni(
+            cliente, "servicios_historicos",
+            "dni,cobertura,turno,modalidad,fecha_ejecutada", documentos)
+        padron = await _filas_por_dni(
+            cliente, "pasajeros", "dni,nombre,direccion,distrito,estado_ubicacion",
+            documentos)
+
+    return novedades_intranet.analizar(marco, servicios, padron)
 
 
 @app.get("/api/routes")

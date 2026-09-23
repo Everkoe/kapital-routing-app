@@ -35,10 +35,12 @@ cualquier ruteo, y nadie puede corregir lo que no ve.
 
 from __future__ import annotations
 
+import io
 import math
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from html.parser import HTMLParser
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -64,9 +66,107 @@ COLUMNAS_MINIMAS = ("Usuario", "DNI", "Fechaejecutada", "Modalidad", "Horaprogra
 
 PAR_COORD = re.compile(r"^\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})\s*$")
 
+# El mismo dato llega con dos nombres según por dónde haya pasado el archivo.
+# La intranet parte las cabeceras en dos líneas («Hora de<br>inicio»); al
+# exportarlas Excel a veces deja el espacio y a veces no, y basta esa
+# diferencia para que una columna desaparezca sin que nada avise. Se unifican
+# aquí, contra la clave sin espacios, y no en cada uso.
+ALIAS_COLUMNAS = {
+    "fechaprogramada": "Fechaprogramada",
+    "fechaejecutada": "Fechaejecutada",
+    "sede": "Sede",
+    "modalidad": "Modalidad",
+    "horadeinicio": "Hora de inicio",
+    "horaenelpunto": "Hora en el punto",
+    "horaderegistro": "Hora deregistro",
+    "dni": "DNI",
+    "usuario": "Usuario",
+    "direccion": "Direccion",
+    "referencia": "Referencia",
+    "distrito": "Distrito",
+    "cobertura": "Cobertura",
+    "horaprogramada": "Horaprogramada",
+    "codigovehiculo": "CodigoVehiculo",
+    "horallegada": "Horallegada",
+    "incidencia": "Incidencia",
+    "latitudinicio": "Latitudinicio",
+    "longitudinicio": "Longitudinicio",
+}
+
+# Las fechas del export HTML vienen como «22/09/26», día primero. Dejar que
+# pandas lo adivine es jugarse el mes: «05/09/26» es una fecha válida leída al
+# revés, y nada la marcaría como error.
+FORMATOS_FECHA = ("%d/%m/%y", "%d/%m/%Y")
+
+# Firma del texto UTF-8 releído como cp1252. La intranet exporta UTF-8 sin
+# declarar el juego de caracteres, así que Excel lo abre como cp1252 y «Ñ»
+# (bytes C3 91) queda convertido en «Ã» + U+2018.
+SENAL_MOJIBAKE = "Ã"
+
 
 class ReporteInvalido(ValueError):
     """El archivo no es el reporte de la intranet."""
+
+
+def reparar_acentos(texto: Optional[str]) -> Optional[str]:
+    """Deshace el destrozo de leer UTF-8 como si fuera cp1252.
+
+    «PEÃ‘A» vuelve a ser «PEÑA». La conversión es reversible porque solo se
+    perdió la interpretación, no los bytes: se vuelven a componer y se
+    decodifican bien. Se prueba cp1252 y, para los bytes que ese juego no
+    define —0x81, el de la «Á»—, latin-1, que los mapea todos.
+
+    Si el texto no era mojibake, no se toca: cualquier fallo al recomponer
+    significa justamente eso, y devolver el original es lo correcto.
+    """
+    if not texto or SENAL_MOJIBAKE not in texto:
+        return texto
+    crudo = bytearray()
+    for caracter in texto:
+        try:
+            crudo += caracter.encode("cp1252")
+        except UnicodeEncodeError:
+            if ord(caracter) > 0xFF:
+                return texto
+            crudo.append(ord(caracter))
+    try:
+        return crudo.decode("utf-8")
+    except UnicodeDecodeError:
+        return texto
+
+
+class _TablaHTML(HTMLParser):
+    """La tabla del export de la intranet, en filas de texto.
+
+    Con la librería estándar y no con `read_html`, que exige lxml o
+    BeautifulSoup: el backend evita dependencias por el límite de tamaño de
+    Vercel, y para una tabla sin anidar no hacen falta.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.filas: List[List[str]] = []
+        self._fila: Optional[List[str]] = None
+        self._celda: Optional[List[str]] = None
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag == "tr":
+            self._fila = []
+        elif tag in ("td", "th") and self._fila is not None:
+            self._celda = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._celda is not None and self._fila is not None:
+            self._fila.append(" ".join("".join(self._celda).split()))
+            self._celda = None
+        elif tag == "tr" and self._fila is not None:
+            if any(self._fila):
+                self.filas.append(self._fila)
+            self._fila = None
+
+    def handle_data(self, data: str) -> None:
+        if self._celda is not None:
+            self._celda.append(data)
 
 
 def en_lima(lat: float, lng: float) -> bool:
@@ -173,28 +273,160 @@ def _minutos(valor: Any) -> float:
     return hora * 60 + valor.minute if hora is not None else float("nan")
 
 
-def leer_reporte(origen: Any) -> pd.DataFrame:
-    """El Excel de la intranet, con las columnas derivadas que hacen falta.
+def bytes_de(origen: Any) -> bytes:
+    """El contenido del archivo, venga como venga.
 
-    `origen` es una ruta o un archivo abierto, así que sirve igual para el
-    script como para el archivo que llega por HTTP.
+    El script pasa una ruta y el endpoint un `BytesIO`; hay que mirar los
+    primeros bytes para saber qué formato es, y eso obliga a tenerlo entero.
+    Se rebobina lo que se pueda rebobinar, por si alguien vuelve a leerlo.
+    """
+    if isinstance(origen, (bytes, bytearray)):
+        return bytes(origen)
+    if hasattr(origen, "read"):
+        contenido = origen.read()
+        if hasattr(origen, "seek"):
+            origen.seek(0)
+        return contenido
+    with open(origen, "rb") as archivo:
+        return archivo.read()
+
+
+def _texto_de_html(contenido: bytes) -> str:
+    """El export decodificado.
+
+    Es UTF-8, pero el archivo **no lo declara**, y de ahí venía todo el
+    problema: sin declaración Excel asume cp1252 y parte los acentos. Aquí se
+    prueba UTF-8 primero, que es lo que la intranet manda de verdad.
     """
     try:
-        # El documento se lee como texto a proposito: como numero, «74037492»
-        # vuelve convertido en «74037492.0».
-        df = pd.read_excel(origen, sheet_name="Consolidado",
-                           header=FILA_CABECERA, dtype={"DNI": str})
-    except ValueError as exc:
-        raise ReporteInvalido(
-            "El archivo no tiene la hoja «Consolidado» del reporte de la intranet."
-        ) from exc
+        return contenido.decode("utf-8")
+    except UnicodeDecodeError:
+        return contenido.decode("cp1252", errors="replace")
 
-    df.columns = [str(c).strip() for c in df.columns]
+
+def tabla_html_a_frame(contenido: bytes) -> pd.DataFrame:
+    """El `.xls` de la intranet, que en realidad es una tabla HTML."""
+    lector = _TablaHTML()
+    lector.feed(_texto_de_html(contenido))
+    filas = lector.filas
+    if len(filas) < 2:
+        raise ReporteInvalido("El archivo no contiene ninguna tabla con datos.")
+
+    cabecera = filas[0]
+    ancho = len(cabecera)
+    datos = [f for f in filas[1:] if len(f) == ancho]
+    if not datos:
+        raise ReporteInvalido(
+            "Ninguna fila del archivo coincide con su cabecera de %d columnas." % ancho
+        )
+    df = pd.DataFrame(datos, columns=cabecera)
+    # La celda vacía del HTML es una cadena vacía o un espacio duro, no un
+    # nulo. Sin esto, `notna()` las daría todas por buenas.
+    return df.replace(r"^\s*$", np.nan, regex=True)
+
+
+def _normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
+    """Los nombres de columna, unificados contra `ALIAS_COLUMNAS`."""
+    nombres = []
+    for columna in df.columns:
+        limpio = " ".join(str(columna).split())
+        clave = limpio.replace(" ", "").lower()
+        nombres.append(ALIAS_COLUMNAS.get(clave, limpio))
+    df.columns = nombres
+    return df
+
+
+def _fechas_a_datetime(df: pd.DataFrame, columnas: Sequence[str]) -> None:
+    """Convierte las fechas de texto del HTML, con el día por delante.
+
+    Solo toca lo que aún es texto: por el camino del `.xlsx` ya llegan como
+    fechas y volver a convertirlas sería arriesgarse a nada bueno.
+    """
+    for columna in columnas:
+        if columna not in df.columns or pd.api.types.is_datetime64_any_dtype(df[columna]):
+            continue
+        serie = df[columna]
+        for formato in FORMATOS_FECHA:
+            convertida = pd.to_datetime(serie, format=formato, errors="coerce")
+            if convertida.notna().sum() >= serie.notna().sum() * 0.9:
+                df[columna] = convertida
+                break
+        else:
+            df[columna] = pd.to_datetime(serie, dayfirst=True, errors="coerce")
+
+
+def parece_novedades(columnas: Any) -> bool:
+    """Si esas columnas son las del archivo de Novedades del cliente."""
+    limpias = {str(c).upper().strip().rstrip(".") for c in columnas}
+    return "NOVEDAD" in limpias and "DNI" in limpias
+
+
+def _por_que_no_es_el_historico(contenido: bytes) -> str:
+    """El motivo concreto, para quien acaba de subir el archivo equivocado.
+
+    «Falta la hoja Consolidado» no le dice a nadie qué hacer. Si lo que ha
+    subido es el otro archivo que maneja a diario, hay que nombrarlo.
+    """
+    try:
+        primera = pd.read_excel(io.BytesIO(contenido), sheet_name=0, header=0, nrows=1)
+    except Exception:  # noqa: BLE001 - solo sirve para afinar el mensaje
+        primera = None
+    if primera is not None and parece_novedades(primera.columns):
+        return ("Esto es el archivo de Novedades del cliente, no el histórico. "
+                "Súbelo en «Novedades del cliente».")
+    return ("El archivo es un Excel, pero no tiene la hoja «Consolidado» del "
+            "reporte. Sube el archivo tal como lo descarga la intranet, sin "
+            "abrirlo ni volver a guardarlo.")
+
+
+def _frame_del_archivo(contenido: bytes) -> pd.DataFrame:
+    """El reporte en bruto, sea cual sea de las dos formas en que llega.
+
+    Tal como sale de la intranet es una tabla HTML con extensión `.xls`. Mucha
+    gente la abre en Excel y la vuelve a guardar como `.xlsx`; ese paso es
+    justamente el que rompía los acentos, así que se admite el archivo
+    original y ya no hace falta.
+    """
+    if contenido[:2] == b"PK":
+        try:
+            # El documento se lee como texto a proposito: como numero,
+            # «74037492» vuelve convertido en «74037492.0».
+            return pd.read_excel(io.BytesIO(contenido), sheet_name="Consolidado",
+                                 header=FILA_CABECERA, dtype={"DNI": str})
+        except ValueError as exc:
+            raise ReporteInvalido(_por_que_no_es_el_historico(contenido)) from exc
+
+    principio = contenido[:4096].lower()
+    if b"<tr" in principio or b"<table" in principio:
+        return tabla_html_a_frame(contenido)
+
+    if contenido[:4] == b"\xd0\xcf\x11\xe0":
+        raise ReporteInvalido(
+            "El archivo es un Excel antiguo (.xls binario). Vuelve a descargarlo "
+            "de la intranet, o guárdalo como .xlsx."
+        )
+    raise ReporteInvalido("El archivo no es el reporte de la intranet.")
+
+
+def leer_reporte(origen: Any) -> pd.DataFrame:
+    """El reporte de la intranet, con las columnas derivadas que hacen falta.
+
+    `origen` es una ruta, un archivo abierto o los bytes, así que sirve igual
+    para el script que para el archivo que llega por HTTP.
+    """
+    df = _normalizar_columnas(_frame_del_archivo(bytes_de(origen)))
+
     faltan = [c for c in COLUMNAS_MINIMAS if c not in df.columns]
     if faltan:
+        if parece_novedades(df.columns):
+            raise ReporteInvalido(
+                "Esto es el archivo de Novedades del cliente, no el histórico. "
+                "Súbelo en «Novedades del cliente»."
+            )
         raise ReporteInvalido(
             "Al archivo le faltan columnas del reporte: %s." % ", ".join(faltan)
         )
+    _fechas_a_datetime(df, ("Fechaejecutada", "Fechaprogramada"))
 
     df = df[df["Usuario"].notna()].copy()
     if df.empty:
@@ -276,9 +508,10 @@ def construir_padron(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[Dict[
                        if str(d).strip()] if "Direccion" in grupo else []
         registro: Dict[str, Any] = {
             "dni": clave,
-            "nombre": str(grupo["Usuario"].iloc[0]),
-            "direccion": max(direcciones, key=len) if direcciones else None,
-            "distrito": _texto(grupo["Distrito"].iloc[0]) if "Distrito" in grupo else None,
+            "nombre": reparar_acentos(str(grupo["Usuario"].iloc[0])),
+            "direccion": reparar_acentos(max(direcciones, key=len)) if direcciones else None,
+            "distrito": reparar_acentos(
+                _texto(grupo["Distrito"].iloc[0])) if "Distrito" in grupo else None,
             "cobertura": _texto(grupo["Cobertura"].iloc[0]) if "Cobertura" in grupo else None,
             "actualizado_en": ahora,
         }
@@ -326,13 +559,13 @@ def construir_historico(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "modalidad": reg["mod"],
             "turno": turno,
             "cobertura": _texto(reg.get("Cobertura")),
-            "distrito": _texto(reg.get("Distrito")),
+            "distrito": reparar_acentos(_texto(reg.get("Distrito"))),
             "codigo_vehiculo": _texto(reg.get("CodigoVehiculo")),
             "dni": dni_de(reg.get("DNI")),
             "hora_inicio": hora_de(reg.get("Hora de inicio")),
             "hora_en_punto": hora_de(reg.get("Hora en el punto")),
             "hora_llegada": hora_de(reg.get("Horallegada")),
-            "incidencia": _texto(reg.get("Incidencia")),
+            "incidencia": reparar_acentos(_texto(reg.get("Incidencia"))),
             "lat_inicio": float(reg["la"]) if pd.notna(reg.get("la")) else None,
             "lng_inicio": float(reg["lo"]) if pd.notna(reg.get("lo")) else None,
         })

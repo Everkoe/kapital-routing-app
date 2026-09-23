@@ -314,3 +314,98 @@ test('ALL es un centinela que ningún dato real puede igualar por accidente', ()
   assert.equal(emptyFilters().microZona, ALL);
   assert.ok(ALL.startsWith('__') && ALL.endsWith('__'));
 });
+
+test('el padrón se busca con guion o sin él: es el mismo vehículo', () => {
+  // La flota lo registra como «K-027» y el histórico de la intranet como
+  // «K027». Quien busca su unidad la escribe como está impresa, con guion, y
+  // antes no encontraba nada.
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00 recojo', [agente('A1')])],
+    indexFleet(FLOTA),
+  );
+
+  for (const query of ['K-027', 'K027', 'k 027', 'k-027']) {
+    assert.equal(
+      applyFilters(services, { ...emptyFilters(), query }).length, 1,
+      `no encontró la unidad buscando «${query}»`,
+    );
+  }
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), query: 'K-028' }).length, 0,
+    'no debe encontrar una unidad distinta',
+  );
+});
+
+test('el filtro de novedad separa lo modificado de lo que sigue igual', () => {
+  // «Modificado» no es una etiqueta del archivo: sale de comparar los
+  // documentos del servicio contra los del día cargado anterior.
+  const services = buildServices(
+    [
+      { ...ruta('K027', 'CALLAO', '03:00', [agente('A1')]),
+        cambio: { modificado: true, nuevos: 1, salieron: [], servicio_nuevo: false } },
+      { ...ruta('K142', 'CALLAO', '04:00', [agente('A2')]),
+        cambio: { modificado: false, nuevos: 0, salieron: [], servicio_nuevo: false } },
+    ],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(services[0].modificado, true);
+  assert.equal(services[1].modificado, false);
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), cambio: 'modificados' }).length, 1);
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), cambio: 'sin_cambio' }).length, 1);
+  assert.equal(applyFilters(services, emptyFilters()).length, 2);
+});
+
+test('un servicio sin información de cambio no se declara modificado', () => {
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00', [agente('A1')])], indexFleet(FLOTA));
+  assert.equal(services[0].modificado, false);
+  assert.equal(services[0].cambio, null);
+});
+
+test('una letra sola busca el padrón, no a todos los que la llevan en el nombre', () => {
+  // Escribir «K» devolvía 96 de 135 servicios porque hay agentes que se
+  // llaman KEIKO o KAROL. Quien escribe una letra está mirando sus unidades.
+  const services = buildServices(
+    [
+      ruta('K027', 'CALLAO', '03:00', [agente('A1')]),
+      ruta('K142', 'CALLAO', '04:00', [agente('A2')]),
+      { ...ruta('V026', 'BLL', '05:00', [agente('A3')]),
+        agentes: [{ id: 'A3', nombre: 'KEIKO BARBARAN', direccion: 'CALLE K 1' }] },
+    ],
+    indexFleet(FLOTA),
+  );
+
+  const porK = applyFilters(services, { ...emptyFilters(), query: 'K' });
+  assert.deepEqual(porK.map((s) => s.conductor), ['K027', 'K142']);
+
+  const porV = applyFilters(services, { ...emptyFilters(), query: 'V' });
+  assert.deepEqual(porV.map((s) => s.conductor), ['V026']);
+
+  const porPrefijo = applyFilters(services, { ...emptyFilters(), query: 'K0' });
+  assert.deepEqual(porPrefijo.map((s) => s.conductor), ['K027']);
+});
+
+test('lo que no es un padrón se sigue buscando en agentes y direcciones', () => {
+  // Los padrones son una letra y tres dígitos, así que «KEIKO» no es prefijo
+  // de ninguno y cae por su propio peso en la búsqueda general.
+  const services = buildServices(
+    [
+      ruta('K027', 'CALLAO', '03:00', [agente('A1')]),
+      { ...ruta('V026', 'BLL', '05:00', [agente('A3')]),
+        agentes: [{ id: 'A3', nombre: 'KEIKO BARBARAN', direccion: 'JR LIMA 540' }] },
+    ],
+    indexFleet(FLOTA),
+  );
+
+  assert.deepEqual(
+    applyFilters(services, { ...emptyFilters(), query: 'keiko' }).map((s) => s.conductor),
+    ['V026'],
+  );
+  assert.deepEqual(
+    applyFilters(services, { ...emptyFilters(), query: 'jr lima' }).map((s) => s.conductor),
+    ['V026'],
+  );
+});

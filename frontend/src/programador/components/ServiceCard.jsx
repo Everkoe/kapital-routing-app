@@ -5,15 +5,16 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  GripVertical,
   History,
   MapPin,
+  UserPlus,
   Truck,
   X,
 } from 'lucide-react';
 import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
 import PreviewAction from './PreviewAction.jsx';
+import ServiceMap from './ServiceMap.jsx';
 
 /**
  * Tarjeta de servicio y su detalle expandible.
@@ -71,15 +72,16 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes }) => (
+const AgentTable = ({ agentes, comparadoCon }) => (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
         <tr>
-          {/* Número de fila, no secuencia de recogida: el backend todavía no
-              ordena las paradas. El orden llega con la entrega 3, y será
-              editable a mano. Ver docs/planning §1. */}
-          <th scope="col" title="Número de fila. El orden de recogida llega en la entrega 3.">#</th>
+          {/* Es el orden real en que se recogió a cada persona, según la hora
+              del histórico. No es una propuesta ni se puede reordenar: nadie
+              secuencia paradas todavía, y un asidero de arrastre que no
+              arrastra promete algo que no existe. */}
+          <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
           <th scope="col">Agente</th>
           <th scope="col">Documento</th>
           <th scope="col">Dirección</th>
@@ -91,13 +93,16 @@ const AgentTable = ({ agentes }) => (
       <tbody>
         {markDuplicates(agentes).map((agente, index) => (
           <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}>
-            <td className="pw-mono">
-              <span className="pw-row-grip">
-                <GripVertical size={13} aria-hidden="true" />
-                {String(index + 1).padStart(2, '0')}
-              </span>
+            <td className="pw-mono">{String(index + 1).padStart(2, '0')}</td>
+            <td>
+              {agente?.nombre || 'Sin nombre'}
+              {agente?.nuevo && (
+                <span className="pw-state" data-tone="ok"
+                  title={`No viajaba en esta unidad y turno ${comparadoCon ? `el ${comparadoCon}` : 'el día cargado anterior'}.`}>
+                  <UserPlus size={12} aria-hidden="true" />Entró
+                </span>
+              )}
             </td>
-            <td>{agente?.nombre || 'Sin nombre'}</td>
             <td className="pw-mono">
               {agente?.id || '—'}
               {agente.duplicado && (
@@ -127,7 +132,7 @@ const AgentTable = ({ agentes }) => (
   </div>
 );
 
-const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
+const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -163,6 +168,15 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
         <Occupancy capacity={service.capacity} />
 
         <span className="pw-cell">
+          {service.modificado && (
+            <span className="pw-tag pw-tag-cambio"
+              title={service.cambio?.servicio_nuevo
+                ? `Esta unidad no hacía este turno ${comparadoCon ? `el ${comparadoCon}` : 'el día cargado anterior'}.`
+                : `Entró o salió gente respecto ${comparadoCon ? `al ${comparadoCon}` : 'al día cargado anterior'}.`}>
+              <History size={11} aria-hidden="true" />
+              {service.cambio?.servicio_nuevo ? 'Servicio nuevo' : 'Cambió'}
+            </span>
+          )}
           <ServiceStateBadge estado={service.estado} />
           {isOpen ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
         </span>
@@ -192,14 +206,44 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               </dd>
             </div>
             <div className="pw-detail-item">
-              <dt>Duración estimada</dt>
-              <dd className="pw-muted">Con el orden de recogida</dd>
+              <dt>Duración medida</dt>
+              {service.duracion ? (
+                <dd>
+                  {Math.round(service.duracion.p50)} min
+                  <small className="pw-detail-nota">
+                    {' '}· hasta {Math.round(service.duracion.p90)} min en el 10% peor
+                    {' '}· {service.duracion.casos} casos
+                  </small>
+                </dd>
+              ) : (
+                <dd className="pw-muted">Sin casos suficientes en el histórico</dd>
+              )}
             </div>
             <div className="pw-detail-item">
-              <dt>Llegada a destino</dt>
-              <dd className="pw-muted">Con el orden de recogida</dd>
+              <dt>Orden de recogida</dt>
+              <dd className="pw-muted">Por la hora real del histórico</dd>
             </div>
           </dl>
+
+          {service.modificado && (
+            <p className="pw-notice" data-tone="warn">
+              <History size={16} aria-hidden="true" />
+              <span>
+                {service.cambio?.servicio_nuevo
+                  ? 'Este servicio no existía en el día cargado anterior: la unidad no hacía este turno.'
+                  : 'Cambió respecto al día cargado anterior.'}
+                {service.cambio?.nuevos > 0 && (
+                  <> <strong>{service.cambio.nuevos}</strong> agente(s) entraron.</>
+                )}
+                {service.cambio?.salieron?.length > 0 && (
+                  <> Salieron: <strong>{service.cambio.salieron.join(', ')}</strong>.</>
+                )}
+              </span>
+            </p>
+          )}
+
+          <h4 className="pw-detail-heading">Dónde viven</h4>
+          <ServiceMap agentes={service.agentes} titulo={service.id} />
 
           <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
 
@@ -219,7 +263,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
           )}
 
           {service.agentes.length > 0 ? (
-            <AgentTable agentes={service.agentes} />
+            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />

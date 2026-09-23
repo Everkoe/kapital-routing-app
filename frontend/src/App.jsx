@@ -294,7 +294,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
           {usuarioActual?.rol === 'Programador de rutas' && (
             <>
               <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Operación</a>
-              <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>Histórico</a>
+              <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>Cargar datos</a>
               <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Flota</a>
               <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Análisis</a>
               <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
@@ -353,7 +353,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             </a>
             <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>
               <UploadCloud size={20} />
-              <span>Histórico</span>
+              <span>Cargar datos</span>
             </a>
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
               <Truck size={20} />
@@ -1281,7 +1281,7 @@ function App() {
         // El Programador ve Análisis: `VistaReportes` lee `/api/reportes`, que
         // devuelve un historial vacío porque esa clave no se alimenta todavía.
         return usuarioActual?.rol === 'Programador de rutas'
-          ? <ProgramadorAnalisis />
+          ? <ProgramadorAnalisis onIrACargar={() => handleNavigate('historico')} />
           : <VistaReportes />;
       case 'configuracion':
         return usuarioActual?.rol === 'Programador de rutas'
@@ -1312,7 +1312,7 @@ function App() {
         if (usuarioActual?.rol === 'Programador de rutas') {
           return (
             <React.Suspense fallback={<GlobalLoader text="Cargando programación..." />}>
-              <ProgramadorWorkbench />
+              <ProgramadorWorkbench onIrACargar={() => handleNavigate('historico')} />
             </React.Suspense>
           );
         }
