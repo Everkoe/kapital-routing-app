@@ -5345,6 +5345,15 @@ LOTE_CONSULTA_DNI = 40
 PAGINA_POSTGREST = 1000
 
 
+def _clave_de_vehiculo(codigo: Any) -> str:
+    """El código de una unidad, comparable entre las dos fuentes.
+
+    La flota de `app_state` guarda «K-027» y la intranet registra «K027». Sin
+    normalizar no cruzaba ni una sola de las 110 unidades.
+    """
+    return re.sub(r"[^A-Z0-9]", "", str(codigo or "").upper())
+
+
 async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
                          documentos: List[str]) -> List[Dict[str, Any]]:
     """Las filas de esa tabla para esos documentos, en tandas y paginadas."""
@@ -5367,6 +5376,54 @@ async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
             if len(pagina) < PAGINA_POSTGREST:
                 break
     return encontradas
+
+
+@app.get("/api/programador/vehiculos")
+async def ocupacion_de_vehiculos(session_token: SessionCookie = None):
+    """Cuánto llevó de verdad cada vehículo, según el histórico.
+
+    La pantalla de Flota enseñaba la carga derivada de `/api/routes`, que está
+    vacío: cuatro columnas a cero para las 110 unidades. Esto la sustituye por
+    lo medido.
+
+    La clave es el código normalizado sin guiones ni espacios: la flota guarda
+    «K-027» y la intranet registra «K027», y sin normalizar no cruzaba ninguna.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/resumen_vehiculos",
+            headers={**HEADERS, "Content-Type": "application/json"}, json={},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] resumen_vehiculos devolvió {respuesta.status_code}")
+        _raise_database_unavailable("resumen_vehiculos")
+    medidos = respuesta.json() or {}
+    return {_clave_de_vehiculo(codigo): datos for codigo, datos in medidos.items()}
+
+
+@app.get("/api/programador/analisis")
+async def analisis_del_historico(session_token: SessionCookie = None):
+    """Lo que dice el histórico cargado, resumido.
+
+    El cálculo vive en la función `resumen_analisis()` de Postgres, no aquí:
+    son 21.789 filas y subirlas para contarlas costaría medio mega de egress
+    cada vez que alguien abre la pestaña. Lo que viaja son ~4 KB.
+
+    Sustituye al análisis anterior, que derivaba del tablero de `/api/routes`.
+    Ese endpoint devuelve una lista vacía desde que la programación no se
+    escribe en `app_state`, así que la pantalla no podía enseñar nada.
+    """
+    await require_admin_session(session_token)
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/resumen_analisis",
+            headers={**HEADERS, "Content-Type": "application/json"}, json={},
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] resumen_analisis devolvió {respuesta.status_code}")
+        _raise_database_unavailable("resumen_analisis")
+    return respuesta.json()
 
 
 @app.post("/api/programador/novedades")

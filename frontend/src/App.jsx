@@ -1281,7 +1281,7 @@ function App() {
         // El Programador ve Análisis: `VistaReportes` lee `/api/reportes`, que
         // devuelve un historial vacío porque esa clave no se alimenta todavía.
         return usuarioActual?.rol === 'Programador de rutas'
-          ? <ProgramadorAnalisis />
+          ? <ProgramadorAnalisis onIrACargar={() => handleNavigate('historico')} />
           : <VistaReportes />;
       case 'configuracion':
         return usuarioActual?.rol === 'Programador de rutas'

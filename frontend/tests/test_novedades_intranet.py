@@ -256,5 +256,24 @@ class LecturaDeNovedadesTest(unittest.TestCase):
         self.assertFalse(hi.parece_novedades(["DNI", "Usuario", "Modalidad"]))
 
 
+class ClaveDeVehiculoTest(unittest.TestCase):
+    """La flota guarda «K-027» y la intranet registra «K027».
+
+    Sin normalizar no cruzaba ni una de las 110 unidades, y la pantalla de
+    Flota enseñaba la carga a cero como si ningún vehículo hubiera trabajado.
+    """
+
+    def test_ignora_guiones_y_espacios(self):
+        from api.index import _clave_de_vehiculo
+        self.assertEqual(_clave_de_vehiculo("K-027"), "K027")
+        self.assertEqual(_clave_de_vehiculo("K027"), "K027")
+        self.assertEqual(_clave_de_vehiculo(" k 027 "), "K027")
+
+    def test_vacio_no_revienta(self):
+        from api.index import _clave_de_vehiculo
+        self.assertEqual(_clave_de_vehiculo(None), "")
+        self.assertEqual(_clave_de_vehiculo(""), "")
+
+
 if __name__ == "__main__":
     unittest.main()

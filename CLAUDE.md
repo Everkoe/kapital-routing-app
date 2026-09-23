@@ -70,6 +70,27 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   construcción idéntica al histórico, así que no hay nada que detectar. No volver a plantear deducir la baja.
   Las direcciones se comparan por términos con peso, sin acentos y sin relleno («AVENIDA», «MZ»), cortando en
   «REF»: comparar los textos tal cual daba 4 traslados falsos de 8.
+- **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
+  - **Operación** (la mesa de trabajo) lee `/api/routes`, **que devuelve `[]`**: nada escribe ya
+    `rutas_estado_actual`. El tablero está vacío y lo seguirá estando hasta que exista un motor que
+    proponga rutas —que sigue congelado, ver §9.2—. No es un fallo que se arregle con código de pantalla.
+    Lo que sí se hizo es que lo diga y lleve a «Cargar datos» en vez de anunciar una entrega ya hecha.
+  - **Cargar datos** es la única entrada real de información: las dos pestañas descritas arriba.
+  - **Análisis** y **Flota** se reconstruyeron sobre el histórico, que es el dato que sí existe.
+    Antes derivaban del mismo `/api/routes` vacío: Análisis calculaba métricas sobre cero filas y Flota
+    enseñaba cuatro columnas a cero para las 110 unidades.
+  - Los resúmenes se calculan en Postgres (`resumen_analisis()` y `resumen_vehiculos()`, en
+    [supabase/002_analisis_programador.sql](supabase/002_analisis_programador.sql)) y no en la
+    aplicación: bajar 21.789 filas para contarlas costaría ~493 KB de egress por visita; el resumen son
+    4 KB y 9 KB. Los sirven `GET /api/programador/analisis` y `GET /api/programador/vehiculos`.
+  - **`A BORDO` es la única incidencia que significa que el servicio ocurrió.** Medido: 15.779 de 21.789,
+    o sea que **el 28% de los asientos programados viajan vacíos**. Es el número que más cambia el
+    dimensionado de flota y por eso preside la pantalla de Análisis.
+  - **Los códigos de vehículo no coinciden entre las dos fuentes**: la flota guarda «K-027» y la
+    intranet registra «K027». El cruce va por el código sin guiones (`_clave_de_vehiculo`), y aun así
+    **solo cruzan 41 de 79**: la intranet mueve unidades «V###» y «M###» que no están dadas de alta en
+    `__flota__`. La pantalla lo dice en vez de enseñar ceros; decidir qué hacer con esas unidades es del
+    usuario, no del código.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria

@@ -33,17 +33,22 @@ const PanelHistorico = () => {
   const [subiendo, setSubiendo] = useState(false);
   const [ultimaCarga, setUltimaCarga] = useState(null);
 
-  const leerEstado = useCallback(async () => {
+  const leerEstado = useCallback(async (vivo = { current: true }) => {
     try {
-      setEstado(await apiFetch('/api/programador/estado-historico'));
+      const respuesta = await apiFetch('/api/programador/estado-historico');
+      if (vivo.current) setEstado(respuesta);
     } catch (error) {
       toast.error(error?.message || 'No se pudo leer el estado del histórico.');
     } finally {
-      setCargando(false);
+      if (vivo.current) setCargando(false);
     }
   }, []);
 
-  useEffect(() => { leerEstado(); }, [leerEstado]);
+  useEffect(() => {
+    const vivo = { current: true };
+    leerEstado(vivo);
+    return () => { vivo.current = false; };
+  }, [leerEstado]);
 
   const subir = async (archivo) => {
     setSubiendo(true);

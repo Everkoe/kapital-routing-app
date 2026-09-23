@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw, Search, Truck } from 'lucide-react';
+import { apiFetch } from '../utils/apiClient';
 import { useBoardData } from './data/useBoardData.js';
-import { capacityDistribution, fleetWithLoad } from './model/analytics.js';
+import { capacityDistribution } from './model/analytics.js';
 import './programador.css';
 
 /**
@@ -11,42 +12,69 @@ import './programador.css';
  * documentos, vencimientos, altas y bajas— y son 1.671 líneas de gestión que
  * el Programador no necesita ni debería poder ejecutar.
  *
- * Lo que este rol necesita saber es cuánto cabe en cada unidad y cuánto lleva,
- * porque es el dato del que dependen sus decisiones de carga. Y era justo el
- * que el tablero anterior falseaba: escribía 15 para todas cuando la capacidad
- * dominante real es 4.
+ * Lo que este rol necesita saber es cuánto cabe en cada unidad y cuánto lleva.
+ * Lo segundo salía antes del tablero de `/api/routes`, que devuelve una lista
+ * vacía: cuatro columnas a cero para las 110 unidades. Ahora sale del
+ * histórico, donde está medido: cuántos viajes hizo cada vehículo y cuánta
+ * gente subió de verdad.
+ *
+ * Los códigos no coinciden entre las dos fuentes —la flota guarda «K-027» y la
+ * intranet registra «K027»—, así que el cruce va por el código sin guiones, y
+ * lo hace el backend. Aun así solo cruzan 41 de 79: la intranet mueve unidades
+ * «V###» y «M###» que no están dadas de alta aquí, y eso se dice en pantalla
+ * en vez de dejar la tabla llena de ceros.
  */
 
+const clave = (valor) => String(valor ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+const pasajeros = (n) => `${n} ${Number(n) === 1 ? 'pasajero' : 'pasajeros'}`;
+
 const FlotaProgramador = () => {
-  const { services, fleet, isLoading, error, refresh } = useBoardData();
+  const { fleet, isLoading, error, refresh } = useBoardData();
+  const [medidos, setMedidos] = useState({});
   const [query, setQuery] = useState('');
 
-  const unidades = useMemo(() => fleetWithLoad(fleet, services), [fleet, services]);
+  const leerMedidos = useCallback(async (vivo = { current: true }) => {
+    try {
+      const respuesta = await apiFetch('/api/programador/vehiculos');
+      if (vivo.current) setMedidos(respuesta);
+    } catch {
+      // La capacidad declarada sigue sirviendo sin esto: no se bloquea la vista.
+      if (vivo.current) setMedidos({});
+    }
+  }, []);
+
+  useEffect(() => {
+    const vivo = { current: true };
+    leerMedidos(vivo);
+    return () => { vivo.current = false; };
+  }, [leerMedidos]);
+
+  const unidades = useMemo(
+    () => Object.values(fleet)
+      .map((u) => ({ ...u, uso: medidos[clave(u.unidad_id)] || null }))
+      .sort((a, b) => (b.uso?.viajes ?? -1) - (a.uso?.viajes ?? -1)),
+    [fleet, medidos],
+  );
+
   const distribucion = useMemo(() => capacityDistribution(fleet), [fleet]);
 
   const visibles = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return unidades;
-    return unidades.filter((u) =>
-      [u.unidad_id, u.chofer].some((field) => String(field ?? '').toLowerCase().includes(needle)),
-    );
+    const buscado = query.trim().toLowerCase();
+    if (!buscado) return unidades;
+    return unidades.filter((u) => [u.unidad_id, u.chofer]
+      .some((campo) => String(campo ?? '').toLowerCase().includes(buscado)));
   }, [unidades, query]);
 
-  const totales = useMemo(
-    () =>
-      unidades.reduce(
-        (acc, u) => {
-          acc.asientos += u.capacidad ?? 0;
-          acc.registros += u.registros;
-          acc.personas += u.personas;
-          if (u.sinUsar) acc.sinUsar += 1;
-          if (u.capacidad === null) acc.sinCapacidad += 1;
-          return acc;
-        },
-        { asientos: 0, registros: 0, personas: 0, sinUsar: 0, sinCapacidad: 0 },
-      ),
-    [unidades],
-  );
+  const totales = useMemo(() => {
+    const enFlota = new Set(Object.values(fleet).map((u) => clave(u.unidad_id)));
+    return {
+      asientos: Object.values(fleet).reduce((n, u) => n + (u.capacidad ?? 0), 0),
+      conHistorico: unidades.filter((u) => u.uso).length,
+      sinHistorico: unidades.filter((u) => !u.uso).length,
+      fueraDeFlota: Object.keys(medidos).filter((c) => !enFlota.has(c)).length,
+    };
+  }, [fleet, unidades, medidos]);
 
   return (
     <div className="pw-root">
@@ -56,7 +84,8 @@ const FlotaProgramador = () => {
           <span className="pw-meta"><Truck size={15} aria-hidden="true" />{unidades.length} unidades</span>
         </div>
         <div className="pw-actions">
-          <button type="button" className="pw-btn" onClick={refresh} disabled={isLoading}>
+          <button type="button" className="pw-btn"
+            onClick={() => { refresh(); leerMedidos(); }} disabled={isLoading}>
             <RefreshCw size={16} aria-hidden="true" />
             {isLoading ? 'Actualizando…' : 'Actualizar'}
           </button>
@@ -67,7 +96,8 @@ const FlotaProgramador = () => {
         <Truck size={16} aria-hidden="true" />
         <span>
           Vista de solo lectura. Dar de alta, editar o retirar unidades corresponde a
-          Administración; aquí el Programador consulta la capacidad de la que dispone.
+          Administración; aquí el Programador consulta la capacidad de la que dispone
+          y lo que cada unidad mueve de verdad según el histórico.
         </span>
       </p>
 
@@ -78,6 +108,17 @@ const FlotaProgramador = () => {
         </p>
       )}
 
+      {totales.fueraDeFlota > 0 && (
+        <p className="pw-notice" data-tone="warn">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>
+            El histórico registra <strong>{totales.fueraDeFlota}</strong> vehículos que
+            no están dados de alta en la flota —los códigos «V» y «M»—. Hacen servicios
+            reales, así que su capacidad no está contada en los asientos de abajo.
+          </span>
+        </p>
+      )}
+
       <section className="pw-panel" aria-labelledby="pw-capdist-title">
         <div className="pw-panel-head">
           <h2 className="pw-panel-title" id="pw-capdist-title">Reparto por capacidad</h2>
@@ -85,18 +126,21 @@ const FlotaProgramador = () => {
         </div>
         <div className="pw-panel-inner">
           <div className="pw-metrics">
-            {distribucion.map(({ capacidad, unidades: count }) => (
+            {distribucion.map(({ capacidad, unidades: cuantas }) => (
               <div className="pw-metric" key={String(capacidad)}>
-                <strong>{count}</strong>
+                <strong>{cuantas}</strong>
                 <span>{capacidad === null ? 'Sin capacidad declarada' : `Unidades de ${capacidad}`}</span>
-                {capacidad !== null && <small>{capacidad * count} asientos</small>}
+                {capacidad !== null && <small>{capacidad * cuantas} asientos</small>}
               </div>
             ))}
           </div>
-          {totales.sinUsar > 0 && (
+          {totales.sinHistorico > 0 && (
             <p className="pw-footnote">
               <AlertTriangle size={14} aria-hidden="true" />
-              <span>{totales.sinUsar} unidad(es) sin ninguna ruta en la programación vigente.</span>
+              <span>
+                {totales.sinHistorico} unidad(es) no aparecen en el histórico cargado:
+                o no han hecho servicios, o la intranet las registra con otro código.
+              </span>
             </p>
           )}
         </div>
@@ -106,15 +150,12 @@ const FlotaProgramador = () => {
         <div className="pw-panel-head">
           <h2 className="pw-panel-title" id="pw-fleet-title">Unidades</h2>
           <span className="pw-panel-tools">
-            <label className="pw-inline-field" htmlFor="pw-fleet-q"><Search size={13} aria-hidden="true" /> Buscar</label>
-            <input
-              id="pw-fleet-q"
-              type="search"
-              className="pw-input pw-input-sm"
-              placeholder="Unidad o conductor…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <label className="pw-inline-field" htmlFor="pw-fleet-q">
+              <Search size={13} aria-hidden="true" /> Buscar
+            </label>
+            <input id="pw-fleet-q" type="search" className="pw-input pw-input-sm"
+              placeholder="Unidad o conductor…" value={query}
+              onChange={(e) => setQuery(e.target.value)} />
             <span className="pw-panel-count">{visibles.length} de {unidades.length}</span>
           </span>
         </div>
@@ -134,34 +175,38 @@ const FlotaProgramador = () => {
                     <th scope="col">Unidad</th>
                     <th scope="col">Conductor</th>
                     <th scope="col">Capacidad</th>
-                    <th scope="col">Registros</th>
-                    <th scope="col">Personas</th>
-                    <th scope="col">Libres</th>
-                    <th scope="col">Servicios</th>
+                    <th scope="col">Viajes</th>
+                    <th scope="col">Lleva</th>
+                    <th scope="col">Máximo</th>
+                    <th scope="col">Días</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibles.map((u) => (
-                    <tr key={u.unidad_id} data-duplicado={u.registros > u.personas}>
+                    <tr key={u.unidad_id}>
                       <td className="pw-mono">{u.unidad_id}</td>
                       <td>{u.chofer || '—'}</td>
                       <td className="pw-mono">
                         {u.capacidad ?? <span className="pw-muted">No declarada</span>}
                       </td>
-                      <td className="pw-mono">{u.registros}</td>
                       <td className="pw-mono">
-                        {u.personas}
-                        {u.registros > u.personas && (
-                          <span className="pw-state" data-tone="warn" title="Esta unidad transporta registros repetidos.">
+                        {u.uso ? u.uso.viajes : <span className="pw-muted">Sin histórico</span>}
+                      </td>
+                      <td className="pw-mono">
+                        {u.uso ? pasajeros(u.uso.ocupacion_p50) : '—'}
+                      </td>
+                      <td className="pw-mono">
+                        {u.uso ? u.uso.ocupacion_max : '—'}
+                        {' '}
+                        {u.uso && u.capacidad && u.uso.ocupacion_max > u.capacidad && (
+                          <span className="pw-state" data-tone="warn"
+                            title="Ha llevado más gente que la capacidad declarada.">
                             <AlertTriangle size={12} aria-hidden="true" />
-                            {u.registros - u.personas} de más
+                            sobre capacidad
                           </span>
                         )}
                       </td>
-                      <td className="pw-mono">{u.libres === null ? '—' : u.libres}</td>
-                      <td className="pw-mono">
-                        {u.sinUsar ? <span className="pw-muted">Sin ruta</span> : u.servicios}
-                      </td>
+                      <td className="pw-mono">{u.uso ? u.uso.dias : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

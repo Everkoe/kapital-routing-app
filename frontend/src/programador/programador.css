@@ -1034,3 +1034,113 @@
   .nov-fila { flex-direction: column; gap: 8px; }
   .nov-estado { min-width: 0; }
 }
+
+/* --- Análisis del histórico ---------------------------------------------- */
+
+.an-metric-icon { color: var(--kapital-text-secondary); line-height: 0; }
+
+.an-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.an-lista li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.an-etiqueta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  color: var(--kapital-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.an-etiqueta small {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--kapital-text-secondary);
+  text-transform: lowercase;
+}
+
+.an-duracion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+.an-duracion strong { font-size: 1rem; color: var(--primary); }
+.an-duracion small { font-size: 0.72rem; color: var(--kapital-text-secondary); }
+
+/* La barra lleva dos capas: el fondo es el total programado y la parte llena
+   lo que de verdad viajó. Mostrar solo el total escondería justo el dato que
+   esta pantalla existe para enseñar. */
+.an-barra { flex: 1.2; min-width: 60px; display: flex; }
+.an-barra-fondo {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--kapital-badge-bg);
+  min-width: 3px;
+}
+.an-barra-llena {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--primary);
+}
+
+.an-cifra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  min-width: 48px;
+  color: var(--kapital-text-primary);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.an-cifra small { font-size: 0.72rem; font-weight: 400; color: var(--kapital-text-secondary); }
+
+.an-dias {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 130px;
+  overflow-x: auto;
+}
+.an-dias li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 1;
+  min-width: 14px;
+  height: 100%;
+}
+.an-dia-barra {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: var(--kapital-badge-bg);
+}
+.an-dia-llena {
+  display: block;
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+}
+.an-dias small { font-size: 0.66rem; color: var(--kapital-text-secondary); }
