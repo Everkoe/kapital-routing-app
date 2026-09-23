@@ -294,7 +294,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
           {usuarioActual?.rol === 'Programador de rutas' && (
             <>
               <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Operación</a>
-              <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>Histórico</a>
+              <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>Cargar datos</a>
               <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Flota</a>
               <a onClick={() => handleNav('reportes')} className={vistaActual === 'reportes' ? 'nav-link active' : 'nav-link'}>Análisis</a>
               <a onClick={() => handleNav('configuracion')} className={vistaActual === 'configuracion' ? 'nav-link active' : 'nav-link'}>Configuración</a>
@@ -353,7 +353,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             </a>
             <a onClick={() => handleNav('historico')} className={vistaActual === 'historico' ? 'nav-link active' : 'nav-link'}>
               <UploadCloud size={20} />
-              <span>Histórico</span>
+              <span>Cargar datos</span>
             </a>
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>
               <Truck size={20} />

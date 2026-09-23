@@ -5,9 +5,10 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import historico_intranet
+    from api import historico_intranet, novedades_intranet
 except ImportError:  # ejecucion desde dentro de `api/`
     import historico_intranet
+    import novedades_intranet
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi import Request
 import math
@@ -5330,6 +5331,90 @@ async def estado_historico(session_token: SessionCookie = None):
             "duraciones": await cuenta("duraciones_base"),
             "ultimo_dia": filas[0]["fecha_ejecutada"] if filas else None,
         }
+
+
+# Documentos por consulta al cruzar las novedades contra el historico. No es
+# por egress —son columnas cortas— sino por el largo de la URL: PostgREST
+# recibe los documentos en `in.(...)` y una lista sin trocear la desborda.
+LOTE_CONSULTA_DNI = 40
+
+# PostgREST no devuelve mas de mil filas por peticion, pida uno lo que pida.
+# Hay que recorrerlas con `offset` y parar en la tanda corta; dar por
+# terminada la lectura en la primera respuesta deja fuera lo que no cupo, y
+# un historial recortado convierte un cambio real en «sin novedad».
+PAGINA_POSTGREST = 1000
+
+
+async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
+                         documentos: List[str]) -> List[Dict[str, Any]]:
+    """Las filas de esa tabla para esos documentos, en tandas y paginadas."""
+    encontradas: List[Dict[str, Any]] = []
+    for inicio in range(0, len(documentos), LOTE_CONSULTA_DNI):
+        trozo = documentos[inicio:inicio + LOTE_CONSULTA_DNI]
+        leidas = 0
+        while True:
+            respuesta = await cliente.get(
+                _tabla_url(tabla), headers=HEADERS,
+                params={"select": columnas, "dni": "in.(%s)" % ",".join(trozo),
+                        "order": "dni", "limit": PAGINA_POSTGREST, "offset": leidas},
+            )
+            if respuesta.status_code != 200:
+                print(f"[Kapital] {tabla} no respondió al cruce: {respuesta.status_code}")
+                _raise_database_unavailable(f"consulta_{tabla}")
+            pagina = respuesta.json()
+            encontradas.extend(pagina)
+            leidas += len(pagina)
+            if len(pagina) < PAGINA_POSTGREST:
+                break
+    return encontradas
+
+
+@app.post("/api/programador/novedades")
+async def analizar_novedades(
+    file: UploadFile = File(...),
+    session_token: SessionCookie = None,
+):
+    """Lee las novedades del cliente y dice qué cambia de verdad.
+
+    No se fía de la columna «NOVEDAD» —está medido que se equivoca— sino que
+    contrasta cada fila con lo que esa persona venía haciendo según el
+    histórico. De la etiqueta solo toma si viaja o no, que es el único dato
+    que no está en ninguna otra parte.
+
+    No escribe nada: devuelve el resultado para que una persona lo mire. Las
+    altas y bajas de verdad las confirma el histórico del día siguiente.
+    """
+    await require_admin_session(session_token)
+
+    contenido = await file.read()
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
+
+    try:
+        marco = novedades_intranet.leer_novedades(contenido)
+    except novedades_intranet.ReporteInvalido as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Kapital] novedades ilegibles: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer el archivo. ¿Es el Excel de Novedades del cliente?",
+        ) from exc
+
+    documentos = sorted({d for d in marco["dni"] if d})
+    if not documentos:
+        raise HTTPException(status_code=400,
+                            detail="El archivo no trae ningún documento legible.")
+
+    async with httpx.AsyncClient(timeout=60.0) as cliente:
+        servicios = await _filas_por_dni(
+            cliente, "servicios_historicos",
+            "dni,cobertura,turno,modalidad,fecha_ejecutada", documentos)
+        padron = await _filas_por_dni(
+            cliente, "pasajeros", "dni,nombre,direccion,distrito,estado_ubicacion",
+            documentos)
+
+    return novedades_intranet.analizar(marco, servicios, padron)
 
 
 @app.get("/api/routes")

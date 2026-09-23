@@ -22,6 +22,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
   (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 238 KB, y lo que queda es la escritura de la sesión,
   que obliga a bajar la columna antes de reescribirla porque PostgREST no sabe hacer escrituras parciales).
+  **PostgREST no devuelve más de mil filas por petición**, pida uno el límite que pida: hay que recorrerlas
+  con `offset` y parar en la tanda corta. Pedir 5.000 y dar la lectura por terminada al recibir 1.000 dejaba
+  fuera veinte mil servicios en silencio, y un historial recortado convierte un cambio real en «sin novedad».
+  Y en una escritura en lote **todas las filas deben traer las mismas claves** (`All object keys must
+  match`), así que se mandan todas las columnas aunque solo cambie una.
 - **Programador de rutas — tablas propias, fuera de `app_state`**: desde 2026-09-22 existen
   `public.pasajeros`, `public.servicios_historicos` y `public.duraciones_base`, con RLS activada, sin
   políticas y con permisos solo para `service_role`. El histórico son 21.271 filas al mes y no cabe en la
@@ -32,16 +37,39 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   geocodificador** —falla en el 88% de estas direcciones, que usan notación de manzana y lote— sino con la
   mediana del GPS de sus recojos: 29 m de error mediano contra domicilios conocidos. Los umbrales de
   confianza están calibrados contra esos domicilios, no elegidos a ojo; `--calibrar` reproduce la medición.
-  Cobertura actual: 768 fiables, 33 dudosos, 310 a revisión humana de 1.111.
+  Cobertura actual: 776 fiables, 35 dudosos, 352 a revisión humana de 1.163.
+- **El `.xls` de la intranet no es un Excel**: es una tabla HTML en UTF-8 **sin declarar el charset**, con
+  extensión `.xls`. Eso importa porque Excel, al abrirlo, asume cp1252 y convierte «Ñ» (bytes `C3 91`) en
+  «Ã» + U+2018; ese texto roto se cargó en el padrón y hubo que repararlo con
+  `scripts/reparar_acentos.py` (78 filas). Desde 2026-09-22 el lector acepta el archivo **tal como lo
+  descarga la intranet** —lo parsea con `html.parser` de la librería estándar, sin lxml ni
+  BeautifulSoup, que no caben en Vercel— y además repara lo que le llegue roto (`reparar_acentos`). Las
+  cabeceras vienen partidas en dos líneas y llegan con espacio o sin él según haya pasado por Excel:
+  `ALIAS_COLUMNAS` las unifica. Las fechas son `dd/mm/aa` y se parsean con el día por delante de forma
+  explícita; dejárselo adivinar a pandas es jugarse el mes sin que nada lo señale.
 - **Carga diaria del histórico**: el Programador sube el reporte de la intranet desde su sección
-  **Histórico** (`POST /api/programador/historico`, ~3,6 s para un día de ~830 servicios). La lectura vive en
+  **Cargar datos → Histórico** (`POST /api/programador/historico`, medido 3,9 s para un día de 518
+  servicios). La lectura vive en
   [frontend/api/historico_intranet.py](frontend/api/historico_intranet.py) y la comparten el endpoint y
   `scripts/cargar_historico.py`, que es para importar meses enteros (~22 s, por encima de lo que aguanta una
   función serverless). **La ubicación NO sale del archivo subido**: la recalcula la función de Postgres
   `recalcular_ubicaciones()` sobre el histórico acumulado. Hacerlo desde el archivo degradaba domicilios ya
   resueltos —medido: una carga de un solo día bajó de 768 buenos a 481, porque un día no llega a los tres
   puntos GPS que exige el umbral—. Por eso el padrón se escribe en dos grupos y quien no declara coordenada
-  va **sin** las columnas de ubicación, para que lo ya aprendido sobreviva.
+  va **sin** las columnas de ubicación, para que lo ya aprendido sobreviva. Que «sin ubicar» suba tras una
+  carga no es una regresión: son personas nuevas. La comprobación correcta es que las **resueltas** no bajen.
+- **Novedades del cliente — el cambio se deduce, no se lee**: es el otro archivo que maneja el Programador
+  (altas, bajas y cambios para los próximos días; suele llegar el viernes con el fin de semana dentro) y se
+  sube en **Cargar datos → Novedades** (`POST /api/programador/novedades`, en
+  [frontend/api/novedades_intranet.py](frontend/api/novedades_intranet.py)). **No escribe nada**: analiza y
+  enseña el resultado. Su columna `NOVEDAD` es inservible y está medido: de 23 filas de muestra, 6 dicen
+  «Asignar Ruta» de gente que ya viajaba —una con 108 servicios previos— y la etiqueta nombra mal el cambio
+  (decía «Asignar» cuando lo que cambiaba era el turno). Por eso cada fila se contrasta con el histórico
+  **anterior a su fecha**, que es de donde salen zona, turno, sentido y dirección. De la etiqueta se lee un
+  solo bit —si viaja o no— y **no por confianza, sino porque no está en ninguna otra parte**: una baja es por
+  construcción idéntica al histórico, así que no hay nada que detectar. No volver a plantear deducir la baja.
+  Las direcciones se comparan por términos con peso, sin acentos y sin relleno («AVENIDA», «MZ»), cortando en
+  «REF»: comparar los textos tal cual daba 4 traslados falsos de 8.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -89,7 +117,7 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
 - `framer-motion` — animaciones
 
-**Backend** (`frontend/api/index.py`, FastAPI/Python, ~6170 líneas y 54 endpoints en un solo archivo —
+**Backend** (`frontend/api/index.py`, FastAPI/Python, ~6420 líneas y 57 endpoints en un solo archivo —
 muy por encima del techo de 800; su modularización es el P2 del PR #1)
 - `fastapi`, `uvicorn`, `pandas`, `openpyxl`, `httpx`, `python-dotenv`
 - WebSockets nativos para eventos en tiempo real (`WebSocketManager`, broadcast por rol)
