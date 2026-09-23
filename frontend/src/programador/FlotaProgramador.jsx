@@ -59,9 +59,15 @@ const FlotaProgramador = () => {
 
   const distribucion = useMemo(() => capacityDistribution(fleet), [fleet]);
 
+  // El padrón manda: escribir «K» son las unidades que empiezan por K, no
+  // todos los conductores con una k en el nombre. Si lo escrito no es el
+  // principio de ningún padrón, se busca por conductor como siempre.
   const visibles = useMemo(() => {
     const buscado = query.trim().toLowerCase();
     if (!buscado) return unidades;
+    const padron = clave(query);
+    const porPadron = unidades.filter((u) => clave(u.unidad_id).startsWith(padron));
+    if (porPadron.length > 0) return porPadron;
     return unidades.filter((u) => [u.unidad_id, u.chofer]
       .some((campo) => String(campo ?? '').toLowerCase().includes(buscado)));
   }, [unidades, query]);

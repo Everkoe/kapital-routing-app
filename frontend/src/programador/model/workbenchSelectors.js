@@ -81,6 +81,10 @@ export const filterOptions = (services) => {
  */
 const soloAlfanumerico = (valor) => lower(valor).replace(/[^a-z0-9]/g, '');
 
+/** Si esa unidad empieza por lo que se ha escrito. */
+const esPadron = (service, padron) =>
+  Boolean(padron) && soloAlfanumerico(service.conductor).startsWith(padron);
+
 /**
  * Busca en el servicio y también dentro de sus agentes: el Programador busca
  * por nombre o dirección de una persona tanto como por unidad.
@@ -92,19 +96,30 @@ const matchesQuery = (service, query) => {
     .some((field) => lower(field).includes(needle));
   if (inService) return true;
 
-  const padron = soloAlfanumerico(query);
-  if (padron && soloAlfanumerico(service.conductor).includes(padron)) return true;
-
   return service.agentes.some((agente) =>
     [agente?.id, agente?.nombre, agente?.direccion].some((field) => lower(field).includes(needle)),
   );
 };
 
+/**
+ * El padrón manda sobre el resto de la búsqueda.
+ *
+ * Buscar por texto suelto dentro de los agentes es útil, pero con una letra
+ * sola lo inunda todo: escribir «K» devolvía 96 de 135 servicios porque hay
+ * agentes que se llaman KEIKO o KAROL. Y lo que el Programador está haciendo
+ * al escribir «K» es mirar sus unidades, no buscar a nadie.
+ *
+ * Por eso, si lo escrito es el principio de algún padrón, se enseñan **solo**
+ * esas unidades. Si no lo es, se busca en todo como antes. La regla no es
+ * ambigua porque los padrones son una letra y tres dígitos: «V» y «V02» son
+ * prefijos de unidad, y «VEGA» no lo es de ninguna, así que un apellido cae
+ * por su propio peso en la búsqueda general.
+ */
 export const applyFilters = (services, filters) => {
   const list = Array.isArray(services) ? services : [];
   const f = { ...emptyFilters(), ...(filters || {}) };
 
-  return list.filter((service) => {
+  const previos = list.filter((service) => {
     if (f.microZona !== ALL && service.microZona !== f.microZona) return false;
     if (f.horario !== ALL && service.horario !== f.horario) return false;
     if (f.estado !== ALL && service.estado !== f.estado) return false;
@@ -112,8 +127,16 @@ export const applyFilters = (services, filters) => {
     if (f.asignacion === 'sin_asignar' && service.asignado) return false;
     if (f.cambio === 'modificados' && !service.modificado) return false;
     if (f.cambio === 'sin_cambio' && service.modificado) return false;
-    return matchesQuery(service, f.query);
+    return true;
   });
+
+  if (!f.query) return previos;
+
+  const padron = soloAlfanumerico(f.query);
+  const porPadron = previos.filter((service) => esPadron(service, padron));
+  if (porPadron.length > 0) return porPadron;
+
+  return previos.filter((service) => matchesQuery(service, f.query));
 };
 
 /**
