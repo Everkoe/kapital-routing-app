@@ -1,4 +1,6 @@
-import { ArrowRightLeft, Clock, MapPin, Search, SlidersHorizontal } from 'lucide-react';
+import {
+  ArrowRightLeft, Clock, GitCompareArrows, MapPin, Search, SlidersHorizontal,
+} from 'lucide-react';
 import { ALL } from '../model/workbenchSelectors.js';
 import { SERVICE_STATE_KEYS, serviceStateLabel } from './estadoCatalog.js';
 
@@ -69,13 +71,26 @@ const WorkbenchFilters = ({ filters, options, onChange }) => {
         allLabel="Todas"
       />
 
+      <Select
+        id="pw-f-cambio"
+        label="Novedad"
+        Icon={GitCompareArrows}
+        value={filters.cambio}
+        onChange={set('cambio')}
+        options={[
+          { value: 'modificados', label: 'Modificados' },
+          { value: 'sin_cambio', label: 'Sin cambios' },
+        ]}
+        allLabel="Todos"
+      />
+
       <div className="pw-field pw-field-search">
         <label htmlFor="pw-f-query"><Search size={13} aria-hidden="true" />Buscar</label>
         <input
           id="pw-f-query"
           type="search"
           className="pw-input"
-          placeholder="Servicio, agente, documento o dirección…"
+          placeholder="Padrón, agente, documento o dirección…"
           value={filters.query}
           onChange={(e) => onChange({ ...filters, query: e.target.value })}
         />

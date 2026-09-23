@@ -8,12 +8,14 @@ import {
   GripVertical,
   History,
   MapPin,
+  UserPlus,
   Truck,
   X,
 } from 'lucide-react';
 import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
 import PreviewAction from './PreviewAction.jsx';
+import ServiceMap from './ServiceMap.jsx';
 
 /**
  * Tarjeta de servicio y su detalle expandible.
@@ -97,7 +99,15 @@ const AgentTable = ({ agentes }) => (
                 {String(index + 1).padStart(2, '0')}
               </span>
             </td>
-            <td>{agente?.nombre || 'Sin nombre'}</td>
+            <td>
+              {agente?.nombre || 'Sin nombre'}
+              {agente?.nuevo && (
+                <span className="pw-state" data-tone="ok"
+                  title="No estaba en este servicio el día cargado anterior.">
+                  <UserPlus size={12} aria-hidden="true" />Nuevo
+                </span>
+              )}
+            </td>
             <td className="pw-mono">
               {agente?.id || '—'}
               {agente.duplicado && (
@@ -163,6 +173,13 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
         <Occupancy capacity={service.capacity} />
 
         <span className="pw-cell">
+          {service.modificado && (
+            <span className="pw-tag pw-tag-cambio"
+              title="Este servicio cambió respecto al día cargado anterior.">
+              <History size={11} aria-hidden="true" />
+              {service.cambio?.servicio_nuevo ? 'Nuevo' : 'Modificado'}
+            </span>
+          )}
           <ServiceStateBadge estado={service.estado} />
           {isOpen ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
         </span>
@@ -210,6 +227,26 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle }) => {
               <dd className="pw-muted">Por la hora real del histórico</dd>
             </div>
           </dl>
+
+          {service.modificado && (
+            <p className="pw-notice" data-tone="warn">
+              <History size={16} aria-hidden="true" />
+              <span>
+                {service.cambio?.servicio_nuevo
+                  ? 'Este servicio no existía en el día cargado anterior: la unidad no hacía este turno.'
+                  : 'Cambió respecto al día cargado anterior.'}
+                {service.cambio?.nuevos > 0 && (
+                  <> <strong>{service.cambio.nuevos}</strong> agente(s) entraron.</>
+                )}
+                {service.cambio?.salieron?.length > 0 && (
+                  <> Salieron: <strong>{service.cambio.salieron.join(', ')}</strong>.</>
+                )}
+              </span>
+            </p>
+          )}
+
+          <h4 className="pw-detail-heading">Dónde viven</h4>
+          <ServiceMap agentes={service.agentes} titulo={service.id} />
 
           <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
 

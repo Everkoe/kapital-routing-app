@@ -154,6 +154,10 @@ export const buildServices = (routes, fleetIndex = {}) => {
       // casos suficientes. No se estima: una cifra inventada aquí se
       // convertiría en una promesa de hora de llegada.
       duracion: route.duracion ?? null,
+      // Qué cambió respecto al día cargado anterior. Sale de comparar los
+      // documentos del servicio, no de ninguna etiqueta.
+      cambio: route.cambio ?? null,
+      modificado: Boolean(route.cambio?.modificado),
       estado: serviceState({ conductor, capacity, agentCount: agentes.length }),
     });
     return acc;

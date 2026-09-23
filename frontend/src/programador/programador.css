@@ -1164,3 +1164,56 @@
    Va en la misma línea porque sin el p90 la mediana sola invita a planificar
    al límite. */
 .pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }
+
+/* --- Mapa del servicio ---------------------------------------------------- */
+
+.pw-map { display: flex; flex-direction: column; gap: 8px; }
+.pw-map .leaflet-container {
+  border-radius: 10px;
+  border: 1px solid var(--kapital-border);
+  /* El mapa se dibuja en su propia capa; sin esto se cuela por encima de los
+     desplegables de filtros al hacer scroll. */
+  z-index: 0;
+}
+.pw-map-nota {
+  margin: 0;
+  color: var(--kapital-text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+/* Un punto numerado con el orden de recogida. Verde si es alguien que no
+   estaba en este servicio el día anterior. */
+.pw-map-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--kapital-card-bg);
+  background: var(--primary);
+  color: var(--kapital-card-bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.pw-map-pin.es-nuevo { background: var(--kapital-accent-green); }
+
+.pw-map-vacio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 10px;
+  color: var(--kapital-text-secondary);
+}
+.pw-map-vacio p { margin: 0; font-size: 0.84rem; line-height: 1.5; }
+.pw-map-vacio svg { flex-shrink: 0; }
+
+/* El distintivo de «modificado» en la cabecera de la tarjeta. */
+.pw-tag-cambio {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--kapital-accent-orange);
+}

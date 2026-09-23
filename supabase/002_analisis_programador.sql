@@ -148,21 +148,30 @@ grant execute on function public.resumen_vehiculos() to service_role;
 --
 -- El tablero leía `/api/routes`, que devuelve una lista vacía desde que la
 -- programación dejó de escribirse en `app_state`. Esto lo sustituye por lo que
--- el Programador carga cada día.
---
--- No propone rutas ni asigna nada —eso necesita un motor que no existe— sino
--- que enseña lo que de verdad se ejecutó, que es el punto de partida del
--- trabajo: se sigue el orden anterior y se aplican las novedades.
+-- el Programador carga cada día. No propone rutas —eso necesita un motor que
+-- no existe— sino que enseña lo que de verdad se ejecutó, que es el punto de
+-- partida del trabajo: seguir el orden anterior y aplicar las novedades.
 --
 -- Un servicio es un vehículo en una fecha, turno y modalidad. La forma de
 -- salida (`conductor`, `micro_zona`, `horario`, `agentes`) es la del contrato
 -- anterior a propósito: así las tarjetas, los filtros, la búsqueda y la
 -- exportación siguen funcionando sin tocarlas.
 --
--- La duración se busca primero en la celda con turno y, si esa combinación no
--- tiene casos suficientes, cae al nivel grueso. Casi la mitad de las celdas
--- con turno tienen menos de cinco casos en un mes; sin el respaldo, la mayoría
--- de las tarjetas se quedarían sin duración. Medido: 130 de 135 la reciben.
+-- Trae además tres cosas que la pantalla necesita:
+--
+-- * **La duración medida.** Se busca la celda con turno y se cae al nivel
+--   grueso cuando no hay casos suficientes; casi la mitad de las celdas con
+--   turno tienen menos de cinco casos en un mes. Medido: 130 de 135 rutas la
+--   reciben, frente a un puñado sin el respaldo.
+-- * **Las coordenadas de cada agente**, para el mapa. Solo las que existen:
+--   401 de 518 en el último día cargado. Quien no tiene domicilio resuelto se
+--   cuenta aparte en vez de recibir un punto inventado, que mandaría un
+--   vehículo a una casa que no existe.
+-- * **Qué cambió respecto al día cargado anterior**, comparando el conjunto de
+--   documentos de cada servicio. Está modificado si entró o salió alguien, y
+--   es nuevo si esa unidad no hacía ese turno. El día de comparación es el
+--   último cargado anterior, que no tiene por qué ser el natural anterior, así
+--   que se devuelve su fecha y la pantalla la nombra.
 create or replace function public.programacion_del_dia(dia date default null)
 returns jsonb
 language sql
@@ -173,33 +182,74 @@ as $$
   with elegido as (
     select coalesce(dia, (select max(fecha_ejecutada) from servicios_historicos)) as fecha
   ),
+  previo as (
+    select max(fecha_ejecutada) as fecha
+    from servicios_historicos
+    where fecha_ejecutada < (select fecha from elegido)
+  ),
   servicios as (
     select
       s.codigo_vehiculo, s.turno, s.modalidad, s.cobertura, s.dni,
-      s.hora_inicio, s.incidencia, p.nombre, p.direccion
+      s.hora_inicio, s.incidencia, p.nombre, p.direccion,
+      p.lat, p.lng, p.estado_ubicacion
     from servicios_historicos s
     left join pasajeros p on p.dni = s.dni
     where s.fecha_ejecutada = (select fecha from elegido)
       and s.codigo_vehiculo is not null
       and btrim(s.codigo_vehiculo) <> ''
   ),
+  ayer as (
+    select
+      s.codigo_vehiculo as codigo_vehiculo,
+      s.turno as turno,
+      s.modalidad as modalidad,
+      s.dni as dni,
+      coalesce(p.nombre, s.dni) as nombre
+    from servicios_historicos s
+    left join pasajeros p on p.dni = s.dni
+    where s.fecha_ejecutada = (select fecha from previo)
+      and s.codigo_vehiculo is not null
+  ),
   agrupados as (
     select
-      codigo_vehiculo,
-      turno,
-      modalidad,
-      -- Una unidad puede tocar dos zonas en el mismo turno; manda la primera,
-      -- y la tarjeta enseña esa.
-      (array_agg(cobertura order by cobertura))[1] as cobertura,
+      s.codigo_vehiculo,
+      s.turno,
+      s.modalidad,
+      -- Una unidad puede tocar dos zonas en el mismo turno; manda la primera.
+      (array_agg(s.cobertura order by s.cobertura))[1] as cobertura,
       jsonb_agg(jsonb_build_object(
-        'id', dni,
-        'nombre', coalesce(nombre, 'Sin nombre'),
-        'direccion', direccion,
-        'hora', hora_inicio,
-        'incidencia', incidencia
-      ) order by hora_inicio nulls last, dni) as agentes
-    from servicios
-    group by codigo_vehiculo, turno, modalidad
+        'id', s.dni,
+        'nombre', coalesce(s.nombre, 'Sin nombre'),
+        'direccion', s.direccion,
+        'hora', s.hora_inicio,
+        'incidencia', s.incidencia,
+        'lat', s.lat,
+        'lng', s.lng,
+        'ubicacion', s.estado_ubicacion,
+        'nuevo', not exists (
+          select 1 from ayer a
+          where a.codigo_vehiculo = s.codigo_vehiculo and a.turno = s.turno
+            and a.modalidad = s.modalidad and a.dni = s.dni)
+      ) order by s.hora_inicio nulls last, s.dni) as agentes,
+      count(*) filter (where not exists (
+        select 1 from ayer a
+        where a.codigo_vehiculo = s.codigo_vehiculo and a.turno = s.turno
+          and a.modalidad = s.modalidad and a.dni = s.dni)) as nuevos,
+      not exists (
+        select 1 from ayer a
+        where a.codigo_vehiculo = s.codigo_vehiculo and a.turno = s.turno
+          and a.modalidad = s.modalidad) as servicio_nuevo,
+      coalesce((
+        select jsonb_agg(distinct a.nombre)
+        from ayer a
+        where a.codigo_vehiculo = s.codigo_vehiculo and a.turno = s.turno
+          and a.modalidad = s.modalidad
+          and not exists (select 1 from servicios x
+                          where x.codigo_vehiculo = a.codigo_vehiculo
+                            and x.turno = a.turno and x.modalidad = a.modalidad
+                            and x.dni = a.dni)), '[]'::jsonb) as salieron
+    from servicios s
+    group by s.codigo_vehiculo, s.turno, s.modalidad
   ),
   con_duracion as (
     select
@@ -218,6 +268,7 @@ as $$
   )
   select jsonb_build_object(
     'fecha', (select fecha from elegido),
+    'comparado_con', (select fecha from previo),
     'dias_disponibles', coalesce((
       select jsonb_agg(f order by f desc)
       from (select distinct fecha_ejecutada as f from servicios_historicos
@@ -229,6 +280,12 @@ as $$
                'horario', turno || ' ' || lower(modalidad),
                'duracion', case when p50 is null then null else jsonb_build_object(
                  'p50', p50, 'p90', p90, 'casos', casos, 'con_turno', con_turno) end,
+               'cambio', jsonb_build_object(
+                 'nuevos', nuevos,
+                 'salieron', salieron,
+                 'servicio_nuevo', servicio_nuevo,
+                 'modificado', servicio_nuevo or nuevos > 0
+                               or jsonb_array_length(salieron) > 0),
                'agentes', agentes)
              order by turno, codigo_vehiculo)
       from con_duracion), '[]'::jsonb)

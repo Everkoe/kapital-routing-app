@@ -19,6 +19,7 @@ export const emptyFilters = () => ({
   horario: ALL,
   estado: ALL,
   asignacion: ALL, // ALL | asignados | sin_asignar
+  cambio: ALL, // ALL | modificados | sin_cambio
   query: '',
 });
 
@@ -71,6 +72,16 @@ export const filterOptions = (services) => {
 };
 
 /**
+ * Padrón escrito de cualquiera de las dos formas.
+ *
+ * La flota registra «K-027» y el histórico de la intranet «K027», así que
+ * quien buscaba su unidad con el guion —que es como está impresa— no
+ * encontraba nada. Comparar sin guiones ni espacios hace que las dos formas
+ * lleguen al mismo sitio.
+ */
+const soloAlfanumerico = (valor) => lower(valor).replace(/[^a-z0-9]/g, '');
+
+/**
  * Busca en el servicio y también dentro de sus agentes: el Programador busca
  * por nombre o dirección de una persona tanto como por unidad.
  */
@@ -80,6 +91,10 @@ const matchesQuery = (service, query) => {
   const inService = [service.conductor, service.microZona, service.horario, service.empresa]
     .some((field) => lower(field).includes(needle));
   if (inService) return true;
+
+  const padron = soloAlfanumerico(query);
+  if (padron && soloAlfanumerico(service.conductor).includes(padron)) return true;
+
   return service.agentes.some((agente) =>
     [agente?.id, agente?.nombre, agente?.direccion].some((field) => lower(field).includes(needle)),
   );
@@ -95,6 +110,8 @@ export const applyFilters = (services, filters) => {
     if (f.estado !== ALL && service.estado !== f.estado) return false;
     if (f.asignacion === 'asignados' && !service.asignado) return false;
     if (f.asignacion === 'sin_asignar' && service.asignado) return false;
+    if (f.cambio === 'modificados' && !service.modificado) return false;
+    if (f.cambio === 'sin_cambio' && service.modificado) return false;
     return matchesQuery(service, f.query);
   });
 };

@@ -314,3 +314,53 @@ test('ALL es un centinela que ningún dato real puede igualar por accidente', ()
   assert.equal(emptyFilters().microZona, ALL);
   assert.ok(ALL.startsWith('__') && ALL.endsWith('__'));
 });
+
+test('el padrón se busca con guion o sin él: es el mismo vehículo', () => {
+  // La flota lo registra como «K-027» y el histórico de la intranet como
+  // «K027». Quien busca su unidad la escribe como está impresa, con guion, y
+  // antes no encontraba nada.
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00 recojo', [agente('A1')])],
+    indexFleet(FLOTA),
+  );
+
+  for (const query of ['K-027', 'K027', 'k 027', 'k-027']) {
+    assert.equal(
+      applyFilters(services, { ...emptyFilters(), query }).length, 1,
+      `no encontró la unidad buscando «${query}»`,
+    );
+  }
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), query: 'K-028' }).length, 0,
+    'no debe encontrar una unidad distinta',
+  );
+});
+
+test('el filtro de novedad separa lo modificado de lo que sigue igual', () => {
+  // «Modificado» no es una etiqueta del archivo: sale de comparar los
+  // documentos del servicio contra los del día cargado anterior.
+  const services = buildServices(
+    [
+      { ...ruta('K027', 'CALLAO', '03:00', [agente('A1')]),
+        cambio: { modificado: true, nuevos: 1, salieron: [], servicio_nuevo: false } },
+      { ...ruta('K142', 'CALLAO', '04:00', [agente('A2')]),
+        cambio: { modificado: false, nuevos: 0, salieron: [], servicio_nuevo: false } },
+    ],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(services[0].modificado, true);
+  assert.equal(services[1].modificado, false);
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), cambio: 'modificados' }).length, 1);
+  assert.equal(
+    applyFilters(services, { ...emptyFilters(), cambio: 'sin_cambio' }).length, 1);
+  assert.equal(applyFilters(services, emptyFilters()).length, 2);
+});
+
+test('un servicio sin información de cambio no se declara modificado', () => {
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00', [agente('A1')])], indexFleet(FLOTA));
+  assert.equal(services[0].modificado, false);
+  assert.equal(services[0].cambio, null);
+});
