@@ -33,6 +33,20 @@ const announceAdminWebSocketState = (connected) => {
  */
 const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 
+/**
+ * Los clientes a los que sirve una unidad, según la columna GRUPO de su base.
+ *
+ * Viene como «TP», «KONECTA» o «TP/KONECTA»: una misma unidad puede atender a
+ * los dos, así que se parte en etiquetas en lugar de enseñarse como un texto
+ * suelto. Solo la base de masivo lo declara; Remisse y Sharf no, y de ellas no
+ * se afirma nada.
+ */
+const grupoDeUnidad = (grupo) =>
+  String(grupo || '')
+    .split(/[/,]/)
+    .map((parte) => parte.trim().toUpperCase())
+    .filter(Boolean);
+
 /** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
 const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
 
@@ -666,6 +680,7 @@ const FlotaView = ({ usuario, initialBase }) => {
           <tr>
             <th>PADRÓN</th>
             <th>{isCliente ? 'NAME' : 'Conductor'}</th>
+            {!isCliente && <th>Cliente</th>}
             {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
@@ -681,7 +696,7 @@ const FlotaView = ({ usuario, initialBase }) => {
             if (filteredFlota.length === 0) {
               return (
                 <tr>
-                  <td colSpan={isCliente ? 6 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <td colSpan={isCliente ? 5 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     No se encontraron unidades que coincidan con la búsqueda.
                   </td>
                 </tr>
@@ -710,6 +725,21 @@ const FlotaView = ({ usuario, initialBase }) => {
                     )}
                   </span>
                 </td>
+                {/* El cliente al que sirve la unidad sale de la columna GRUPO
+                    de la base de masivo: TP, KONECTA o las dos. Las bases que
+                    no lo declaran —Remisse, Sharf— se quedan sin marca en vez
+                    de recibir una supuesta, porque de ellas no consta. */}
+                {!isCliente && (
+                  <td>
+                    {vehiculo.grupo
+                      ? grupoDeUnidad(vehiculo.grupo).map((cliente) => (
+                          <span key={cliente} className="unidad-grupo" data-cliente={cliente}>
+                            {cliente}
+                          </span>
+                        ))
+                      : <span className="unidad-grupo-vacio">No consta</span>}
+                  </td>
+                )}
                 {/* Ni el tipo ni la capacidad se preguntan siempre en el alta.
                     Sin respaldo la celda quedaba como « (15 pax)», con el tipo
                     en blanco, que parecía un fallo de carga en vez de un dato

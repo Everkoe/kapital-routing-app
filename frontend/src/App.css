@@ -2548,3 +2548,26 @@ select.campo-pendiente {
   font-size: 0.82rem;
   font-style: italic;
 }
+
+/* El cliente al que sirve una unidad. Son etiquetas y no un texto suelto
+   porque una misma unidad puede atender a TP y a Konecta a la vez. */
+.unidad-grupo {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 1px 4px 1px 0;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: var(--kapital-badge-bg);
+  color: var(--text-secondary);
+}
+.unidad-grupo[data-cliente="TP"] {
+  background: rgba(56, 189, 248, 0.16);
+  color: var(--kapital-nav-link-active);
+}
+.unidad-grupo[data-cliente="KONECTA"] {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--kapital-accent-green);
+}
+.unidad-grupo-vacio { font-size: 0.76rem; color: var(--text-muted); }

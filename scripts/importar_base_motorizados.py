@@ -104,6 +104,21 @@ def _texto(valor: Any) -> Optional[str]:
     return limpio if limpio and limpio.lower() != "nan" else None
 
 
+def _grupo(valor: Any, base: Any) -> Optional[str]:
+    """El cliente al que sirve la unidad: TP, KONECTA o los dos.
+
+    Se descarta cuando repite el nombre de la base —el archivo de Sharf trae
+    «Sharf Motorizado» en esa columna—: eso no dice a qué cliente sirve, y
+    enseñarlo en la columna de cliente sería ruido con aspecto de dato.
+    """
+    texto = _texto(valor)
+    if not texto:
+        return None
+    if _texto(base) and texto.strip().lower() == str(_texto(base)).strip().lower():
+        return None
+    return texto.upper().replace(" ", "")
+
+
 def _fecha(valor: Any) -> Optional[str]:
     texto = _texto(valor)
     if not texto:
@@ -152,6 +167,7 @@ def leer_base(ruta: str) -> List[Dict[str, Any]]:
             "modelo": _texto(fila.get("modelo")),
             "anio": _texto(fila.get("anio")),
             "color": _texto(fila.get("color")),
+            "grupo": _grupo(fila.get("grupo"), fila.get("base")),
             "correo": (_texto(fila.get("correo")) or "").lower() or None,
         })
     if not personas:
@@ -214,6 +230,7 @@ def unidad_de(persona: Dict[str, Any]) -> Dict[str, Any]:
         "ano": persona.get("anio"),
         "color": persona.get("color"),
         "base": persona.get("base"),
+        "grupo": persona.get("grupo"),
         "soat": "", "atu": "", "licencia": "", "revision": "",
         "soat_doc": "", "atu_doc": "", "licencia_doc": "", "revision_doc": "",
     }
@@ -235,16 +252,22 @@ def clave_de_usuario(nombre: str, ocupadas) -> str:
     return candidata
 
 
-def usuario_de(persona: Dict[str, Any], clave: str, contrasena: str) -> Dict[str, Any]:
-    return {
+def usuario_de(persona: Dict[str, Any], clave: str,
+               contrasena: Optional[str] = None) -> Dict[str, Any]:
+    """El usuario tal como lo guarda `app_state`.
+
+    Sin `contrasena` devuelve solo los campos de datos, que es lo que hace
+    falta para refrescar a alguien que ya tiene cuenta: construirle una
+    contraseña vacía reventaba —`password_for_storage` rechaza la cadena
+    vacía, y con razón— y pisársela dejaría fuera a quien ya estaba entrando.
+    """
+    usuario = {
         "rol": "Conductor",
         "estado": "Activo",
         "nombre": persona.get("nombre"),
         "email": persona.get("correo") or clave,
         "celular": persona.get("celular"),
         "unidad_id": persona["padron"],
-        "password": backend.password_for_storage(contrasena),
-        "needs_password_change": True,
         "perfil_conductor": {
             "tipoDoc": "DNI",
             "numDoc": persona["dni"],
@@ -261,6 +284,10 @@ def usuario_de(persona: Dict[str, Any], clave: str, contrasena: str) -> Dict[str
             "capacidadVehiculo": persona.get("capacidad"),
         },
     }
+    if contrasena:
+        usuario["password"] = backend.password_for_storage(contrasena)
+        usuario["needs_password_change"] = True
+    return usuario
 
 
 def _url(recurso: str) -> str:
@@ -348,6 +375,9 @@ def main() -> int:
     flota = dict(usuarios.get("__flota__") or {})
     altas, actualizaciones = planificar(personas, usuarios)
 
+    from collections import Counter
+    grupos = Counter(p.get("grupo") or "sin grupo" for p in personas)
+    print("grupos (cliente)     : %s" % dict(grupos))
     print("altas de usuario     : %d" % len(altas))
     print("cuentas ya existentes: %d" % len(actualizaciones))
     nuevas_unidades = [p["padron"] for p in personas if p["padron"] not in flota]
@@ -378,11 +408,8 @@ def main() -> int:
     # A quien ya tiene cuenta se le refrescan los datos, nunca la contraseña:
     # cambiarla dejaría fuera a alguien que ya estaba entrando.
     for cambio in actualizaciones:
-        actual = usuarios[cambio["clave"]]
-        refresco = usuario_de(cambio["persona"], cambio["clave"], "")
-        refresco.pop("password")
-        refresco.pop("needs_password_change")
-        actual.update(refresco)
+        usuarios[cambio["clave"]].update(
+            usuario_de(cambio["persona"], cambio["clave"]))
 
     for persona in personas:
         flota[persona["padron"]] = {**flota.get(persona["padron"], {}),
