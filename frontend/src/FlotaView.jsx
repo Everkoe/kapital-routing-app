@@ -656,6 +656,7 @@ const FlotaView = ({ usuario, initialBase }) => {
               {baseFilter === 'MASIVO' && (
                 <div className="flota-clientes" role="group" aria-label="Cliente dentro de masivo">
                   <span className="flota-clientes-titulo">Cliente</span>
+                  <span className="flota-clientes-barra" aria-hidden="true" />
                   {CLIENTES_DE_MASIVO.map((cliente) => (
                     <button key={cliente} type="button"
                       className="unidad-grupo flota-cliente-toggle"
@@ -665,12 +666,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                       {cliente}
                     </button>
                   ))}
-                  {clientesFiltro.length > 0 && (
-                    <button type="button" className="flota-clientes-limpiar"
-                      onClick={() => setClientesFiltro([])}>
-                      Ver todas
-                    </button>
-                  )}
                 </div>
               )}
 

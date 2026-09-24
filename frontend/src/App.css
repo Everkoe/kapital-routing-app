@@ -2606,7 +2606,16 @@ select.campo-pendiente {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  margin-right: 2px;
+}
+
+/* La misma barrita que separa «BASE» de su valor, para que los dos controles
+   se lean como la misma familia. */
+.flota-clientes-barra {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--border-color);
+  margin: 0 2px;
 }
 .flota-cliente-toggle {
   border: 1px solid transparent;
@@ -2624,15 +2633,3 @@ select.campo-pendiente {
   border-color: currentColor;
 }
 .flota-cliente-toggle[aria-pressed='false'][data-cliente] { background: transparent; }
-
-.flota-clientes-limpiar {
-  border: none;
-  background: none;
-  padding: 2px 4px;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-family: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.flota-clientes-limpiar:hover { color: var(--text-primary); }
