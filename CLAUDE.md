@@ -80,6 +80,18 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   actualiza a quien ya existe y **nunca le cambia la contraseña** a alguien que ya entró. Hoy: 128
   usuarios y 126 unidades. Ojo, la flota pasa a tener dos naturalezas —autos de 4 a 15 plazas y motos de
   2—, y eso afecta a cualquier cálculo de capacidad que suponga coche.
+  La columna `GRUPO` del Excel es **el cliente**, no la base: TP, KONECTA o `TP/KONECTA`, porque una
+  unidad puede servir a los dos (25, 11 y 31 de las 67 de masivo). Se guarda en `grupo` y Gestión de
+  Flota lo enseña en etiquetas. **Solo masivo lo declara**; Remisse y Sharf no, y ahí la celda dice «No
+  consta» en vez de heredar una marca inventada. El archivo de Sharf repite el nombre de su base en esa
+  columna, así que se descarta al leer. La única unidad de masivo sin cliente es `K-TEST`, que es de
+  prueba y no está en el Excel.
+- **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
+  la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
+  fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
+  la columna de cliente: la base tenía el grupo y la tabla decía «No consta» en todas las filas.
+  Reiniciar el backend —o esperar a que caduque la caché— lo resuelve; en Vercel se arregla solo en el
+  siguiente cold start.
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones
