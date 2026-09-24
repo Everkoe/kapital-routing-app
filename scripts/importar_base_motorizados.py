@@ -104,19 +104,23 @@ def _texto(valor: Any) -> Optional[str]:
     return limpio if limpio and limpio.lower() != "nan" else None
 
 
-def _grupo(valor: Any, base: Any) -> Optional[str]:
-    """El cliente al que sirve la unidad: TP, KONECTA o los dos.
+def _grupo(valor: Any) -> Optional[str]:
+    """El grupo de la unidad, tal como lo declara su base.
 
-    Se descarta cuando repite el nombre de la base —el archivo de Sharf trae
-    «Sharf Motorizado» en esa columna—: eso no dice a qué cliente sirve, y
-    enseñarlo en la columna de cliente sería ruido con aspecto de dato.
+    En masivo es el cliente —«TP», «KONECTA» o «TP/KONECTA», porque una unidad
+    puede servir a los dos—; en Remisse y en Sharf es el nombre de la propia
+    base. Las tres cosas son el grupo, y se enseñan igual.
+
+    Llegué a descartarlo cuando repetía el nombre de la base, dándolo por
+    redundante. No me correspondía: quien mantiene el archivo lo escribe ahí a
+    propósito, y quitarlo dejaba 56 unidades marcadas como «No consta» cuando
+    su grupo estaba escrito en la columna.
+
+    Solo se normaliza para comparar: mayúsculas y sin espacios alrededor. Los
+    espacios de dentro se respetan, que «SHARF MOTORIZADO» se lee.
     """
     texto = _texto(valor)
-    if not texto:
-        return None
-    if _texto(base) and texto.strip().lower() == str(_texto(base)).strip().lower():
-        return None
-    return texto.upper().replace(" ", "")
+    return " ".join(texto.upper().split()) if texto else None
 
 
 def _fecha(valor: Any) -> Optional[str]:
@@ -167,7 +171,7 @@ def leer_base(ruta: str) -> List[Dict[str, Any]]:
             "modelo": _texto(fila.get("modelo")),
             "anio": _texto(fila.get("anio")),
             "color": _texto(fila.get("color")),
-            "grupo": _grupo(fila.get("grupo"), fila.get("base")),
+            "grupo": _grupo(fila.get("grupo")),
             "correo": (_texto(fila.get("correo")) or "").lower() or None,
         })
     if not personas:

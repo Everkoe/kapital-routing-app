@@ -34,18 +34,21 @@ const announceAdminWebSocketState = (connected) => {
 const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 
 /**
- * Los clientes a los que sirve una unidad, según la columna GRUPO de su base.
+ * El grupo de una unidad, tal como lo declara su base.
  *
- * Viene como «TP», «KONECTA» o «TP/KONECTA»: una misma unidad puede atender a
- * los dos, así que se parte en etiquetas en lugar de enseñarse como un texto
- * suelto. Solo la base de masivo lo declara; Remisse y Sharf no, y de ellas no
- * se afirma nada.
+ * En masivo es el cliente —«TP», «KONECTA» o «TP/KONECTA», porque una misma
+ * unidad puede atender a los dos—; en Remisse y en Sharf es el nombre de la
+ * propia base. Se parte por la barra para que las mixtas salgan en dos
+ * etiquetas en vez de como un texto pegado.
  */
 const grupoDeUnidad = (grupo) =>
   String(grupo || '')
     .split(/[/,]/)
     .map((parte) => parte.trim().toUpperCase())
     .filter(Boolean);
+
+/** Clave estable para el color: el mismo grupo, siempre del mismo color. */
+const claveDeGrupo = (grupo) => grupo.replace(/[^A-Z0-9]/g, '');
 
 /** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
 const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
@@ -733,7 +736,8 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <td>
                     {vehiculo.grupo
                       ? grupoDeUnidad(vehiculo.grupo).map((cliente) => (
-                          <span key={cliente} className="unidad-grupo" data-cliente={cliente}>
+                          <span key={cliente} className="unidad-grupo"
+                            data-cliente={claveDeGrupo(cliente)}>
                             {cliente}
                           </span>
                         ))

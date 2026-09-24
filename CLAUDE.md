@@ -80,12 +80,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   actualiza a quien ya existe y **nunca le cambia la contraseña** a alguien que ya entró. Hoy: 128
   usuarios y 126 unidades. Ojo, la flota pasa a tener dos naturalezas —autos de 4 a 15 plazas y motos de
   2—, y eso afecta a cualquier cálculo de capacidad que suponga coche.
-  La columna `GRUPO` del Excel es **el cliente**, no la base: TP, KONECTA o `TP/KONECTA`, porque una
-  unidad puede servir a los dos (25, 11 y 31 de las 67 de masivo). Se guarda en `grupo` y Gestión de
-  Flota lo enseña en etiquetas. **Solo masivo lo declara**; Remisse y Sharf no, y ahí la celda dice «No
-  consta» en vez de heredar una marca inventada. El archivo de Sharf repite el nombre de su base en esa
-  columna, así que se descarta al leer. La única unidad de masivo sin cliente es `K-TEST`, que es de
-  prueba y no está en el Excel.
+  La columna `GRUPO` del Excel se guarda en `grupo` y Gestión de Flota la enseña en etiquetas de color,
+  una por grupo. **Las tres bases la declaran**: en masivo es el cliente —`TP`, `KONECTA` o
+  `TP/KONECTA`, porque una unidad puede servir a los dos (25, 11 y 31 de 67)—; en Remisse y en Sharf es
+  el nombre de la propia base (40 y 16). Llegué a descartarla cuando repetía la base, dándola por
+  redundante, y dejó 56 unidades como «No consta» teniendo el dato escrito: **no descartar ese valor**.
+  Solo quedan sin grupo 3 unidades, una de ellas `K-TEST`, que es de prueba y no está en ningún Excel.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
