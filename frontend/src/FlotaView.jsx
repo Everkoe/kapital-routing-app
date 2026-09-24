@@ -33,6 +33,23 @@ const announceAdminWebSocketState = (connected) => {
  */
 const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 
+/**
+ * El grupo de una unidad, tal como lo declara su base.
+ *
+ * En masivo es el cliente —«TP», «KONECTA» o «TP/KONECTA», porque una misma
+ * unidad puede atender a los dos—; en Remisse y en Sharf es el nombre de la
+ * propia base. Se parte por la barra para que las mixtas salgan en dos
+ * etiquetas en vez de como un texto pegado.
+ */
+const grupoDeUnidad = (grupo) =>
+  String(grupo || '')
+    .split(/[/,]/)
+    .map((parte) => parte.trim().toUpperCase())
+    .filter(Boolean);
+
+/** Clave estable para el color: el mismo grupo, siempre del mismo color. */
+const claveDeGrupo = (grupo) => grupo.replace(/[^A-Z0-9]/g, '');
+
 /** Espejo de `_ADMINISTRATION_ROLES` del backend: más estrecho que el gate admin. */
 const ROLES_QUE_RENOMBRAN = new Set(['Admin', 'Administración', 'Administrador']);
 
@@ -60,6 +77,9 @@ const FlotaView = ({ usuario, initialBase }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [baseFilter, setBaseFilter] = useState(() => _resolveInitialBase(initialBase));
   const [baseDropdownOpen, setBaseDropdownOpen] = useState(false);
+  // Clientes elegidos dentro de masivo. Vacío significa «los dos», que es lo
+  // que se espera de un filtro sin marcar: no esconde nada hasta que se pide.
+  const [clientesFiltro, setClientesFiltro] = useState([]);
   const baseDropdownRef = useRef(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef(null);
@@ -70,6 +90,15 @@ const FlotaView = ({ usuario, initialBase }) => {
     { key: 'REMISSE', label: 'Remisse' },
     { key: 'SHARF MOTORIZADO', label: 'Sharf Motorizado' }
   ];
+
+  // Masivo es la única base con más de un cliente; las otras son su propio
+  // grupo y no hay nada que elegir dentro.
+  const CLIENTES_DE_MASIVO = ['TP', 'KONECTA'];
+
+  const alternarCliente = (cliente) =>
+    setClientesFiltro((elegidos) => (elegidos.includes(cliente)
+      ? elegidos.filter((c) => c !== cliente)
+      : [...elegidos, cliente]));
 
   const EXPORT_OPTIONS = [
     { key: 'MASIVO', label: 'BASE MASIVO 2026', filename: 'BASE MASIVO 2026.xlsx' },
@@ -461,7 +490,11 @@ const FlotaView = ({ usuario, initialBase }) => {
                           (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (vehiculo.unidad_id || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBase = baseFilter === 'Todas' || (vehiculo.base && vehiculo.base.toLowerCase().trim().includes(baseFilter.toLowerCase().trim()));
-    return matchesSearch && matchesBase;
+    // Sin ningún cliente marcado se enseñan todas: el filtro vacío no filtra.
+    const matchesCliente = clientesFiltro.length === 0
+      || grupoDeUnidad(vehiculo.grupo).map(claveDeGrupo)
+        .some((cliente) => clientesFiltro.includes(cliente));
+    return matchesSearch && matchesBase && matchesCliente;
   });
 
   // KPIs calculations
@@ -591,7 +624,11 @@ const FlotaView = ({ usuario, initialBase }) => {
                     <style>{`@keyframes dropdownIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }`}</style>
                     {BASE_OPTIONS.map(({ key, label }) => (
                       <button key={key}
-                        onClick={() => { setBaseFilter(key); setBaseDropdownOpen(false); }}
+                        onClick={() => {
+                          setBaseFilter(key);
+                          setClientesFiltro([]);
+                          setBaseDropdownOpen(false);
+                        }}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 12px', borderRadius: '7px', border: 'none',
@@ -610,6 +647,28 @@ const FlotaView = ({ usuario, initialBase }) => {
                   </div>
                 )}
               </div>
+
+              {/* Masivo sirve a dos clientes y una misma unidad puede atender a
+                  los dos, así que no es un desplegable de una sola opción sino
+                  dos interruptores. Sin ninguno marcado se ven todas: un filtro
+                  que nadie ha tocado no debe esconder nada. Solo aparece en
+                  masivo, porque las demás bases son su propio grupo. */}
+              {baseFilter === 'MASIVO' && (
+                <div className="flota-clientes" role="group" aria-label="Cliente dentro de masivo">
+                  <span className="flota-clientes-titulo">Cliente</span>
+                  <span className="flota-clientes-barra" aria-hidden="true" />
+                  {CLIENTES_DE_MASIVO.map((cliente) => (
+                    <button key={cliente} type="button"
+                      className="unidad-grupo flota-cliente-toggle"
+                      data-cliente={cliente}
+                      aria-pressed={clientesFiltro.includes(cliente)}
+                      onClick={() => alternarCliente(cliente)}>
+                      {cliente}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div style={{ position: 'relative', flex: 1 }}>
                 <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
                 <input
@@ -666,6 +725,7 @@ const FlotaView = ({ usuario, initialBase }) => {
           <tr>
             <th>PADRÓN</th>
             <th>{isCliente ? 'NAME' : 'Conductor'}</th>
+            {!isCliente && <th>Cliente</th>}
             {!isCliente && <th>Tipo / Cap.</th>}
             <th>SOAT</th>
             <th>Rev. Técnica</th>
@@ -681,7 +741,7 @@ const FlotaView = ({ usuario, initialBase }) => {
             if (filteredFlota.length === 0) {
               return (
                 <tr>
-                  <td colSpan={isCliente ? 6 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <td colSpan={isCliente ? 5 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     No se encontraron unidades que coincidan con la búsqueda.
                   </td>
                 </tr>
@@ -710,6 +770,22 @@ const FlotaView = ({ usuario, initialBase }) => {
                     )}
                   </span>
                 </td>
+                {/* El cliente al que sirve la unidad sale de la columna GRUPO
+                    de la base de masivo: TP, KONECTA o las dos. Las bases que
+                    no lo declaran —Remisse, Sharf— se quedan sin marca en vez
+                    de recibir una supuesta, porque de ellas no consta. */}
+                {!isCliente && (
+                  <td>
+                    {vehiculo.grupo
+                      ? grupoDeUnidad(vehiculo.grupo).map((cliente) => (
+                          <span key={cliente} className="unidad-grupo"
+                            data-cliente={claveDeGrupo(cliente)}>
+                            {cliente}
+                          </span>
+                        ))
+                      : <span className="unidad-grupo-vacio">No consta</span>}
+                  </td>
+                )}
                 {/* Ni el tipo ni la capacidad se preguntan siempre en el alta.
                     Sin respaldo la celda quedaba como « (15 pax)», con el tipo
                     en blanco, que parecía un fallo de carga en vez de un dato

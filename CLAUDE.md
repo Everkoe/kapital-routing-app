@@ -70,6 +70,28 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   construcción idéntica al histórico, así que no hay nada que detectar. No volver a plantear deducir la baja.
   Las direcciones se comparan por términos con peso, sin acentos y sin relleno («AVENIDA», «MZ»), cortando en
   «REF»: comparar los textos tal cual daba 4 traslados falsos de 8.
+- **Bases de terceros (motorizados)**: el 2026-09-24 entró la primera, «Sharf Motorizado», con
+  `scripts/importar_base_motorizados.py`. Por cada persona escribe **dos cosas**: una unidad en
+  `__flota__` con el padrón por clave (SM001…) y un usuario con rol Conductor, su `perfil_conductor` y
+  una contraseña provisional cifrada con `needs_password_change`. Las provisionales en claro salen a un
+  CSV bajo `scratch/` —ignorado por git— y es la única copia. El script **no se fía de la cabecera**: el
+  mismo archivo llegó tres veces con las etiquetas descuadradas sobre columnas distintas, así que mapea
+  por nombre normalizado y se para si falta una obligatoria. Es repetible: cruza por DNI y por padrón,
+  actualiza a quien ya existe y **nunca le cambia la contraseña** a alguien que ya entró. Hoy: 128
+  usuarios y 126 unidades. Ojo, la flota pasa a tener dos naturalezas —autos de 4 a 15 plazas y motos de
+  2—, y eso afecta a cualquier cálculo de capacidad que suponga coche.
+  La columna `GRUPO` del Excel se guarda en `grupo` y Gestión de Flota la enseña en etiquetas de color,
+  una por grupo. **Las tres bases la declaran**: en masivo es el cliente —`TP`, `KONECTA` o
+  `TP/KONECTA`, porque una unidad puede servir a los dos (25, 11 y 31 de 67)—; en Remisse y en Sharf es
+  el nombre de la propia base (40 y 16). Llegué a descartarla cuando repetía la base, dándola por
+  redundante, y dejó 56 unidades como «No consta» teniendo el dato escrito: **no descartar ese valor**.
+  Solo quedan sin grupo 3 unidades, una de ellas `K-TEST`, que es de prueba y no está en ningún Excel.
+- **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
+  la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
+  fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
+  la columna de cliente: la base tenía el grupo y la tabla decía «No consta» en todas las filas.
+  Reiniciar el backend —o esperar a que caduque la caché— lo resuelve; en Vercel se arregla solo en el
+  siguiente cold start.
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones

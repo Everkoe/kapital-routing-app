@@ -10,6 +10,9 @@
   --kapital-accent-red: #ef4444;
   --kapital-accent-orange: #f59e0b;
   --kapital-accent-clear: #475569;
+  /* El cuarto grupo de la flota necesitaba un tono propio: los otros tres ya
+     usan el azul de navegación, el verde y el ámbar. */
+  --kapital-grupo-sharf: #c084fc;
   --kapital-badge-bg: rgba(56, 189, 248, 0.15);
   --kapital-badge-text: #38bdf8;
   --kapital-nav-link-active: #38bdf8;
@@ -27,6 +30,7 @@
   --kapital-accent-red: #DC2626;
   --kapital-accent-orange: #F59E0B;
   --kapital-accent-clear: #6B7280;
+  --kapital-grupo-sharf: #7E22CE;
   --kapital-badge-bg: #E1EFFE;
   --kapital-badge-text: #1E429F;
   --kapital-nav-link-active: #38BDF8;
@@ -2548,3 +2552,84 @@ select.campo-pendiente {
   font-size: 0.82rem;
   font-style: italic;
 }
+
+/* El cliente al que sirve una unidad. Son etiquetas y no un texto suelto
+   porque una misma unidad puede atender a TP y a Konecta a la vez. */
+.unidad-grupo {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 1px 4px 1px 0;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: var(--kapital-badge-bg);
+  color: var(--text-secondary);
+}
+/* Un color por grupo, para distinguirlos de un vistazo cuando una unidad
+   sirve a dos. El fondo va en rgba del mismo tono que el texto, que es una
+   variable del tema: así el contraste aguanta en claro y en oscuro. */
+.unidad-grupo[data-cliente="TP"] {
+  background: rgba(56, 189, 248, 0.16);
+  color: var(--kapital-nav-link-active);
+}
+.unidad-grupo[data-cliente="KONECTA"] {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--kapital-accent-green);
+}
+.unidad-grupo[data-cliente="REMISSE"] {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--kapital-accent-orange);
+}
+.unidad-grupo[data-cliente="SHARFMOTORIZADO"] {
+  background: rgba(168, 85, 247, 0.18);
+  color: var(--kapital-grupo-sharf);
+}
+.unidad-grupo-vacio { font-size: 0.76rem; color: var(--text-muted); }
+
+/* El filtro de cliente dentro de masivo. Reutiliza el aspecto de las
+   etiquetas de la tabla para que se lea como lo mismo: lo que marcas aquí es
+   lo que ves allí. Sin marcar quedan apagadas, y marcadas encienden su color. */
+.flota-clientes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.flota-clientes-titulo {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* La misma barrita que separa «BASE» de su valor, para que los dos controles
+   se lean como la misma familia. */
+.flota-clientes-barra {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--border-color);
+  margin: 0 2px;
+}
+.flota-cliente-toggle {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  /* Apagado mientras no se elige: el color se reserva para lo que sí filtra. */
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.flota-cliente-toggle:hover { opacity: 1; }
+.flota-cliente-toggle[aria-pressed='true'] {
+  opacity: 1;
+  border-color: currentColor;
+}
+.flota-cliente-toggle[aria-pressed='false'][data-cliente] { background: transparent; }
