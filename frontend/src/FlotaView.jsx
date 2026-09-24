@@ -77,6 +77,9 @@ const FlotaView = ({ usuario, initialBase }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [baseFilter, setBaseFilter] = useState(() => _resolveInitialBase(initialBase));
   const [baseDropdownOpen, setBaseDropdownOpen] = useState(false);
+  // Clientes elegidos dentro de masivo. Vacío significa «los dos», que es lo
+  // que se espera de un filtro sin marcar: no esconde nada hasta que se pide.
+  const [clientesFiltro, setClientesFiltro] = useState([]);
   const baseDropdownRef = useRef(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef(null);
@@ -87,6 +90,15 @@ const FlotaView = ({ usuario, initialBase }) => {
     { key: 'REMISSE', label: 'Remisse' },
     { key: 'SHARF MOTORIZADO', label: 'Sharf Motorizado' }
   ];
+
+  // Masivo es la única base con más de un cliente; las otras son su propio
+  // grupo y no hay nada que elegir dentro.
+  const CLIENTES_DE_MASIVO = ['TP', 'KONECTA'];
+
+  const alternarCliente = (cliente) =>
+    setClientesFiltro((elegidos) => (elegidos.includes(cliente)
+      ? elegidos.filter((c) => c !== cliente)
+      : [...elegidos, cliente]));
 
   const EXPORT_OPTIONS = [
     { key: 'MASIVO', label: 'BASE MASIVO 2026', filename: 'BASE MASIVO 2026.xlsx' },
@@ -478,7 +490,11 @@ const FlotaView = ({ usuario, initialBase }) => {
                           (vehiculo.chofer || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (vehiculo.unidad_id || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBase = baseFilter === 'Todas' || (vehiculo.base && vehiculo.base.toLowerCase().trim().includes(baseFilter.toLowerCase().trim()));
-    return matchesSearch && matchesBase;
+    // Sin ningún cliente marcado se enseñan todas: el filtro vacío no filtra.
+    const matchesCliente = clientesFiltro.length === 0
+      || grupoDeUnidad(vehiculo.grupo).map(claveDeGrupo)
+        .some((cliente) => clientesFiltro.includes(cliente));
+    return matchesSearch && matchesBase && matchesCliente;
   });
 
   // KPIs calculations
@@ -608,7 +624,11 @@ const FlotaView = ({ usuario, initialBase }) => {
                     <style>{`@keyframes dropdownIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }`}</style>
                     {BASE_OPTIONS.map(({ key, label }) => (
                       <button key={key}
-                        onClick={() => { setBaseFilter(key); setBaseDropdownOpen(false); }}
+                        onClick={() => {
+                          setBaseFilter(key);
+                          setClientesFiltro([]);
+                          setBaseDropdownOpen(false);
+                        }}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 12px', borderRadius: '7px', border: 'none',
@@ -627,6 +647,33 @@ const FlotaView = ({ usuario, initialBase }) => {
                   </div>
                 )}
               </div>
+
+              {/* Masivo sirve a dos clientes y una misma unidad puede atender a
+                  los dos, así que no es un desplegable de una sola opción sino
+                  dos interruptores. Sin ninguno marcado se ven todas: un filtro
+                  que nadie ha tocado no debe esconder nada. Solo aparece en
+                  masivo, porque las demás bases son su propio grupo. */}
+              {baseFilter === 'MASIVO' && (
+                <div className="flota-clientes" role="group" aria-label="Cliente dentro de masivo">
+                  <span className="flota-clientes-titulo">Cliente</span>
+                  {CLIENTES_DE_MASIVO.map((cliente) => (
+                    <button key={cliente} type="button"
+                      className="unidad-grupo flota-cliente-toggle"
+                      data-cliente={cliente}
+                      aria-pressed={clientesFiltro.includes(cliente)}
+                      onClick={() => alternarCliente(cliente)}>
+                      {cliente}
+                    </button>
+                  ))}
+                  {clientesFiltro.length > 0 && (
+                    <button type="button" className="flota-clientes-limpiar"
+                      onClick={() => setClientesFiltro([])}>
+                      Ver todas
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div style={{ position: 'relative', flex: 1 }}>
                 <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
                 <input
