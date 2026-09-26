@@ -409,3 +409,28 @@ test('lo que no es un padrón se sigue buscando en agentes y direcciones', () =>
     ['V026'],
   );
 });
+
+test('los retirados viajan aparte y no cuentan como ocupación', () => {
+  // Un retirado no ocupa asiento, pero tampoco se borra: el día siguiente
+  // necesita saber que alguien iba a viajar y se cayó.
+  const services = buildServices(
+    [{
+      ...ruta('K027', 'CALLAO', '03:00', [agente('A1'), agente('A2')]),
+      retirados: [{ id: 'A9', nombre: 'QUIEN SE CAYO', nota: 'Baja del cliente' }],
+    }],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(services[0].agentCount, 2, 'solo cuentan los que viajan');
+  assert.equal(services[0].capacity.used, 2);
+  assert.equal(services[0].retirados.length, 1);
+  assert.equal(services[0].retirados[0].nombre, 'QUIEN SE CAYO');
+});
+
+test('sin retirados el campo es una lista vacía, no undefined', () => {
+  // La tarjeta hace `service.retirados?.length`; devolver undefined obligaría
+  // a que cada consumidor se acordara del interrogante.
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00', [agente('A1')])], indexFleet(FLOTA));
+  assert.deepEqual(services[0].retirados, []);
+});

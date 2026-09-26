@@ -7,6 +7,8 @@ import {
   ChevronRight,
   History,
   MapPin,
+  RotateCcw,
+  UserMinus,
   UserPlus,
   Truck,
   X,
@@ -72,7 +74,7 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes, comparadoCon }) => (
+const AgentTable = ({ agentes, comparadoCon, onRetirar }) => (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
@@ -117,12 +119,26 @@ const AgentTable = ({ agentes, comparadoCon }) => (
             <td><ServiceStateBadge estado="programado" size={13} /></td>
             <td>
               <span className="pw-row-actions">
-                <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
-                  Aprobar
-                </PreviewAction>
-                <PreviewAction Icon={X} size="sm" entrega="Propuesta automática y revisión">
-                  Rechazar
-                </PreviewAction>
+                {onRetirar ? (
+                  /* Sobre un plan sí hay algo que hacer: sacar a alguien del
+                     servicio. Aprobar y rechazar siguen sin existir porque no
+                     hay propuesta que revisar. */
+                  <button type="button" className="pw-btn pw-btn-sm"
+                    onClick={() => onRetirar(agente)}
+                    title="Sacar a esta persona del servicio">
+                    <UserMinus size={13} aria-hidden="true" />
+                    Retirar
+                  </button>
+                ) : (
+                  <>
+                    <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
+                      Aprobar
+                    </PreviewAction>
+                    <PreviewAction Icon={X} size="sm" entrega="Propuesta automática y revisión">
+                      Rechazar
+                    </PreviewAction>
+                  </>
+                )}
               </span>
             </td>
           </tr>
@@ -132,7 +148,8 @@ const AgentTable = ({ agentes, comparadoCon }) => (
   </div>
 );
 
-const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
+const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
+                      onRetirar, onReponer }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -263,12 +280,44 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
           )}
 
           {service.agentes.length > 0 ? (
-            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon} />
+            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon}
+              onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />
               Este servicio no tiene agentes asignados.
             </p>
+          )}
+
+          {/* Los retirados no se borran: el día siguiente necesita saber que
+              alguien iba a viajar y se cayó, y quien revisa necesita poder
+              deshacerlo sin volver a buscar a la persona. Van fuera del
+              condicional de arriba porque un servicio puede quedarse sin nadie
+              a bordo y seguir teniendo retirados que enseñar. */}
+          {service.retirados?.length > 0 && (
+            <>
+              <h4 className="pw-detail-heading">
+                Retirados de este servicio ({service.retirados.length})
+              </h4>
+              <ul className="pw-retirados">
+                {service.retirados.map((agente) => (
+                  <li key={agente.id}>
+                    <span className="pw-truncate">
+                      {agente.nombre || agente.id}
+                      {agente.nota && <small> · {agente.nota}</small>}
+                    </span>
+                    {onReponer && (
+                      <button type="button" className="pw-btn pw-btn-sm"
+                        onClick={() => onReponer(service, agente)}
+                        title="Devolver a esta persona al servicio">
+                        <RotateCcw size={13} aria-hidden="true" />
+                        Reponer
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
 
           <div className="pw-detail-footer">

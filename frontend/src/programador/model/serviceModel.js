@@ -158,6 +158,10 @@ export const buildServices = (routes, fleetIndex = {}) => {
       // documentos del servicio, no de ninguna etiqueta.
       cambio: route.cambio ?? null,
       modificado: Boolean(route.cambio?.modificado),
+      // Quien estaba asignado y se retiró. Viaja aparte de `agentes` para que
+      // no cuente como ocupación: un retirado no ocupa asiento, pero tampoco
+      // se borra, porque el día siguiente necesita saber que se cayó.
+      retirados: Array.isArray(route.retirados) ? route.retirados : [],
       estado: serviceState({ conductor, capacity, agentCount: agentes.length }),
     });
     return acc;

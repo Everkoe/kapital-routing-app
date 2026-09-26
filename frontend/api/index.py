@@ -5378,6 +5378,112 @@ async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
     return encontradas
 
 
+async def _rpc_programador(nombre: str, cuerpo: Dict[str, Any]) -> Any:
+    """Llama a una función de Postgres y devuelve su resultado.
+
+    Las cuatro operaciones del plan —leer, sembrar, editar y aplicar
+    novedades— viven en la base y no aquí por lo mismo que los resúmenes:
+    una tanda de cambios se resuelve en un viaje en vez de en veinte.
+    """
+    async with httpx.AsyncClient(timeout=120.0) as cliente:
+        respuesta = await cliente.post(
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/{nombre}",
+            headers={**HEADERS, "Content-Type": "application/json"}, json=cuerpo,
+        )
+    if respuesta.status_code != 200:
+        print(f"[Kapital] {nombre} devolvió {respuesta.status_code}: "
+              f"{respuesta.text[:200]}")
+        _raise_database_unavailable(nombre)
+    return respuesta.json()
+
+
+def _dia_o_hoy(fecha: Optional[str]) -> str:
+    """La fecha pedida, o el día de hoy si no viene ninguna."""
+    return fecha or datetime.now().date().isoformat()
+
+
+@app.get("/api/programador/plan")
+async def leer_plan(fecha: Optional[str] = None, session_token: SessionCookie = None):
+    """La programación guardada de un día, o el aviso de que no existe.
+
+    Es lo que el Programador edita, a diferencia de `/programacion`, que es el
+    histórico de lo que ocurrió y no se toca.
+    """
+    await require_admin_session(session_token)
+    return await _rpc_programador("leer_programacion", {"dia": _dia_o_hoy(fecha)})
+
+
+@app.post("/api/programador/plan/sembrar")
+async def sembrar_plan(cuerpo: Dict[str, Any] = Body(...),
+                       session_token: SessionCookie = None):
+    """Crea la programación de un día copiando la de otro ya ejecutado.
+
+    Es el «seguir el orden anterior»: el día empieza igual al último que se
+    hizo y encima se aplican las novedades. No pisa lo ya hecho salvo que se
+    pida rehacerlo, porque volver a sembrar sin querer borraría las decisiones
+    de una persona.
+    """
+    actor = await require_admin_session(session_token)
+    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    resultado = await _rpc_programador("sembrar_programacion", {
+        "dia": dia,
+        "desde": cuerpo.get("desde"),
+        "rehacer": bool(cuerpo.get("rehacer")),
+    })
+    if resultado.get("creadas"):
+        registrar_actividad(
+            "Programación creada", actor=actor, entity_type="programacion",
+            entity_id=dia,
+            entity_label=f"{resultado['creadas']} asignaciones",
+            description=(f"Sembrada desde el {resultado.get('sembrado_desde')}."),
+        )
+        await persist_users_only()
+    return resultado
+
+
+@app.post("/api/programador/plan/editar")
+async def editar_plan(cuerpo: Dict[str, Any] = Body(...),
+                      session_token: SessionCookie = None):
+    """Guarda una tanda de cambios del Programador sobre el plan de un día."""
+    await require_admin_session(session_token)
+    cambios = cuerpo.get("cambios") or []
+    if not isinstance(cambios, list) or not cambios:
+        raise HTTPException(status_code=400, detail="No hay ningún cambio que guardar.")
+    return await _rpc_programador("editar_programacion", {
+        "dia": _dia_o_hoy(cuerpo.get("fecha")), "cambios": cambios,
+    })
+
+
+@app.post("/api/programador/plan/novedades")
+async def aplicar_novedades_al_plan(cuerpo: Dict[str, Any] = Body(...),
+                                    session_token: SessionCookie = None):
+    """Lleva al plan lo que dicen las novedades, solo en lo que no admite duda.
+
+    Las bajas se retiran; las altas y los cambios de zona o turno salen de su
+    servicio y quedan pendientes de colocar. Elegir en qué vehículo entra cada
+    uno es el problema que necesita las reglas de la operación, y resolverlo
+    aquí a ojo sería inventarse una decisión que nadie ha tomado.
+    """
+    actor = await require_admin_session(session_token)
+    entradas = cuerpo.get("entradas") or []
+    if not isinstance(entradas, list) or not entradas:
+        raise HTTPException(status_code=400,
+                            detail="No hay novedades que aplicar.")
+    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    resultado = await _rpc_programador("aplicar_novedades",
+                                       {"dia": dia, "entradas": entradas})
+    if not resultado.get("error"):
+        registrar_actividad(
+            "Novedades aplicadas", actor=actor, entity_type="programacion",
+            entity_id=dia,
+            entity_label=f"{resultado.get('pendientes', 0)} por colocar",
+            description=(f"{resultado.get('retiradas', 0)} asignaciones retiradas, "
+                         f"{resultado.get('pendientes', 0)} pendientes."),
+        )
+        await persist_users_only()
+    return resultado
+
+
 @app.get("/api/programador/programacion")
 async def programacion_del_dia(fecha: Optional[str] = None,
                                session_token: SessionCookie = None):

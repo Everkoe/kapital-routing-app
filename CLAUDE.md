@@ -92,6 +92,21 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   la columna de cliente: la base tenía el grupo y la tabla decía «No consta» en todas las filas.
   Reiniciar el backend —o esperar a que caduque la caché— lo resuelve; en Vercel se arregla solo en el
   siguiente cold start.
+- **La programación del Programador — lo que decide, no lo que ocurrió**: desde 2026-09-25 existen
+  `public.programacion`, `programacion_dias` y `programacion_pendientes`, con sus funciones en
+  [supabase/003_plan_programador.sql](supabase/003_plan_programador.sql). **Tabla aparte del histórico a
+  propósito**: mezclarlas haría imposible distinguir un hecho de una intención, que es justo lo que hace
+  falta cuando algo sale mal. El flujo es el del trabajo real: `sembrar_programacion()` copia el último
+  día ejecutado —el «seguir el orden anterior»; 396 asignaciones en 0,9 s— y **no pisa lo ya hecho**
+  salvo que se pida rehacerlo. Encima se aplican las novedades con `aplicar_novedades()`, que hace solo
+  lo mecánico: **la baja se retira; el alta y el cambio de zona o turno salen de su servicio y quedan
+  pendientes**. No recoloca a nadie, porque elegir vehículo es el problema que necesita las reglas de la
+  operación y resolverlo a ojo sería inventarse una decisión. Un retirado **no se borra**: el día
+  siguiente necesita saber que alguien iba a viajar y se cayó. Los endpoints son
+  `GET /api/programador/plan` y los `POST .../plan/sembrar`, `.../plan/editar` y `.../plan/novedades`.
+  **Cada cambio se guarda al momento**, no al pulsar un botón: acumularlos obliga a resolver qué pasa si
+  alguien cierra la pestaña a medias, y ese «¿guardé?» es lo que no debe tener quien programa de
+  madrugada.
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones

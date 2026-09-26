@@ -35,16 +35,29 @@ const fetchBoard = async (dia) => {
   // el componente que la inició, desmontarlo —cambiar de sección mientras
   // carga— dejaría colgados a los demás consumidores esperando una promesa
   // muerta. Quien se va simplemente ignora el resultado.
-  const [programacion, fleet] = await Promise.all([
-    apiFetch(`/api/programador/programacion${dia ? `?fecha=${dia}` : ''}`),
+  //
+  // Se pregunta primero por el plan y solo se cae al histórico si ese día no
+  // tiene ninguno: son dos cosas distintas y no da igual cuál se enseñe. El
+  // plan se edita; el histórico es lo que pasó y no se toca.
+  const sufijo = dia ? `?fecha=${dia}` : '';
+  const [plan, fleet] = await Promise.all([
+    apiFetch(`/api/programador/plan${sufijo}`),
     apiFetch('/api/flota').catch(() => null),
   ]);
+
+  const origen = plan?.existe
+    ? plan
+    : await apiFetch(`/api/programador/programacion${sufijo}`);
+
   return {
-    routes: Array.isArray(programacion?.rutas) ? programacion.rutas : [],
-    fecha: programacion?.fecha ?? null,
-    comparadoCon: programacion?.comparado_con ?? null,
-    dias: Array.isArray(programacion?.dias_disponibles)
-      ? programacion.dias_disponibles : [],
+    modo: plan?.existe ? 'plan' : 'historico',
+    routes: Array.isArray(origen?.rutas) ? origen.rutas : [],
+    fecha: origen?.fecha ?? plan?.fecha ?? null,
+    comparadoCon: origen?.comparado_con ?? null,
+    sembradoDesde: plan?.sembrado_desde ?? null,
+    pendientes: Array.isArray(plan?.pendientes) ? plan.pendientes : [],
+    dias: Array.isArray(plan?.dias_disponibles) ? plan.dias_disponibles : [],
+    diasConPlan: Array.isArray(plan?.dias_con_plan) ? plan.dias_con_plan : [],
     fleet: indexFleet(fleet),
     loadedAt: Date.now(),
   };
@@ -78,7 +91,8 @@ export const resetBoardCache = () => {
 };
 
 const vacio = {
-  routes: [], fleet: {}, fecha: null, comparadoCon: null, dias: [], loadedAt: null,
+  modo: 'historico', routes: [], fleet: {}, fecha: null, comparadoCon: null,
+  sembradoDesde: null, pendientes: [], dias: [], diasConPlan: [], loadedAt: null,
 };
 
 export const useBoardData = (dia = '') => {

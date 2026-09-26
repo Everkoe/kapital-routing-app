@@ -30,6 +30,10 @@ export const NOVELTY_REASONS = {
   sin_ubicacion: { label: 'Sin ubicación', tone: 'danger', Icon: MapPin },
   direccion_incompleta: { label: 'Dirección incompleta', tone: 'warn', Icon: Info },
   sin_unidad: { label: 'Sin unidad disponible', tone: 'warn', Icon: UserPlus },
+  // Los dos motivos con los que una novedad deja a alguien pendiente. Decir
+  // «sin unidad» de un alta sería describir la consecuencia y callar la causa.
+  alta: { label: 'Alta del cliente', tone: 'ok', Icon: UserPlus },
+  cambio: { label: 'Cambió de zona u horario', tone: 'warn', Icon: Info },
 };
 
 export const SERVICE_STATE_KEYS = Object.keys(SERVICE_STATES);

@@ -1228,3 +1228,28 @@
   color: var(--kapital-text-secondary);
   line-height: 1.4;
 }
+
+/* Los retirados de un servicio: se ven, pero apartados de quien sí viaja. */
+.pw-retirados {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pw-retirados li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 8px;
+  color: var(--kapital-text-secondary);
+  font-size: 0.85rem;
+}
+.pw-retirados small { opacity: 0.8; }
+
+/* Los botones de aplicar, uno por día del archivo. */
+.nov-aplicar { display: flex; flex-wrap: wrap; gap: 8px; }

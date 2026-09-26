@@ -61,6 +61,7 @@ const WorkbenchHeader = ({
   onIrACargar,
   dia,
   dias,
+  diasConPlan,
   onCambiarDia,
 }) => (
   <>
@@ -75,7 +76,14 @@ const WorkbenchHeader = ({
               aria-label="Día de la programación"
               onChange={(e) => onCambiarDia?.(e.target.value)}>
               <option value="">Último cargado{fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}</option>
-              {dias.map((d) => <option key={d} value={d}>{fechaCorta(d)}</option>)}
+              {/* El punto marca los días que ya tienen programación creada:
+                  sin él, elegir un día es a ciegas y no se sabe cuál se puede
+                  editar hasta abrirlo. */}
+              {dias.map((d) => (
+                <option key={d} value={d}>
+                  {diasConPlan?.includes(d) ? '● ' : ''}{fechaCorta(d)}
+                </option>
+              ))}
             </select>
           ) : (fechaPlanificacion ? fechaCorta(fechaPlanificacion) : 'Sin día cargado')}
         </span>

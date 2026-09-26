@@ -1,7 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardList, Inbox, Upload } from 'lucide-react';
+import {
+  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Upload,
+} from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
+import { apiFetch } from '../utils/apiClient';
 import { buildPendingAgents } from './model/serviceModel.js';
 import { useBoardData } from './data/useBoardData.js';
 import {
@@ -67,7 +70,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // costaría ~96 KB de egress sin aportar nada.
   const {
     services, isLoading, error, refresh, fecha, dias, comparadoCon,
+    modo, sembradoDesde, pendientes: pendientesGuardados, diasConPlan,
   } = useBoardData(dia);
+  const [guardando, setGuardando] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -79,15 +84,86 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     [services, filters],
   );
 
-  const pending = useMemo(
-    () => buildPendingAgents(applyFilters(services, { ...filters, asignacion: 'sin_asignar' })),
-    [services, filters],
-  );
+  // Con un plan, los pendientes son los que el plan dice: gente que tiene que
+  // viajar y todavía no tiene sitio. Sin plan son los que el tablero deja sin
+  // unidad, que es lo que había antes.
+  const pending = useMemo(() => {
+    if (modo === 'plan') {
+      return pendientesGuardados.map((p) => ({
+        id: `${p.id}-${p.turno || ''}`,
+        agenteId: p.id,
+        nombre: p.nombre,
+        direccion: p.direccion,
+        microZona: p.cobertura,
+        horario: [p.turno, p.modalidad && p.modalidad.toLowerCase()]
+          .filter(Boolean).join(' '),
+        motivo: p.motivo,
+        detalle: p.detalle,
+      }));
+    }
+    return buildPendingAgents(
+      applyFilters(services, { ...filters, asignacion: 'sin_asignar' }));
+  }, [modo, pendientesGuardados, services, filters]);
 
   const toggleService = useCallback(
     (id) => setOpenServiceId((current) => (current === id ? null : id)),
     [],
   );
+
+  const crearPlan = useCallback(async () => {
+    setGuardando(true);
+    const aviso = toast.loading('Creando la programación…');
+    try {
+      const r = await apiFetch('/api/programador/plan/sembrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: dia || fecha }),
+      });
+      if (r?.sin_historico) throw new Error('No hay histórico del que partir.');
+      toast.success(r.ya_existia
+        ? 'Ese día ya tenía programación.'
+        : `${r.creadas} asignaciones copiadas del ${r.sembrado_desde}.`, { id: aviso });
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo crear la programación.', { id: aviso });
+    } finally {
+      setGuardando(false);
+    }
+  }, [dia, fecha, refresh]);
+
+  // Cada cambio se guarda al momento y no al pulsar un botón. Acumularlos
+  // obliga a resolver qué pasa si alguien cierra la pestaña a medias, y ese
+  // «¿guardé?» es justo lo que no debe tener quien programa a las cinco de la
+  // mañana.
+  const editar = useCallback(async (cambios, mensaje) => {
+    setGuardando(true);
+    try {
+      await apiFetch('/api/programador/plan/editar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: fecha || dia, cambios }),
+      });
+      toast.success(mensaje);
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo guardar el cambio.');
+    } finally {
+      setGuardando(false);
+    }
+  }, [dia, fecha, refresh]);
+
+  const retirar = useCallback((service, agente) => editar([{
+    accion: 'retirar', dni: agente.id, vehiculo: service.conductor,
+    turno: service.horario.split(' ')[0],
+    modalidad: service.horario.split(' ')[1]?.toUpperCase(),
+    nota: 'Retirado por el Programador',
+  }], `${agente.nombre || agente.id} ya no viaja en este servicio.`), [editar]);
+
+  const reponer = useCallback((service, agente) => editar([{
+    accion: 'reponer', dni: agente.id, vehiculo: service.conductor,
+    turno: service.horario.split(' ')[0],
+    modalidad: service.horario.split(' ')[1]?.toUpperCase(),
+  }], `${agente.nombre || agente.id} vuelve al servicio.`), [editar]);
 
   const handleExport = useCallback(() => {
     // Exporta lo que el Programador está viendo, no el tablero completo: si
@@ -131,6 +207,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         onIrACargar={onIrACargar}
         dia={dia}
         dias={dias}
+        diasConPlan={diasConPlan}
         onCambiarDia={setDia}
       />
 
@@ -139,6 +216,36 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           <AlertTriangle size={16} aria-hidden="true" />
           {error}
         </p>
+      )}
+
+      {/* Lo que se está mirando no es obvio y importa: un histórico no se
+          puede tocar y un plan sí. Decirlo evita que alguien intente editar
+          un día que ya pasó y crea que la aplicación no responde. */}
+      {!isLoading && !error && (
+        modo === 'plan' ? (
+          <p className="pw-notice" data-tone="ok">
+            <ClipboardList size={16} aria-hidden="true" />
+            <span>
+              Programación editable
+              {sembradoDesde && <> · copiada del {formatoFecha(sembradoDesde)}</>}
+              {guardando && <> · guardando…</>}
+            </span>
+          </p>
+        ) : services.length > 0 && (
+          <p className="pw-notice">
+            <History size={16} aria-hidden="true" />
+            <span>
+              Estás viendo <strong>lo que se ejecutó</strong> ese día, y no se
+              edita. Para trabajar sobre él, crea la programación: se copia
+              entera y a partir de ahí se toca.
+            </span>
+            <button type="button" className="pw-btn pw-btn-primary"
+              onClick={crearPlan} disabled={guardando}>
+              <CalendarPlus size={16} aria-hidden="true" />
+              Crear programación
+            </button>
+          </p>
+        )
       )}
 
       <WorkbenchFilters filters={filters} options={options} onChange={setFilters} />
@@ -209,6 +316,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   isOpen={openServiceId === service.id}
                   onToggle={toggleService}
                   comparadoCon={comparadoCon ? formatoFecha(comparadoCon) : null}
+                  onRetirar={modo === 'plan' ? retirar : null}
+                  onReponer={modo === 'plan' ? reponer : null}
                 />
               ))}
           </div>
