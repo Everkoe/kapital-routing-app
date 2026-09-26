@@ -158,7 +158,8 @@ const PanelNovedades = () => {
           + 'Créala primero en Operación.');
       }
       setAplicado({ fecha, ...r });
-      toast.success(`${r.retiradas} retiradas y ${r.pendientes} por colocar.`,
+      toast.success(`${r.pendientes} por colocar `
+        + `(${r.retiradas} de baja, ${r.movidas ?? 0} sacados de su servicio).`,
         { id: aviso });
     } catch (fallo) {
       toast.error(fallo?.message || 'No se pudo aplicar.', { id: aviso });
@@ -240,8 +241,12 @@ const PanelNovedades = () => {
                 <p className="pw-notice" data-tone="ok">
                   <CalendarCheck size={16} aria-hidden="true" />
                   <span>
-                    {fecha(aplicado.fecha)}: <strong>{aplicado.retiradas}</strong> asignaciones
-                    retiradas, <strong>{aplicado.pendientes}</strong> por colocar,
+                    {/* Las bajas y los traslados se cuentan aparte porque no
+                        son lo mismo: una baja no viaja, y quien se mueve sí,
+                        solo que todavía no se sabe dónde. */}
+                    {fecha(aplicado.fecha)}: <strong>{aplicado.retiradas}</strong> de baja,
+                    {' '}<strong>{aplicado.movidas ?? 0}</strong> sacados de su
+                    servicio, <strong>{aplicado.pendientes}</strong> por colocar,
                     {' '}{aplicado.sin_cambio} sin tocar.
                   </span>
                 </p>

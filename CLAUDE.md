@@ -121,17 +121,25 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   El KPI «Agentes sin asignar» suma los pendientes del plan: sobre un plan no hay servicios huérfanos
   —quien se cae sale de todo servicio—, así que sin ellos daba cero justo después de aplicar las
   novedades, que es el único momento en que ese número dice algo.
-  **Pendiente y medido**: un `cambio` **borra** su fila de `programacion` en vez de marcarla, de modo
-  que se pierde en qué vehículo iba esa persona. Contradice la regla de la propia tabla («una baja no se
-  borra: se marca») y ese dato es justo el que ayuda a recolocarla, porque suele volver con el mismo
-  conductor. La corrección es de una línea en `aplicar_novedades`, pero requiere aplicar DDL.
+  **Un `cambio` tampoco borra su fila: la marca**, igual que una baja. Llegó a borrarla, y con ella el
+  rastro de en qué vehículo iba esa persona, que es justo el dato que hace falta para recolocarla porque
+  lo normal es que vuelva con el mismo conductor. Ahora `aplicar_novedades` devuelve `retiradas` (bajas)
+  y `movidas` (sacados de su servicio) por separado: no son lo mismo, porque quien se mueve sí viaja.
+  **Y sembrar exige `dni is not null`.** El histórico trae 161 servicios sin pasajero —139 de ellos
+  «A BORDO»— repartidos por **27 de los 32 días cargados**, y como `programacion.dni` es `not null` la
+  siembra no fallaba en esas filas sino **entera**, con un 503 genérico. Solo se libraba sembrar desde el
+  22 de septiembre, que da la casualidad de que está limpio, que es justo el día desde el que se probó
+  todo. Medido tras el arreglo: sembrar el 5 de septiembre desde el 31 de agosto crea 520 asignaciones.
 - **Cómo se aplica lo de `supabase/`**: con `scripts/aplicar_sql.py`, que manda el archivo a la API de
   gestión de Supabase; por PostgREST no pasa el DDL y no hay ningún cliente de Postgres instalado en el
   entorno. Hasta ahora cada sesión lo hacía con un script de usar y tirar que se perdía al terminar, y
   eso deja el esquema del repositorio y el de la base sin forma comprobable de coincidir. **Ojo: el
   `SUPABASE_ACCESS_TOKEN` de `frontend/.env` está revocado** —devuelve 401 incluso en `GET /v1/projects`—
-  así que hoy no se puede aplicar nada sin generar uno nuevo. El MCP de Supabase tampoco sirve de
-  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación.
+  así que el script no funciona hasta que se genere uno nuevo. El MCP de Supabase tampoco sirve de
+  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación. Mientras tanto la vía
+  que sí funciona es el **editor SQL del panel** (`/dashboard/project/hathiwnnydorgxxgilmq/sql/new`) con la
+  sesión del usuario abierta; avisa de «operación destructiva» ante cualquier `create or replace`, que es
+  esperable y reversible porque la definición anterior está en git.
 
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban

@@ -12,7 +12,9 @@
 -- inserción, que aún no existe porque le faltan las reglas de la operación.
 --
 -- Aplicado el 2026-09-25. Medido: sembrar un día son 396 asignaciones en
--- 0,9 s, y leerlo 0,5 s.
+-- 0,9 s, y leerlo 0,5 s. `aplicar_novedades` se reaplicó el mismo día: un
+-- cambio borraba su fila y con ella el rastro de en qué vehículo iba esa
+-- persona, que es lo que hace falta para recolocarla.
 
 create table if not exists public.programacion (
   id bigserial primary key,
@@ -149,6 +151,13 @@ begin
   where s.fecha_ejecutada = origen
     and s.codigo_vehiculo is not null
     and btrim(s.codigo_vehiculo) <> ''
+    -- El histórico trae servicios sin pasajero: 161 filas, 139 de ellas «A
+    -- BORDO», repartidas por 27 de los 32 días cargados. Sin este filtro la
+    -- siembra no fallaba en esas filas, fallaba **entera** —`dni` es `not
+    -- null`— y solo se libraba el 22 de septiembre, que da la casualidad de
+    -- que está limpio. Una fila sin persona no es una asignación.
+    and s.dni is not null
+    and btrim(s.dni) <> ''
     -- Quien no subió el día de referencia no se arrastra: sembrar una baja
     -- conocida haría empezar el día con asientos que ya se sabe que sobran.
     and upper(btrim(coalesce(s.incidencia, ''))) = 'A BORDO'
@@ -406,6 +415,7 @@ declare
   documento text;
   tocadas integer;
   retiradas integer := 0;
+  movidas integer := 0;
   pendientes integer := 0;
   sin_cambio integer := 0;
 begin
@@ -431,8 +441,20 @@ begin
     elsif (e ->> 'clasificacion') in ('alta', 'cambio') then
       -- Sale de donde estaba: si cambió de zona o de turno, ese sitio ya no
       -- le corresponde y dejarlo allí sería programar un recojo que no toca.
-      delete from programacion p
-       where p.fecha = dia and p.dni = documento;
+      --
+      -- Pero se marca, no se borra, por lo mismo que una baja: en qué vehículo
+      -- iba es justo el dato que hace falta para recolocarlo, porque lo normal
+      -- es que vuelva con el mismo conductor. Borrándolo, el pendiente aparecía
+      -- sin ningún origen y había que reconstruirlo a mano.
+      update programacion p
+         set estado = 'retirado',
+             nota = coalesce(nullif(e ->> 'resumen_cambios', ''),
+                             nullif(e ->> 'etiqueta', ''),
+                             'Cambio del cliente'),
+             actualizado_en = now()
+       where p.fecha = dia and p.dni = documento and p.estado = 'programado';
+      get diagnostics tocadas = row_count;
+      movidas := movidas + tocadas;
 
       insert into programacion_pendientes
         (fecha, dni, turno, modalidad, cobertura, motivo, detalle)
@@ -454,8 +476,8 @@ begin
   update programacion_dias d set actualizado_en = now() where d.fecha = dia;
 
   return jsonb_build_object(
-    'fecha', dia, 'retiradas', retiradas, 'pendientes', pendientes,
-    'sin_cambio', sin_cambio);
+    'fecha', dia, 'retiradas', retiradas, 'movidas', movidas,
+    'pendientes', pendientes, 'sin_cambio', sin_cambio);
 end;
 $$;
 
