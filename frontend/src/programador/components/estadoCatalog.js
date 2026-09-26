@@ -33,7 +33,10 @@ export const NOVELTY_REASONS = {
   // Los dos motivos con los que una novedad deja a alguien pendiente. Decir
   // «sin unidad» de un alta sería describir la consecuencia y callar la causa.
   alta: { label: 'Alta del cliente', tone: 'ok', Icon: UserPlus },
-  cambio: { label: 'Cambió de zona u horario', tone: 'warn', Icon: Info },
+  // «de zona u horario» se quedaba corto: también entra aquí quien se mudó, y
+  // una etiqueta que dice «horario» a alguien que cambió de casa confunde. Lo
+  // que cambió lo dice la línea de detalle, con las palabras de la novedad.
+  cambio: { label: 'Cambio del cliente', tone: 'warn', Icon: Info },
 };
 
 export const SERVICE_STATE_KEYS = Object.keys(SERVICE_STATES);

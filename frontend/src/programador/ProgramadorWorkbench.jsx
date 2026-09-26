@@ -8,6 +8,9 @@ import { apiFetch } from '../utils/apiClient';
 import { buildPendingAgents } from './model/serviceModel.js';
 import { useBoardData } from './data/useBoardData.js';
 import {
+  cambiosDeLaTanda, cambiosParaAsignar, proponer, proponerTodas,
+} from './model/motorInsercion.js';
+import {
   applyFilters,
   computeKpis,
   emptyFilters,
@@ -173,6 +176,39 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     [pendientesGuardados],
   );
 
+  // Lo que el motor necesita de cada pendiente, con la misma clave que el
+  // panel para poder encontrar su propuesta.
+  const pendientesMotor = useMemo(
+    () => pendientesGuardados.map((p, index) => ({
+      clave: pendingIdentity(p, index),
+      dni: p.id,
+      nombre: p.nombre,
+      turno: p.turno,
+      modalidad: p.modalidad,
+      cobertura: p.cobertura,
+      sede: p.sede,
+      lat: p.lat,
+      lng: p.lng,
+      habituales: p.habituales,
+      motivo: p.motivo,
+    })),
+    [pendientesGuardados],
+  );
+
+  // Todas a la vez y no una por persona: si dos quieren el último asiento de
+  // un coche, verlas por separado le daría el mismo sitio a las dos. Se
+  // calcula sobre todos los pendientes, no sobre los filtrados, para que la
+  // propuesta de alguien no cambie según lo que se esté mirando.
+  const tanda = useMemo(
+    () => (modo === 'plan' ? proponerTodas(pendientesMotor, services) : []),
+    [modo, pendientesMotor, services],
+  );
+  const propuestas = useMemo(
+    () => new Map(tanda.map((t) => [t.pendiente.clave, t])),
+    [tanda],
+  );
+  const asignables = tanda.filter((t) => t.elegido).length;
+
   const pendientesHistoricos = useMemo(
     () => buildPendingAgents(services),
     [services],
@@ -258,6 +294,28 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     turno: service.horario.split(' ')[0],
     modalidad: service.horario.split(' ')[1]?.toUpperCase(),
   }], `${agente.nombre || agente.id} vuelve al servicio.`), [editar]);
+
+  // La propuesta que se ve se calculó suponiendo que los demás pendientes
+  // también entraban. Al asignar solo a una persona se recalcula contra el
+  // plan real, para que su posición en el orden no cuente con gente que
+  // todavía no está.
+  const asignar = useCallback((clave, candidato) => {
+    const persona = pendientesMotor.find((p) => p.clave === clave);
+    const real = persona && proponer(persona, services, { maxOpciones: Infinity })
+      .candidatos.find((c) => c.service.id === candidato.service.id);
+    if (!real) {
+      toast.error('Ese servicio ya no tiene sitio. Vuelve a mirar las opciones.');
+      return;
+    }
+    editar(cambiosParaAsignar(persona, real),
+      `${persona.nombre || persona.dni} va en ${real.service.conductor}.`);
+  }, [editar, pendientesMotor, services]);
+
+  const asignarTodas = useCallback(() => {
+    const cambios = cambiosDeLaTanda(tanda);
+    if (cambios.length === 0) return;
+    editar(cambios, `${asignables} ${asignables === 1 ? 'persona asignada' : 'personas asignadas'}.`);
+  }, [asignables, editar, tanda]);
 
   const botonCrear = (
     <button type="button" className="pw-btn pw-btn-primary"
@@ -482,6 +540,12 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         <PendingPanel
           pending={pending}
           totalPending={modo === 'plan' ? pendientesDelPlan.length : pendientesHistoricos.length}
+          modoPlan={modo === 'plan'}
+          propuestas={propuestas}
+          asignables={asignables}
+          ocupado={guardando}
+          onAsignar={asignar}
+          onAsignarTodas={asignarTodas}
         />
       </div>
     </div>

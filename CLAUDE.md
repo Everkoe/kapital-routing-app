@@ -130,6 +130,43 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   siembra no fallaba en esas filas sino **entera**, con un 503 genérico. Solo se libraba sembrar desde el
   22 de septiembre, que da la casualidad de que está limpio, que es justo el día desde el que se probó
   todo. Medido tras el arreglo: sembrar el 5 de septiembre desde el 31 de agosto crea 520 asignaciones.
+- **El motor de inserción** (desde 2026-09-26, en
+  [frontend/src/programador/model/motorInsercion.js](frontend/src/programador/model/motorInsercion.js)): para
+  cada pendiente del plan **propone** en qué servicio entra y en qué posición del orden; asigna la persona que
+  programa, de una en una o todas juntas. Es una inserción y no un optimizador porque el problema diario tiene
+  una mediana de un pasajero y un vehículo por celda (ver §9.2). Solo busca sitio en **servicios que ya
+  existen** del mismo turno, sentido y sede: no abre servicios ni encadena turnos, que es justo lo que
+  necesitaría las cuatro reglas de la operación que siguen sin escribirse (tiempo máximo a bordo, antelación
+  del recojo, margen entre turnos, qué hacer con las V###/M###). Ordena por su zona primero, después el menor
+  desvío en línea recta, y a igualdad las que dejan más plazas. Todo lo que usa está medido, no supuesto:
+  - **La sede es restricción dura**: ninguno de los 5.959 servicios del histórico mezcla sedes y solo una
+    persona ha ido alguna vez a dos. El plan no la guarda; `leer_programacion` la deduce del histórico
+    ([supabase/006_datos_del_motor.sql](supabase/006_datos_del_motor.sql)).
+  - **Capacidad de las unidades sin capacidad declarada** = lo más que han llevado en un servicio
+    (`max_llevado`). En las 39 unidades que sí la declaran, ese máximo coincide con ella en 23 y la holgura
+    mediana es 0. Eso resuelve las 36 V###/M### sin preguntar. **Tres unidades han llevado más de lo que
+    declaran** (K170 declara 4 y llevó 6; K244 y K246 declaran 4 y llevaron 5): ahí manda la declarada, y la
+    diferencia es un dato que el usuario debe revisar.
+  - **`22:00` y `22:01` son el mismo turno.** La intranet escribe las salidas habituales con `:01` (la de las
+    22:01 son 457 servicios en 32 días; la de las 22:00, 26) y las novedades piden `22:00`. Exigir el turno
+    exacto dejaba al motor sin ver la salida habitual; la tolerancia es de un minuto
+    (`TOLERANCIA_TURNO_MIN`) y nada más: si alguien puede esperar al coche de las 22:15 es una regla.
+  - **La unidad habitual no reordena, solo se enseña.** Se comprobó con las novedades reales: en los cuatro
+    casos la unidad habitual hacía ese turno pero cubría otra zona y quedaba más lejos (la de HOLGUIN, a
+    +11,7 km frente a +1,6 en su zona). Preferirla habría empeorado todas las propuestas.
+  - El desvío **no se convierte en minutos**: la geometría explica poco de la duración (§9.2) y sería una
+    promesa de hora.
+  La tanda («Asignar las N propuestas») atiende primero a **quien menos opciones tiene**, y sus cambios se
+  aplican **en el orden en que el motor eligió**, no en el de la lista: si dos personas van al mismo coche,
+  aplicarlos al revés deja a dos con la misma posición. Hay prueba de las dos cosas.
+- **`agregar`, `mover` y `ordenar` no funcionaron nunca hasta el 2026-09-26.** `editar_programacion` (de la
+  004) declaraba una variable `dni` igual que la columna, y Postgres rechazaba toda llamada con «column
+  reference "dni" is ambiguous»; retirar y reponer sí iban porque no la usan. Las pruebas del backend
+  simulan PostgREST y no podían verlo. **`scripts/probar_funciones_plan.py` ejecuta cada acción de verdad
+  contra la base**, sobre un día sembrado dentro de una transacción que se deshace al final: correrlo tras
+  tocar cualquier función del plan. En PL/pgSQL, **ninguna variable puede llamarse como una columna** de las
+  tablas que toca la función.
+
 - **Cómo se aplica lo de `supabase/`**: con `scripts/aplicar_sql.py`, que manda el archivo a la API de
   gestión de Supabase; por PostgREST no pasa el DDL y no hay ningún cliente de Postgres instalado en el
   entorno. Hasta ahora cada sesión lo hacía con un script de usar y tirar que se perdía al terminar, y
@@ -314,8 +351,9 @@ Contexto que no cambia con cada lote:
 1. ~~Migrar a DB en la nube~~ — **hecho** (Supabase V2 en modo compat). Pendiente decidir si el estado en
    memoria restante se elimina o se formaliza como caché intencional.
 2. Algoritmos de optimización real de rutas — **descongelado el 2026-09-22** por decisión del usuario, que
-   pasó contexto propio (VROOM + CatBoost + OSRM). Lo hecho hasta ahora es solo la base de datos; **no hay
-   ningún motor de optimización instalado y no debe añadirse por iniciativa propia**.
+   pasó contexto propio (VROOM + CatBoost + OSRM). **Desde el 2026-09-26 hay un motor de inserción**, pedido
+   por el usuario y descrito en §2 («El motor de inserción»). No es un optimizador: no hay VROOM, OSRM ni
+   CatBoost instalados, y **no deben añadirse por iniciativa propia**.
    Dos conclusiones medidas que conviene no volver a discutir desde cero:
    - **La ruta de un pasajero es 100% estable** (cobertura + turno + modalidad); lo que rota es el vehículo,
      solo 64% estable. La variación diaria real es del 22%, no del 10%: 88 altas y 76 bajas sobre 738.
