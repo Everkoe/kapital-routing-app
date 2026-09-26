@@ -29,8 +29,14 @@ export const emptyFilters = () => ({
  * `capacidadLibre` solo suma servicios cuya unidad declara capacidad. Cuando
  * alguna no la declara se informa aparte en `capacidadDesconocida`, para que la
  * cifra no se lea como un total exacto que en realidad es parcial.
+ *
+ * `sinColocar` son los pendientes del plan, y suman a «agentes sin asignar»
+ * porque son exactamente eso. Sin ellos el contador daba cero justo después de
+ * aplicar las novedades —cuando el plan no tiene servicios huérfanos, sino
+ * personas fuera de todo servicio—, que es el único momento en que ese número
+ * tenía algo que decir.
  */
-export const computeKpis = (services) => {
+export const computeKpis = (services, sinColocar = 0) => {
   const list = Array.isArray(services) ? services : [];
 
   return list.reduce(
@@ -51,7 +57,7 @@ export const computeKpis = (services) => {
       servicios: 0,
       serviciosAsignados: 0,
       agentesAsignados: 0,
-      agentesSinAsignar: 0,
+      agentesSinAsignar: sinColocar,
       capacidadLibre: 0,
       capacidadDesconocida: 0,
       excedidos: 0,

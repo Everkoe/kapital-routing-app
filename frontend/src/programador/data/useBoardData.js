@@ -57,6 +57,10 @@ const fetchBoard = async (dia) => {
     sembradoDesde: plan?.sembrado_desde ?? null,
     pendientes: Array.isArray(plan?.pendientes) ? plan.pendientes : [],
     dias: Array.isArray(plan?.dias_disponibles) ? plan.dias_disponibles : [],
+    // Los días que se pueden programar no son los del histórico: el trabajo
+    // del Programador es sobre mañana, que por definición no está ejecutado.
+    diasProgramables: Array.isArray(plan?.dias_programables)
+      ? plan.dias_programables : [],
     diasConPlan: Array.isArray(plan?.dias_con_plan) ? plan.dias_con_plan : [],
     fleet: indexFleet(fleet),
     loadedAt: Date.now(),
@@ -92,7 +96,8 @@ export const resetBoardCache = () => {
 
 const vacio = {
   modo: 'historico', routes: [], fleet: {}, fecha: null, comparadoCon: null,
-  sembradoDesde: null, pendientes: [], dias: [], diasConPlan: [], loadedAt: null,
+  sembradoDesde: null, pendientes: [], dias: [], diasProgramables: [],
+  diasConPlan: [], loadedAt: null,
 };
 
 export const useBoardData = (dia = '') => {

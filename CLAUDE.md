@@ -106,7 +106,33 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `GET /api/programador/plan` y los `POST .../plan/sembrar`, `.../plan/editar` y `.../plan/novedades`.
   **Cada cambio se guarda al momento**, no al pulsar un botón: acumularlos obliga a resolver qué pasa si
   alguien cierra la pestaña a medias, y ese «¿guardé?» es lo que no debe tener quien programa de
-  madrugada.
+  madrugada. Por lo mismo se retiró el botón «Guardar» del encabezado: anunciaba como
+  pendiente algo que ya ocurre solo.
+  **El eje de días no sale del histórico, y ese fue el fallo que dejó la función inalcanzable**: el
+  selector solo ofrecía días ya ejecutados, y el día que un programador necesita —mañana— no está en
+  `servicios_historicos` por definición. El plan del 26 existía en la base y no había manera de abrirlo
+  desde la pantalla. Ahora `GET /plan` añade `dias_programables` (hoy y trece días más, unidos a los que
+  ya tienen plan para que uno viejo siga alcanzándose) y el selector los presenta en dos grupos, «Por
+  programar» y «Ya ejecutado · no se edita». La ventana se calcula en el backend y no en Postgres a
+  propósito: cuánto se deja planificar por delante es una decisión de producto y cambiarla no debería
+  ser un DDL. **Y «hoy» es el de Lima, no el del servidor** (`_hoy_en_lima`): en Vercel el reloj es UTC
+  y Perú va cinco horas por detrás, así que desde las 19:00 `datetime.now()` ya decía mañana, justo en
+  las horas en que se programa.
+  El KPI «Agentes sin asignar» suma los pendientes del plan: sobre un plan no hay servicios huérfanos
+  —quien se cae sale de todo servicio—, así que sin ellos daba cero justo después de aplicar las
+  novedades, que es el único momento en que ese número dice algo.
+  **Pendiente y medido**: un `cambio` **borra** su fila de `programacion` en vez de marcarla, de modo
+  que se pierde en qué vehículo iba esa persona. Contradice la regla de la propia tabla («una baja no se
+  borra: se marca») y ese dato es justo el que ayuda a recolocarla, porque suele volver con el mismo
+  conductor. La corrección es de una línea en `aplicar_novedades`, pero requiere aplicar DDL.
+- **Cómo se aplica lo de `supabase/`**: con `scripts/aplicar_sql.py`, que manda el archivo a la API de
+  gestión de Supabase; por PostgREST no pasa el DDL y no hay ningún cliente de Postgres instalado en el
+  entorno. Hasta ahora cada sesión lo hacía con un script de usar y tirar que se perdía al terminar, y
+  eso deja el esquema del repositorio y el de la base sin forma comprobable de coincidir. **Ojo: el
+  `SUPABASE_ACCESS_TOKEN` de `frontend/.env` está revocado** —devuelve 401 incluso en `GET /v1/projects`—
+  así que hoy no se puede aplicar nada sin generar uno nuevo. El MCP de Supabase tampoco sirve de
+  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación.
+
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones

@@ -71,12 +71,18 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const {
     services, isLoading, error, refresh, fecha, dias, comparadoCon,
     modo, sembradoDesde, pendientes: pendientesGuardados, diasConPlan,
+    diasProgramables,
   } = useBoardData(dia);
+
+  // Sobre qué día se puede trabajar. Vacío significa «el último ejecutado», que
+  // nunca lo es: un día que ya pasó no se programa, se consulta. Sin esta
+  // distinción el botón de crear sembraba el día del histórico que estabas
+  // mirando, o sea programaba el pasado.
+  const esProgramable = Boolean(dia) && diasProgramables.includes(dia);
   const [guardando, setGuardando] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
-  const kpis = useMemo(() => computeKpis(services), [services]);
   const options = useMemo(() => filterOptions(services), [services]);
 
   const visibleServices = useMemo(
@@ -105,19 +111,30 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       applyFilters(services, { ...filters, asignacion: 'sin_asignar' }));
   }, [modo, pendientesGuardados, services, filters]);
 
+  // Solo en el plan: en el histórico los pendientes salen de los propios
+  // servicios sin unidad, que el KPI ya cuenta, y sumarlos sería contarlos dos
+  // veces.
+  const kpis = useMemo(
+    () => computeKpis(services, modo === 'plan' ? pending.length : 0),
+    [services, modo, pending.length]);
+
   const toggleService = useCallback(
     (id) => setOpenServiceId((current) => (current === id ? null : id)),
     [],
   );
 
   const crearPlan = useCallback(async () => {
+    if (!esProgramable) {
+      toast.error('Elige primero un día de «Por programar».');
+      return;
+    }
     setGuardando(true);
     const aviso = toast.loading('Creando la programación…');
     try {
       const r = await apiFetch('/api/programador/plan/sembrar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha: dia || fecha }),
+        body: JSON.stringify({ fecha: dia }),
       });
       if (r?.sin_historico) throw new Error('No hay histórico del que partir.');
       toast.success(r.ya_existia
@@ -129,7 +146,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     } finally {
       setGuardando(false);
     }
-  }, [dia, fecha, refresh]);
+  }, [dia, esProgramable, refresh]);
 
   // Cada cambio se guarda al momento y no al pulsar un botón. Acumularlos
   // obliga a resolver qué pasa si alguien cierra la pestaña a medias, y ese
@@ -164,6 +181,14 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     turno: service.horario.split(' ')[0],
     modalidad: service.horario.split(' ')[1]?.toUpperCase(),
   }], `${agente.nombre || agente.id} vuelve al servicio.`), [editar]);
+
+  const botonCrear = (
+    <button type="button" className="pw-btn pw-btn-primary"
+      onClick={crearPlan} disabled={guardando}>
+      <CalendarPlus size={16} aria-hidden="true" />
+      Crear programación
+    </button>
+  );
 
   const handleExport = useCallback(() => {
     // Exporta lo que el Programador está viendo, no el tablero completo: si
@@ -207,6 +232,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         onIrACargar={onIrACargar}
         dia={dia}
         dias={dias}
+        diasProgramables={diasProgramables}
         diasConPlan={diasConPlan}
         onCambiarDia={setDia}
       />
@@ -228,22 +254,30 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
             <span>
               Programación editable
               {sembradoDesde && <> · copiada del {formatoFecha(sembradoDesde)}</>}
-              {guardando && <> · guardando…</>}
+              {' · '}
+              {/* Decirlo aquí y no en un botón: el guardado no es una acción
+                  que alguien tenga que recordar, y un «Guardar» apagado hacía
+                  creer lo contrario. */}
+              {guardando ? 'guardando…' : 'cada cambio se guarda solo'}
             </span>
+          </p>
+        ) : esProgramable ? (
+          <p className="pw-notice">
+            <CalendarPlus size={16} aria-hidden="true" />
+            <span>
+              Este día <strong>todavía no tiene programación</strong>. Se crea
+              copiando el último día ejecutado y a partir de ahí se edita.
+            </span>
+            {botonCrear}
           </p>
         ) : services.length > 0 && (
           <p className="pw-notice">
             <History size={16} aria-hidden="true" />
             <span>
               Estás viendo <strong>lo que se ejecutó</strong> ese día, y no se
-              edita. Para trabajar sobre él, crea la programación: se copia
-              entera y a partir de ahí se toca.
+              edita. Para trabajar, elige arriba un día
+              de <strong>«Por programar»</strong>.
             </span>
-            <button type="button" className="pw-btn pw-btn-primary"
-              onClick={crearPlan} disabled={guardando}>
-              <CalendarPlus size={16} aria-hidden="true" />
-              Crear programación
-            </button>
           </p>
         )
       )}
@@ -281,24 +315,36 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
 
             {!isLoading && services.length === 0 && !error && (
               // Un tablero vacío sin decir qué hacer deja a quien lo mira
-              // buscando el botón por toda la aplicación. Aquí se nombra la
-              // sección y los dos archivos, y se lleva de un clic.
-              <Placeholder
-                Icon={Inbox}
-                title="No hay programación cargada"
-                accion={(
-                  <button type="button" className="pw-btn pw-btn-primary"
-                    onClick={onIrACargar}>
-                    <Upload size={16} aria-hidden="true" />
-                    Ir a «Cargar datos»
-                  </button>
-                )}
-              >
-                Este tablero sale del histórico. Los Excel se suben en
-                <strong> Cargar datos</strong>: el reporte «Detalle» de la intranet, en la
-                pestaña «Histórico de la operación»; el archivo de novedades que manda el
-                cliente, en «Novedades del cliente».
-              </Placeholder>
+              // buscando el botón por toda la aplicación. Y lo que hay que
+              // hacer no es lo mismo en los dos casos: en un día por programar
+              // falta crearlo, no subir nada.
+              esProgramable ? (
+                <Placeholder
+                  Icon={CalendarPlus}
+                  title="Este día no tiene programación todavía"
+                  accion={botonCrear}
+                >
+                  Se crea copiando el último día ejecutado —seguir el orden
+                  anterior— y encima se aplican las novedades del cliente.
+                </Placeholder>
+              ) : (
+                <Placeholder
+                  Icon={Inbox}
+                  title="No hay programación cargada"
+                  accion={(
+                    <button type="button" className="pw-btn pw-btn-primary"
+                      onClick={onIrACargar}>
+                      <Upload size={16} aria-hidden="true" />
+                      Ir a «Cargar datos»
+                    </button>
+                  )}
+                >
+                  Este tablero sale del histórico. Los Excel se suben en
+                  <strong> Cargar datos</strong>: el reporte «Detalle» de la intranet, en la
+                  pestaña «Histórico de la operación»; el archivo de novedades que manda el
+                  cliente, en «Novedades del cliente».
+                </Placeholder>
+              )
             )}
 
             {!isLoading && services.length > 0 && visibleServices.length === 0 && (

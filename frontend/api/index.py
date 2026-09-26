@@ -26,7 +26,7 @@ import threading
 import time
 from copy import copy as _copy_style
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 import base64
 import re
@@ -5397,9 +5397,48 @@ async def _rpc_programador(nombre: str, cuerpo: Dict[str, Any]) -> Any:
     return respuesta.json()
 
 
+# Perú no tiene horario de verano, así que el desplazamiento es fijo y no hace
+# falta `tzdata`, que no está garantizada en el entorno serverless.
+ZONA_LIMA = timezone(timedelta(hours=-5))
+
+# Cuántos días por delante se deja programar. Es una decisión de producto, no
+# un hecho de la base, y por eso vive aquí: cambiarla no debería ser un DDL.
+DIAS_PROGRAMABLES = 14
+
+
+def _hoy_en_lima() -> date:
+    """El día de hoy donde opera la flota, no donde corre el servidor.
+
+    En Vercel el reloj es UTC y Lima va cinco horas por detrás: desde las 19:00
+    de Lima, `datetime.now()` ya dice mañana. Para una operación cuya ventana es
+    11:00 → 07:00 eso no es un detalle, porque son justo las horas en las que se
+    programa: daría por vencido un día que todavía se está trabajando.
+    """
+    return datetime.now(ZONA_LIMA).date()
+
+
 def _dia_o_hoy(fecha: Optional[str]) -> str:
     """La fecha pedida, o el día de hoy si no viene ninguna."""
-    return fecha or datetime.now().date().isoformat()
+    return fecha or _hoy_en_lima().isoformat()
+
+
+def _dias_programables(dias_con_plan: Any) -> List[str]:
+    """Los días que se pueden programar, que no son los del histórico.
+
+    Y esa es justamente la cuestión: un programador trabaja sobre mañana, y
+    mañana no está en `servicios_historicos` por definición. Mientras la
+    pantalla solo supo ofrecer días ya ejecutados, la programación existía en la
+    base y no había manera de abrirla desde la aplicación.
+
+    Se unen los días que ya tienen plan para que uno creado fuera de la ventana
+    —o uno que entretanto pasó— siga pudiéndose abrir.
+    """
+    hoy = _hoy_en_lima()
+    dias = {(hoy + timedelta(days=n)).isoformat()
+            for n in range(DIAS_PROGRAMABLES)}
+    if isinstance(dias_con_plan, list):
+        dias.update(str(d) for d in dias_con_plan if d)
+    return sorted(dias)
 
 
 @app.get("/api/programador/plan")
@@ -5410,7 +5449,10 @@ async def leer_plan(fecha: Optional[str] = None, session_token: SessionCookie = 
     histórico de lo que ocurrió y no se toca.
     """
     await require_admin_session(session_token)
-    return await _rpc_programador("leer_programacion", {"dia": _dia_o_hoy(fecha)})
+    plan = await _rpc_programador("leer_programacion", {"dia": _dia_o_hoy(fecha)})
+    if isinstance(plan, dict):
+        plan["dias_programables"] = _dias_programables(plan.get("dias_con_plan"))
+    return plan
 
 
 @app.post("/api/programador/plan/sembrar")

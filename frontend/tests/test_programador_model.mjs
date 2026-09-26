@@ -171,6 +171,21 @@ test('los KPI separan la capacidad conocida de la que no lo es', () => {
   assert.equal(kpis.capacidadDesconocida, 1, 'y dice cuántas quedaron fuera del cálculo');
 });
 
+test('los agentes sin asignar incluyen a los que el plan dejó por colocar', () => {
+  // Sobre un plan no hay servicios huérfanos: quien se queda fuera sale de
+  // todo servicio y pasa a pendientes. Sin contarlos, el KPI daba cero justo
+  // después de aplicar las novedades, que es cuando tiene algo que decir.
+  const services = buildServices(
+    [ruta('KAP-003', 'SJM', '16:30', [agente('A1'), agente('A2')])],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(computeKpis(services).agentesSinAsignar, 0);
+  assert.equal(computeKpis(services, 4).agentesSinAsignar, 4);
+  assert.equal(computeKpis(services, 4).agentesAsignados, 2,
+    'los pendientes no se cuentan dos veces');
+});
+
 test('la búsqueda encuentra por agente, no solo por servicio', () => {
   const services = buildServices(
     [

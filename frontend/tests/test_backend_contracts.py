@@ -3579,3 +3579,51 @@ class StorageConfigurationTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiasProgramablesTestCase(unittest.TestCase):
+    """El eje de días del Programador, que no sale del histórico.
+
+    Es la distinción que faltaba: un programador trabaja sobre mañana, y mañana
+    no está en `servicios_historicos` por definición. Mientras la pantalla solo
+    supo ofrecer días ejecutados, la programación existía en la base y no había
+    forma de abrirla desde la aplicación.
+    """
+
+    def test_empieza_hoy_y_cubre_la_ventana_completa(self):
+        dias = backend._dias_programables([])
+
+        self.assertEqual(len(dias), backend.DIAS_PROGRAMABLES)
+        self.assertEqual(dias[0], backend._hoy_en_lima().isoformat())
+        self.assertEqual(dias, sorted(dias))
+
+    def test_incluye_un_plan_anterior_a_la_ventana(self):
+        # Un día que ya pasó pero tiene programación tiene que seguir
+        # abriéndose: si no, el trabajo hecho queda inalcanzable en cuanto
+        # cambia la fecha.
+        dias = backend._dias_programables(["2020-01-01"])
+
+        self.assertIn("2020-01-01", dias)
+        self.assertEqual(dias[0], "2020-01-01")
+
+    def test_no_repite_un_dia_que_ya_esta_en_la_ventana(self):
+        hoy = backend._hoy_en_lima().isoformat()
+
+        dias = backend._dias_programables([hoy])
+
+        self.assertEqual(dias.count(hoy), 1)
+
+    def test_aguanta_que_la_base_no_devuelva_lista(self):
+        self.assertEqual(len(backend._dias_programables(None)),
+                         backend.DIAS_PROGRAMABLES)
+
+    def test_hoy_es_el_de_lima_y_no_el_del_servidor(self):
+        # A las 02:00 UTC en Lima todavía es el día anterior. Dar por vencido
+        # un día que aún se está trabajando desplazaría toda la programación,
+        # y justo en las horas en que se programa.
+        from datetime import datetime as _dt, timezone as _tz
+
+        momento = _dt(2026, 9, 26, 2, 0, tzinfo=_tz.utc)
+        with mock.patch.object(backend, "datetime") as reloj:
+            reloj.now.side_effect = lambda zona=None: momento.astimezone(zona)
+            self.assertEqual(backend._hoy_en_lima().isoformat(), "2026-09-25")
