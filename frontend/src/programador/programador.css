@@ -1345,3 +1345,44 @@
 .pw-propuesta-vacia[data-tone='warn'] { color: var(--kapital-accent-orange); }
 
 .pw-propuesta-vacia svg { flex-shrink: 0; margin-top: 2px; }
+
+/* --- Orden de recogida arrastrable (solo sobre un plan) --- */
+
+.pw-orden {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pw-orden-asa {
+  color: var(--kapital-text-secondary);
+  cursor: grab;
+}
+
+.pw-orden-flechas {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.pw-orden-flecha {
+  display: flex;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 0;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+}
+
+.pw-orden-flecha:hover:not(:disabled) { color: var(--kapital-text-primary); }
+
+.pw-orden-flecha:disabled { opacity: 0.3; cursor: default; }
+
+.pw-table tr[draggable='true'] { cursor: grab; }
+
+.pw-table tr[data-arrastrando] td { opacity: 0.45; }
+
+/* Una raya donde caería la fila, arriba o abajo según de dónde venga. */
+.pw-table tr[data-destino='encima'] td { box-shadow: inset 0 2px 0 var(--kapital-badge-text); }
+
+.pw-table tr[data-destino='debajo'] td { box-shadow: inset 0 -2px 0 var(--kapital-badge-text); }

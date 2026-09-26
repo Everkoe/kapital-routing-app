@@ -159,6 +159,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   La tanda («Asignar las N propuestas») atiende primero a **quien menos opciones tiene**, y sus cambios se
   aplican **en el orden en que el motor eligió**, no en el de la lista: si dos personas van al mismo coche,
   aplicarlos al revés deja a dos con la misma posición. Hay prueba de las dos cosas.
+- **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
+  lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
+  se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
+  falla; `editar` devuelve si se guardó precisamente para eso. Verificado disparando los eventos de arrastre
+  del navegador; **un arrastre físico con ratón no se pudo probar** porque la automatización no inicia el
+  arrastre nativo. En el histórico no hay asa: lo que pasó no se reordena.
+- **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
+  `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
+  Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier
+  servicio. Para eso existe `hasCoordinate` en el modelo: **usarlo siempre** que se lea una coordenada.
 - **`agregar`, `mover` y `ordenar` no funcionaron nunca hasta el 2026-09-26.** `editar_programacion` (de la
   004) declaraba una variable `dni` igual que la columna, y Postgres rechazaba toda llamada con «column
   reference "dni" is ambiguous»; retirar y reponer sí iban porque no la usan. Las pruebas del backend

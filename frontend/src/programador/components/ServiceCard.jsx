@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -5,6 +6,8 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  GripVertical,
   History,
   MapPin,
   RotateCcw,
@@ -107,16 +110,56 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes, comparadoCon, onRetirar, historical }) => (
+/** La lista con un elemento cambiado de sitio, sin tocar la original. */
+const moverEn = (lista, desde, hasta) => {
+  const copia = [...lista];
+  const [movido] = copia.splice(desde, 1);
+  copia.splice(hasta, 0, movido);
+  return copia;
+};
+
+const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical }) => {
+  // El orden recién soltado, mientras el servidor lo guarda. Sin esto la fila
+  // vuelve a su sitio hasta que llega la relectura y parece que el arrastre no
+  // funcionó. La tarjeta monta la tabla con una `key` hecha del orden, así que
+  // en cuanto llegan los datos nuevos esto se descarta solo.
+  const [enEspera, setEnEspera] = useState(null);
+  const [arrastrado, setArrastrado] = useState(null);
+  const [destino, setDestino] = useState(null);
+  const filas = enEspera ?? agentes;
+  const puedeOrdenar = Boolean(onOrdenar) && filas.length > 1;
+
+  const reordenar = async (desde, hasta) => {
+    if (desde === null || desde === hasta || hasta < 0 || hasta >= filas.length) return;
+    const nuevas = moverEn(filas, desde, hasta);
+    setEnEspera(nuevas);
+    const guardado = await onOrdenar(nuevas.map((a) => a.id));
+    if (!guardado) setEnEspera(null);
+  };
+
+  const soltarArrastre = () => {
+    setArrastrado(null);
+    setDestino(null);
+  };
+
+  // Dónde caería la fila: encima o debajo según venga de arriba o de abajo.
+  const marcaDestino = (index) => {
+    if (arrastrado === null || destino !== index || arrastrado === index) return undefined;
+    return arrastrado < index ? 'debajo' : 'encima';
+  };
+
+  return (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
         <tr>
-          {/* Es el orden real en que se recogió a cada persona, según la hora
-              del histórico. No es una propuesta ni se puede reordenar: nadie
-              secuencia paradas todavía, y un asidero de arrastre que no
-              arrastra promete algo que no existe. */}
-          <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
+          {puedeOrdenar ? (
+            <th scope="col" title="Orden de recogida del plan. Arrastra la fila o usa las flechas para cambiarlo.">#</th>
+          ) : (
+            /* En el histórico es el orden real en que se recogió a cada
+               persona, según la hora. Lo que pasó no se reordena. */
+            <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
+          )}
           <th scope="col">Agente</th>
           <th scope="col">Documento</th>
           <th scope="col">Dirección</th>
@@ -126,9 +169,45 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, historical }) => (
         </tr>
       </thead>
       <tbody>
-        {markDuplicates(agentes).map((agente, index) => (
-          <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}>
-            <td className="pw-mono">{String(index + 1).padStart(2, '0')}</td>
+        {markDuplicates(filas).map((agente, index) => (
+          <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}
+            draggable={puedeOrdenar || undefined}
+            data-arrastrando={arrastrado === index || undefined}
+            data-destino={marcaDestino(index)}
+            onDragStart={puedeOrdenar ? (e) => {
+              setArrastrado(index);
+              e.dataTransfer.effectAllowed = 'move';
+              // Firefox no empieza el arrastre sin algún dato.
+              e.dataTransfer.setData('text/plain', String(agente?.id ?? index));
+            } : undefined}
+            onDragOver={puedeOrdenar ? (e) => { e.preventDefault(); setDestino(index); } : undefined}
+            onDrop={puedeOrdenar ? (e) => {
+              e.preventDefault();
+              reordenar(arrastrado, index);
+              soltarArrastre();
+            } : undefined}
+            onDragEnd={puedeOrdenar ? soltarArrastre : undefined}>
+            <td className="pw-mono">
+              <span className="pw-orden">
+                {puedeOrdenar && <GripVertical size={14} className="pw-orden-asa" aria-hidden="true" />}
+                {String(index + 1).padStart(2, '0')}
+                {puedeOrdenar && (
+                  <span className="pw-orden-flechas">
+                    <button type="button" className="pw-orden-flecha" disabled={index === 0}
+                      aria-label={`Recoger antes a ${agente?.nombre || agente?.id}`}
+                      onClick={() => reordenar(index, index - 1)}>
+                      <ChevronUp size={12} aria-hidden="true" />
+                    </button>
+                    <button type="button" className="pw-orden-flecha"
+                      disabled={index === filas.length - 1}
+                      aria-label={`Recoger después a ${agente?.nombre || agente?.id}`}
+                      onClick={() => reordenar(index, index + 1)}>
+                      <ChevronDown size={12} aria-hidden="true" />
+                    </button>
+                  </span>
+                )}
+              </span>
+            </td>
             <td>
               {agente?.nombre || 'Sin nombre'}
               {agente?.nuevo && (
@@ -181,10 +260,11 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, historical }) => (
       </tbody>
     </table>
   </div>
-);
+  );
+};
 
 const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
-                      onRetirar, onReponer, historical }) => {
+                      onRetirar, onReponer, onOrdenar, historical }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -273,7 +353,10 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
             </div>
             <div className="pw-detail-item">
               <dt>Orden de recogida</dt>
-              <dd className="pw-muted">Por la hora real del histórico</dd>
+              <dd className="pw-muted">
+                {onOrdenar ? 'El del plan: arrastra las filas para cambiarlo'
+                  : 'Por la hora real del histórico'}
+              </dd>
             </div>
           </dl>
 
@@ -295,7 +378,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
           )}
 
           <h4 className="pw-detail-heading">Dónde viven</h4>
-          <ServiceMap agentes={service.agentes} titulo={service.id} />
+          <ServiceMap agentes={service.agentes} titulo={service.id} plan={Boolean(onOrdenar)} />
 
           <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
 
@@ -315,9 +398,11 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
           )}
 
           {service.agentes.length > 0 ? (
-            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon}
+            <AgentTable key={service.agentes.map((a) => a?.id).join('|')}
+              agentes={service.agentes} comparadoCon={comparadoCon}
               historical={historical}
-              onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null} />
+              onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null}
+              onOrdenar={onOrdenar ? (dnis) => onOrdenar(service, dnis) : null} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildPendingAgents,
   buildServices,
+  hasCoordinate,
   distinctDocuments,
   indexFleet,
   markDuplicates,
@@ -185,6 +186,16 @@ test('los agentes sin asignar incluyen a los que el plan dejó por colocar', () 
   assert.equal(computeKpis(services, 4).agentesSinAsignar, 4);
   assert.equal(computeKpis(services, 4).agentesAsignados, 2,
     'los pendientes no se cuentan dos veces');
+});
+
+test('una coordenada ausente no es una coordenada cero', () => {
+  // El mapa usaba `Number.isFinite(Number(x))` y pintaba a quien no tenía
+  // ubicación en el (0, 0), en el golfo de Guinea.
+  assert.equal(hasCoordinate(null), false);
+  assert.equal(hasCoordinate(undefined), false);
+  assert.equal(hasCoordinate(''), false);
+  assert.equal(hasCoordinate(0), true, 'un cero escrito sí es un dato');
+  assert.equal(hasCoordinate(-12.04), true);
 });
 
 test('la búsqueda encuentra por agente, no solo por servicio', () => {

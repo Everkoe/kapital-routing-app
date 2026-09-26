@@ -178,7 +178,7 @@ const PendingPanel = ({
             <button type="button" className="pw-btn pw-btn-primary pw-btn-sm"
               disabled={ocupado} onClick={onAsignarTodas}>
               <ListChecks size={14} aria-hidden="true" />
-              Asignar {asignables === 1 ? 'la propuesta' : `las ${asignables} propuestas`}
+              {asignables === 1 ? 'Asignar la propuesta' : `Asignar todas (${asignables})`}
             </button>
           )}
           <span className="pw-panel-count">

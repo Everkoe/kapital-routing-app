@@ -275,8 +275,12 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       requireRpcSuccess(respuesta, 'El plan no aceptó el cambio.');
       toast.success(mensaje);
       await refresh();
+      return true;
     } catch (fallo) {
       toast.error(fallo?.message || 'No se pudo guardar el cambio.');
+      // Quien enseñó el cambio antes de guardarlo —el orden arrastrado— tiene
+      // que saber que no se guardó para deshacerlo en pantalla.
+      return false;
     } finally {
       setGuardando(false);
     }
@@ -294,6 +298,11 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     turno: service.horario.split(' ')[0],
     modalidad: service.horario.split(' ')[1]?.toUpperCase(),
   }], `${agente.nombre || agente.id} vuelve al servicio.`), [editar]);
+
+  const ordenar = useCallback((service, dnis) => editar([{
+    accion: 'ordenar', vehiculo: service.conductor, turno: service.turno,
+    modalidad: service.modalidad, dnis,
+  }], 'Orden de recogida guardado.'), [editar]);
 
   // La propuesta que se ve se calculó suponiendo que los demás pendientes
   // también entraban. Al asignar solo a una persona se recalcula contra el
@@ -531,6 +540,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   comparadoCon={referencia ? formatoFecha(referencia) : null}
                   historical={modo !== 'plan'}
                   onRetirar={modo === 'plan' ? retirar : null}
+                  onOrdenar={modo === 'plan' ? ordenar : null}
                   onReponer={modo === 'plan' ? reponer : null}
                 />
               ))}
