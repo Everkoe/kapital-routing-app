@@ -1,5 +1,13 @@
 -- Endurecimiento incremental de 003_plan_programador.sql.
 --
+-- Corregido el 2026-09-26: `editar_programacion` declaraba una variable `dni`,
+-- igual que la columna, y Postgres rechazaba con «column reference "dni" is
+-- ambiguous» toda llamada con `agregar`, `mover` u `ordenar`. En producción
+-- esas tres acciones no funcionaron nunca; retirar y reponer sí, porque no
+-- usan la variable. Las pruebas del backend simulan la base y no podían verlo:
+-- `scripts/probar_funciones_plan.py` las ejecuta de verdad y deshace después.
+-- La variable se llama ahora `documento`, como en `aplicar_novedades`.
+--
 -- 003 ya está aplicado en V2. Este archivo solo reemplaza las funciones: no
 -- vuelve a crear tablas ni borra datos. Las mutaciones mantienen como fuente
 -- de verdad las tablas del plan y devuelven errores estructurados que el API
@@ -134,7 +142,7 @@ declare
   tocadas integer;
   i integer;
   documentos jsonb;
-  dni text;
+  documento text;
   origen text;
 begin
   perform pg_advisory_xact_lock(hashtext('kapital-programacion:' || dia::text));
@@ -191,8 +199,8 @@ begin
       end if;
 
     elsif accion = 'mover' then
-      dni := nullif(btrim(cambio ->> 'dni'), '');
-      if dni is null
+      documento := nullif(btrim(cambio ->> 'dni'), '');
+      if documento is null
          or nullif(btrim(cambio #>> '{desde,vehiculo}'), '') is null
          or nullif(btrim(cambio #>> '{desde,turno}'), '') is null
          or nullif(btrim(cambio #>> '{desde,modalidad}'), '') is null
@@ -201,14 +209,14 @@ begin
          or nullif(btrim(cambio #>> '{hacia,modalidad}'), '') is null
          or exists (
            select 1 from programacion p
-           where p.fecha = dia and p.dni = dni
+           where p.fecha = dia and p.dni = documento
              and p.codigo_vehiculo = cambio #>> '{hacia,vehiculo}'
              and p.turno = cambio #>> '{hacia,turno}'
              and p.modalidad = cambio #>> '{hacia,modalidad}'
          )
          or not exists (
            select 1 from programacion p
-           where p.fecha = dia and p.dni = dni
+           where p.fecha = dia and p.dni = documento
              and p.codigo_vehiculo = cambio #>> '{desde,vehiculo}'
              and p.turno = cambio #>> '{desde,turno}'
              and p.modalidad = cambio #>> '{desde,modalidad}'
@@ -219,7 +227,7 @@ begin
       end if;
 
       delete from programacion p
-       where p.fecha = dia and p.dni = dni
+       where p.fecha = dia and p.dni = documento
          and p.codigo_vehiculo = cambio #>> '{desde,vehiculo}'
          and p.turno = cambio #>> '{desde,turno}'
          and p.modalidad = cambio #>> '{desde,modalidad}'
@@ -234,8 +242,8 @@ begin
                                 cobertura, dni, orden, origen, estado)
       values (dia, cambio #>> '{hacia,vehiculo}', cambio #>> '{hacia,turno}',
               cambio #>> '{hacia,modalidad}', cambio #>> '{hacia,cobertura}',
-              dni, null, 'manual', 'programado');
-      delete from programacion_pendientes x where x.fecha = dia and x.dni = dni;
+              documento, null, 'manual', 'programado');
+      delete from programacion_pendientes x where x.fecha = dia and x.dni = documento;
       aplicados := aplicados + 1;
 
     elsif accion = 'ordenar' then
@@ -247,14 +255,14 @@ begin
       end if;
       for i in 0 .. jsonb_array_length(documentos) - 1
       loop
-        dni := nullif(btrim(documentos ->> i), '');
-        if dni is null then
+        documento := nullif(btrim(documentos ->> i), '');
+        if documento is null then
           ignorados := ignorados + 1;
           continue;
         end if;
         update programacion p
            set orden = i + 1, actualizado_en = now()
-         where p.fecha = dia and p.dni = dni
+         where p.fecha = dia and p.dni = documento
            and p.codigo_vehiculo = cambio ->> 'vehiculo'
            and p.turno = cambio ->> 'turno' and p.modalidad = cambio ->> 'modalidad'
            and p.estado = 'programado'
@@ -266,9 +274,9 @@ begin
       end loop;
 
     elsif accion = 'agregar' then
-      dni := nullif(btrim(cambio ->> 'dni'), '');
+      documento := nullif(btrim(cambio ->> 'dni'), '');
       origen := coalesce(nullif(cambio ->> 'origen', ''), 'manual');
-      if dni is null
+      if documento is null
          or nullif(btrim(cambio ->> 'vehiculo'), '') is null
          or nullif(btrim(cambio ->> 'turno'), '') is null
          or nullif(btrim(cambio ->> 'modalidad'), '') is null
@@ -280,7 +288,7 @@ begin
       insert into programacion (fecha, codigo_vehiculo, turno, modalidad,
                                 cobertura, dni, orden, origen, estado)
       values (dia, cambio ->> 'vehiculo', cambio ->> 'turno',
-              cambio ->> 'modalidad', cambio ->> 'cobertura', dni,
+              cambio ->> 'modalidad', cambio ->> 'cobertura', documento,
               (select coalesce(max(p.orden), 0) + 1 from programacion p
                 where p.fecha = dia and p.codigo_vehiculo = cambio ->> 'vehiculo'
                   and p.turno = cambio ->> 'turno'
@@ -293,7 +301,7 @@ begin
       -- Una asignación manual resuelve cualquier pendiente del mismo DNI en
       -- ese día, incluso si la fila ya estaba programada y solo se reparó el
       -- panel en una segunda llamada.
-      delete from programacion_pendientes x where x.fecha = dia and x.dni = dni;
+      delete from programacion_pendientes x where x.fecha = dia and x.dni = documento;
       if tocadas > 0 then aplicados := aplicados + tocadas;
       else ignorados := ignorados + 1;
       end if;
