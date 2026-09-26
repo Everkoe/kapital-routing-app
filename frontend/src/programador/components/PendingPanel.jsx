@@ -25,7 +25,7 @@ const initials = (nombre, agenteId) => {
 
 const MAX_VISIBLE = 50;
 
-const PendingPanel = ({ pending }) => {
+const PendingPanel = ({ pending, totalPending = pending.length }) => {
   const counts = useMemo(
     () =>
       pending.reduce(
@@ -51,7 +51,11 @@ const PendingPanel = ({ pending }) => {
             title="Disponible cuando el panel reciba las novedades importadas.">
             <option>Hora solicitada</option>
           </select>
-          <span className="pw-panel-count">{counts.total} agentes</span>
+          <span className="pw-panel-count">
+            {totalPending !== counts.total
+              ? `${counts.total} de ${totalPending} agentes`
+              : `${counts.total} agentes`}
+          </span>
         </span>
       </div>
 
@@ -75,14 +79,18 @@ const PendingPanel = ({ pending }) => {
       <div className="pw-panel-body">
         {counts.total === 0 ? (
           <div className="pw-placeholder">
-            <CheckCircle2 size={34} aria-hidden="true" />
-            <h3>Todo asignado</h3>
-            <p>No quedan agentes pendientes en la programación cargada.</p>
+            {totalPending > 0 ? <Info size={34} aria-hidden="true" /> : (
+              <CheckCircle2 size={34} aria-hidden="true" />
+            )}
+            <h3>{totalPending > 0 ? 'Ningún pendiente coincide' : 'Todo asignado'}</h3>
+            <p>{totalPending > 0
+              ? 'Ajusta o limpia los filtros para volver a ver los pendientes.'
+              : 'No quedan agentes pendientes en la programación cargada.'}</p>
           </div>
         ) : (
           <>
             {visible.map((agent) => (
-              <article className="pw-agent-card" key={agent.id}>
+              <article className="pw-agent-card" key={agent.pendingKey || agent.id}>
                 <span className="pw-avatar" aria-hidden="true">{initials(agent.nombre, agent.agenteId)}</span>
                 <div className="pw-agent-body">
                   <div className="pw-agent-name pw-truncate">{agent.nombre || agent.agenteId || 'Sin nombre'}</div>

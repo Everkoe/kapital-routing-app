@@ -8,6 +8,7 @@ import { apiFetch, apiRequest } from '../utils/apiClient';
 import Indicador from './Indicador';
 import ZonaDeCarga from './ZonaDeCarga';
 import { fecha } from './fechas';
+import { invalidateBoardCache } from './data/useBoardData.js';
 
 /**
  * Novedades del cliente: qué cambia para los próximos días.
@@ -23,7 +24,8 @@ import { fecha } from './fechas';
  * porque no está en ninguna otra parte —una baja es idéntica al histórico, esa
  * es justamente su naturaleza—.
  *
- * No escribe nada. Enseña el resultado para que una persona lo mire.
+ * Analizar no escribe nada. El botón «Aplicar» sí persiste el resultado en el
+ * plan del día elegido y luego invalida el caché compartido del tablero.
  */
 
 const INSTRUCCION = 'El Excel que manda el cliente con las altas, bajas y '
@@ -157,6 +159,15 @@ const PanelNovedades = () => {
         throw new Error(`El ${fecha} todavía no tiene programación. `
           + 'Créala primero en Operación.');
       }
+      if (r?.error) {
+        throw new Error(typeof r.error === 'string'
+          ? r.error
+          : 'El plan no aceptó las novedades.');
+      }
+      // Cambian pendientes, rutas y la lista de días con plan. Vaciar todas
+      // las fechas evita que otra vista reutilice una respuesta anterior; no
+      // cancela peticiones que ya estén compartidas por otros consumidores.
+      invalidateBoardCache();
       setAplicado({ fecha, ...r });
       toast.success(`${r.pendientes} por colocar `
         + `(${r.retiradas} de baja, ${r.movidas ?? 0} sacados de su servicio).`,

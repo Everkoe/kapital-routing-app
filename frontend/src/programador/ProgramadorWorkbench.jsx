@@ -24,11 +24,11 @@ import './programador.css';
 /**
  * Mesa de trabajo del Programador de Rutas.
  *
- * **Qué enseña.** La programación de un día tal como se ejecutó, reconstruida
- * del histórico que se carga en «Cargar datos». Hasta ahora leía `/api/routes`,
- * que devuelve una lista vacía desde que la programación dejó de escribirse en
- * `app_state`: el tablero estaba vacío y no había forma de llenarlo, porque el
- * Excel que sube el Programador entra en otras tablas.
+ * **Qué enseña.** La programación del día seleccionado. Si ya existe un plan,
+ * se lee de las tablas persistentes de planificación; si todavía no existe,
+ * se muestra el histórico que se carga en «Cargar datos» para poder sembrarlo.
+ * La mesa dejó de depender de `/api/routes` y de la fila monolítica de
+ * `app_state`, que no contenían la programación que el Programador sube.
  *
  * Eso la convierte en el punto de partida del trabajo real —seguir el orden
  * anterior y aplicar solo las novedades—, no en una propuesta: aquí no se
@@ -39,10 +39,8 @@ import './programador.css';
  * - Orden de recogida propuesto. El histórico trae la hora real de cada recojo
  *   y por ahí se ordenan los agentes, pero nadie secuencia paradas todavía; la
  *   columna `#` del detalle es número de fila y está rotulada como tal.
- * - Guardado versionado. Necesita una decisión sobre dónde se persiste la
- *   sesión de planificación (`docs/planning/route-programmer-contracts.md` §5).
- * - Estados de propuesta, aprobación y rechazo. Requieren un motor que proponga
- *   algo que revisar.
+ * - Historial versionado de revisiones. El plan actual sí se persiste, pero
+ *   todavía no existe un contrato de versiones, aprobación y rechazo.
  *
  * Dibujar cualquiera de los tres ahora sería simular funcionalidad.
  */
@@ -51,6 +49,48 @@ import './programador.css';
 // operación (decisión pendiente 22 del documento de contratos).
 const VENTANA_OPERATIVA = '11:00 — 07:00';
 const OPERACION = 'TP';
+
+const rpcErrorMessage = (payload, fallback) => {
+  if (!payload || typeof payload !== 'object' || !payload.error) return null;
+  if (typeof payload.error === 'string') return payload.error;
+  if (typeof payload.error?.detail === 'string') return payload.error.detail;
+  return fallback;
+};
+
+const requireRpcSuccess = (payload, fallback) => {
+  const message = rpcErrorMessage(payload, fallback);
+  if (message) throw new Error(message);
+  return payload;
+};
+
+const pendingIdentity = (pending, index) => {
+  const key = [pending?.id, pending?.turno, pending?.modalidad]
+    .map((value) => String(value ?? '').trim())
+    .join('|');
+  return key || `pendiente-sin-datos-${index}`;
+};
+
+/** Aplica los mismos filtros del tablero a los pendientes que guardó el plan. */
+const filterSavedPending = (pending, filters) => {
+  const rows = (pending || []).map((agent) => ({
+    id: `pendiente|${agent.id}`,
+    conductor: 'SIN ASIGNAR',
+    microZona: agent.microZona,
+    horario: agent.horario,
+    empresa: agent.empresa,
+    estado: 'sin_asignar',
+    asignado: false,
+    modificado: ['alta', 'cambio'].includes(agent.motivo),
+    agentes: [{
+      id: agent.agenteId,
+      nombre: agent.nombre,
+      direccion: agent.direccion,
+    }],
+    pendiente: agent,
+  }));
+
+  return applyFilters(rows, filters).map((row) => row.pendiente);
+};
 
 const Placeholder = ({ Icon, title, children, accion }) => (
   <div className="pw-placeholder">
@@ -83,7 +123,25 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
-  const options = useMemo(() => filterOptions(services), [services]);
+  const options = useMemo(() => {
+    const base = filterOptions(services);
+    if (modo !== 'plan') return base;
+
+    // Un pendiente puede traer una zona/turno que todavía no existe en una
+    // ruta asignada. Si no entra en las opciones, el filtro no podría llegar
+    // a esa fila aunque la búsqueda sí la encontrara.
+    const union = (actual, nuevos) => [...new Set([
+      ...actual,
+      ...nuevos.filter(Boolean),
+    ])].sort((a, b) => a.localeCompare(b, 'es'));
+    return {
+      microZonas: union(base.microZonas, pendientesGuardados.map((p) => p.cobertura)),
+      horarios: union(base.horarios, pendientesGuardados.map((p) => [
+        p.turno,
+        p.modalidad && p.modalidad.toLowerCase(),
+      ].filter(Boolean).join(' '))),
+    };
+  }, [modo, pendientesGuardados, services]);
 
   const visibleServices = useMemo(
     () => sortServices(applyFilters(services, filters)),
@@ -93,30 +151,44 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // Con un plan, los pendientes son los que el plan dice: gente que tiene que
   // viajar y todavía no tiene sitio. Sin plan son los que el tablero deja sin
   // unidad, que es lo que había antes.
+  const pendientesDelPlan = useMemo(
+    () => pendientesGuardados.map((p, index) => ({
+      id: pendingIdentity(p, index),
+      pendingKey: pendingIdentity(p, index),
+      agenteId: p.id,
+      nombre: p.nombre,
+      direccion: p.direccion,
+      microZona: p.cobertura,
+      turno: p.turno,
+      modalidad: p.modalidad,
+      horario: [p.turno, p.modalidad && p.modalidad.toLowerCase()]
+        .filter(Boolean).join(' '),
+      motivo: p.motivo,
+      detalle: p.detalle,
+    })),
+    [pendientesGuardados],
+  );
+
+  const pendientesHistoricos = useMemo(
+    () => buildPendingAgents(services),
+    [services],
+  );
+
   const pending = useMemo(() => {
-    if (modo === 'plan') {
-      return pendientesGuardados.map((p) => ({
-        id: `${p.id}-${p.turno || ''}`,
-        agenteId: p.id,
-        nombre: p.nombre,
-        direccion: p.direccion,
-        microZona: p.cobertura,
-        horario: [p.turno, p.modalidad && p.modalidad.toLowerCase()]
-          .filter(Boolean).join(' '),
-        motivo: p.motivo,
-        detalle: p.detalle,
-      }));
-    }
+    if (modo === 'plan') return filterSavedPending(pendientesDelPlan, filters);
     return buildPendingAgents(
       applyFilters(services, { ...filters, asignacion: 'sin_asignar' }));
-  }, [modo, pendientesGuardados, services, filters]);
+  }, [modo, pendientesDelPlan, services, filters]);
 
   // Solo en el plan: en el histórico los pendientes salen de los propios
   // servicios sin unidad, que el KPI ya cuenta, y sumarlos sería contarlos dos
   // veces.
   const kpis = useMemo(
-    () => computeKpis(services, modo === 'plan' ? pending.length : 0),
-    [services, modo, pending.length]);
+    () => ({
+      ...computeKpis(services, modo === 'plan' ? pendientesDelPlan.length : 0),
+      serviciosPorRevisar: services.filter((service) => service.modificado).length,
+    }),
+    [services, modo, pendientesDelPlan.length]);
 
   const toggleService = useCallback(
     (id) => setOpenServiceId((current) => (current === id ? null : id)),
@@ -131,11 +203,11 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     setGuardando(true);
     const aviso = toast.loading('Creando la programación…');
     try {
-      const r = await apiFetch('/api/programador/plan/sembrar', {
+      const r = requireRpcSuccess(await apiFetch('/api/programador/plan/sembrar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fecha: dia }),
-      });
+      }), 'No se pudo crear la programación.');
       if (r?.sin_historico) throw new Error('No hay histórico del que partir.');
       toast.success(r.ya_existia
         ? 'Ese día ya tenía programación.'
@@ -155,11 +227,12 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const editar = useCallback(async (cambios, mensaje) => {
     setGuardando(true);
     try {
-      await apiFetch('/api/programador/plan/editar', {
+      const respuesta = await apiFetch('/api/programador/plan/editar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fecha: fecha || dia, cambios }),
       });
+      requireRpcSuccess(respuesta, 'El plan no aceptó el cambio.');
       toast.success(mensaje);
       await refresh();
     } catch (fallo) {
@@ -191,9 +264,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   );
 
   const handleExport = useCallback(() => {
-    // Exporta lo que el Programador está viendo, no el tablero completo: si
-    // filtró, exportar otra cosa sería una sorpresa desagradable.
-    const rows = visibleServices.flatMap((service) =>
+    // La exportación es una entrega del plan, no una captura de la vista.
+    // Aunque haya filtros activos, el archivo incluye todos los servicios y
+    // una hoja aparte con quienes siguen pendientes de colocar.
+    const rows = services.flatMap((service) =>
       service.agentes.map((agente) => ({
         Servicio: service.id,
         Horario: service.horario,
@@ -206,17 +280,42 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         Empresa: agente?.empresa || '',
       })),
     );
+    const pendingRows = pendientesDelPlan.map((agent) => ({
+      Documento: agent.agenteId || '',
+      Agente: agent.nombre || '',
+      Dirección: agent.direccion || '',
+      Zona: agent.microZona || '',
+      Turno: agent.turno || '',
+      Modalidad: agent.modalidad || '',
+      Motivo: agent.motivo || '',
+      Detalle: agent.detalle || '',
+    }));
 
-    if (rows.length === 0) {
-      toast.error('No hay agentes en la vista actual para exportar.');
+    if (rows.length === 0 && pendingRows.length === 0) {
+      toast.error('El plan no tiene servicios ni pendientes para exportar.');
       return;
     }
 
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), 'Programación');
-    XLSX.writeFile(book, `programacion_${OPERACION}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success(`Exportados ${rows.length} registros.`);
-  }, [visibleServices]);
+    if (rows.length > 0) {
+      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), 'Programación');
+    }
+    if (pendingRows.length > 0) {
+      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(pendingRows), 'Pendientes');
+    }
+    XLSX.writeFile(book, `programacion_${OPERACION}_${fecha || dia || 'sin-fecha'}.xlsx`);
+    const filtrosActivos = Object.entries(filters).some(([clave, valor]) => (
+      clave === 'query' ? Boolean(String(valor || '').trim()) : valor !== '__all__'
+    ));
+    toast.success(
+      `Exportado el plan completo: ${rows.length} registros y ${pendingRows.length} pendientes.`
+      + (filtrosActivos ? ' Los filtros solo afectan la vista.' : ''),
+    );
+  }, [dia, fecha, filters, pendientesDelPlan, services]);
+
+  const exportHelp = modo === 'plan'
+    ? 'Exporta el plan completo; los filtros solo afectan la vista.'
+    : 'Disponible al seleccionar un día de «Por programar».';
 
   return (
     <div className="pw-root">
@@ -228,7 +327,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         isLoading={isLoading}
         onRefresh={refresh}
         onExport={handleExport}
-        canExport={!isLoading && visibleServices.length > 0}
+        canExport={modo === 'plan' && !isLoading
+          && (services.length > 0 || pendientesDelPlan.length > 0)}
+        exportHelp={exportHelp}
+        modo={modo}
         onIrACargar={onIrACargar}
         dia={dia}
         dias={dias}
@@ -362,6 +464,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   isOpen={openServiceId === service.id}
                   onToggle={toggleService}
                   comparadoCon={comparadoCon ? formatoFecha(comparadoCon) : null}
+                  historical={modo !== 'plan'}
                   onRetirar={modo === 'plan' ? retirar : null}
                   onReponer={modo === 'plan' ? reponer : null}
                 />
@@ -369,7 +472,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           </div>
         </section>
 
-        <PendingPanel pending={pending} />
+        <PendingPanel
+          pending={pending}
+          totalPending={modo === 'plan' ? pendientesDelPlan.length : pendientesHistoricos.length}
+        />
       </div>
     </div>
   );

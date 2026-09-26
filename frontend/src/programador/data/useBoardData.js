@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '../../utils/apiClient';
+import { apiFetch } from '../../utils/apiClient.js';
 import { buildServices, indexFleet } from '../model/serviceModel.js';
 
 /**
@@ -10,8 +10,9 @@ import { buildServices, indexFleet } from '../model/serviceModel.js';
  * y el tablero llevaba tiempo enseñando ceros sin decir por qué. La fuente es
  * ahora el histórico que el Programador carga cada día, servido por
  * `/api/programador/programacion` con la misma forma que el contrato anterior
- * —`conductor`, `micro_zona`, `horario`, `agentes`— para que las tarjetas, los
- * filtros y la exportación sigan funcionando sin tocarlos.
+ * —`conductor`, `micro_zona`, `horario`, `agentes`— para que las tarjetas y
+ * filtros sigan consumiendo el mismo contrato; la exportación añade además
+ * los pendientes persistidos del plan en una hoja separada.
  *
  * Un día completo son ~96 KB. Con varias secciones leyendo lo mismo, recargar
  * en cada cambio de pestaña multiplicaría el egress sin aportar nada: el día
@@ -24,6 +25,40 @@ const TTL_MS = 45_000;
 
 const cache = new Map(); // fecha|'' -> { routes, fleet, fecha, dias, loadedAt }
 const inFlight = new Map();
+
+/**
+ * El plan guarda los cambios por fila, mientras que la mesa los presenta por
+ * servicio. Cuando una baja deja el servicio con sus filas retiradas, por
+ * ejemplo, no hay un `cambio` de servicio explícito en la respuesta de SQL.
+ * Derivarlo aquí mantiene el KPI y el filtro «Modificados» alineados con lo
+ * que realmente se guardó, sin inventar un estado de aprobación.
+ */
+export const derivePlanRouteChanges = (route) => {
+  if (!route || typeof route !== 'object') return route;
+
+  const agentes = Array.isArray(route.agentes) ? route.agentes : [];
+  const retirados = Array.isArray(route.retirados) ? route.retirados : [];
+  const filasNoHistoricas = agentes.filter((agente) => {
+    const origen = String(agente?.origen || '').trim().toLowerCase();
+    return origen && origen !== 'historico';
+  });
+  const yaMarcado = Boolean(route.cambio?.modificado);
+  if (yaMarcado || (filasNoHistoricas.length === 0 && retirados.length === 0)) {
+    return route;
+  }
+
+  return {
+    ...route,
+    cambio: {
+      ...(route.cambio || {}),
+      modificado: true,
+      nuevos: route.cambio?.nuevos ?? filasNoHistoricas.length,
+      salieron: route.cambio?.salieron
+        ?? retirados.map((agente) => agente?.id).filter(Boolean),
+      servicio_nuevo: route.cambio?.servicio_nuevo ?? false,
+    },
+  };
+};
 
 const isFresh = (dia) => {
   const hit = cache.get(dia);
@@ -51,7 +86,7 @@ const fetchBoard = async (dia) => {
 
   return {
     modo: plan?.existe ? 'plan' : 'historico',
-    routes: Array.isArray(origen?.rutas) ? origen.rutas : [],
+    routes: Array.isArray(origen?.rutas) ? origen.rutas.map(derivePlanRouteChanges) : [],
     fecha: origen?.fecha ?? plan?.fecha ?? null,
     comparadoCon: origen?.comparado_con ?? null,
     sembradoDesde: plan?.sembrado_desde ?? null,
@@ -88,9 +123,19 @@ const load = async ({ force = false, dia = '' } = {}) => {
   return peticion;
 };
 
+/**
+ * Invalida las respuestas guardadas después de una escritura en el plan.
+ * No cancela peticiones compartidas que ya estén en vuelo: otro consumidor
+ * puede necesitarlas y quien vuelva a la mesa leerá una respuesta nueva.
+ */
+export const invalidateBoardCache = (dia = null) => {
+  if (dia) cache.delete(dia);
+  else cache.clear();
+};
+
 /** Solo para pruebas y para el cierre de sesión: deja el caché sin contenido. */
 export const resetBoardCache = () => {
-  cache.clear();
+  invalidateBoardCache();
   inFlight.clear();
 };
 

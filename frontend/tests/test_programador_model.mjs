@@ -17,6 +17,7 @@ import {
   filterOptions,
   sortServices,
 } from '../src/programador/model/workbenchSelectors.js';
+import { derivePlanRouteChanges } from '../src/programador/data/useBoardData.js';
 
 // La flota real declara unidades de distinta capacidad. Ese es justamente el
 // dato que el tablero anterior ignoraba al escribir 15 a mano.
@@ -448,4 +449,29 @@ test('sin retirados el campo es una lista vacía, no undefined', () => {
   const services = buildServices(
     [ruta('K027', 'CALLAO', '03:00', [agente('A1')])], indexFleet(FLOTA));
   assert.deepEqual(services[0].retirados, []);
+});
+
+test('el plan deriva un servicio modificado desde filas persistidas', () => {
+  const route = {
+    conductor: 'K027',
+    agentes: [{ id: 'A1', origen: 'historico' }],
+    retirados: [{ id: 'A2', nota: 'Baja del cliente' }],
+  };
+
+  const changed = derivePlanRouteChanges(route);
+
+  assert.equal(changed.cambio.modificado, true);
+  assert.deepEqual(changed.cambio.salieron, ['A2']);
+  assert.notEqual(changed, route, 'la derivación no muta la respuesta del caché');
+});
+
+test('una fila manual también hace visible el servicio como modificado', () => {
+  const changed = derivePlanRouteChanges({
+    conductor: 'K027',
+    agentes: [{ id: 'A1', origen: 'manual', estado: 'programado' }],
+    retirados: [],
+  });
+
+  assert.equal(changed.cambio.modificado, true);
+  assert.equal(changed.cambio.nuevos, 1);
 });

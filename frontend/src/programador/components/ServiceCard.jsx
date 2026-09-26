@@ -46,6 +46,39 @@ const occupancyTone = (capacity) => {
   return 'ok';
 };
 
+const ORIGEN_LABELS = {
+  historico: 'Original',
+  novedad: 'Novedad',
+  manual: 'Manual',
+};
+
+const ESTADO_LABELS = {
+  programado: { label: 'Programado', tone: 'ok' },
+  retirado: { label: 'Retirado', tone: 'danger' },
+};
+
+const AgentOrigin = ({ agente, historical }) => {
+  const origen = String(agente?.origen || '').trim().toLowerCase();
+  const label = origen
+    ? (ORIGEN_LABELS[origen] || 'No informado')
+    : (historical ? 'Original' : 'No informado');
+  return (
+    <span className="pw-tag pw-tag-quiet" title={agente?.nota || undefined}>
+      {label}
+    </span>
+  );
+};
+
+const AgentStatus = ({ agente }) => {
+  const estado = String(agente?.estado || '').trim().toLowerCase();
+  const info = ESTADO_LABELS[estado] || { label: 'No informado', tone: 'neutral' };
+  return (
+    <span className="pw-state" data-tone={info.tone} title={agente?.nota || undefined}>
+      {info.label}
+    </span>
+  );
+};
+
 const Occupancy = ({ capacity }) => {
   const pct = capacity.known && capacity.total > 0
     ? Math.min((capacity.used / capacity.total) * 100, 100)
@@ -74,7 +107,7 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes, comparadoCon, onRetirar }) => (
+const AgentTable = ({ agentes, comparadoCon, onRetirar, historical }) => (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
@@ -114,9 +147,11 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar }) => (
               )}
             </td>
             <td>{agente?.direccion || 'Sin dirección'}</td>
-            {/* Todo lo cargado hoy es original: no hay motor que agregue ni mueva. */}
-            <td><span className="pw-tag pw-tag-quiet">Original</span></td>
-            <td><ServiceStateBadge estado="programado" size={13} /></td>
+            <td>
+              <AgentOrigin agente={agente} historical={historical} />
+              {agente?.nota && <small className="pw-detail-nota">{agente.nota}</small>}
+            </td>
+            <td><AgentStatus agente={agente} /></td>
             <td>
               <span className="pw-row-actions">
                 {onRetirar ? (
@@ -149,7 +184,7 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar }) => (
 );
 
 const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
-                      onRetirar, onReponer }) => {
+                      onRetirar, onReponer, historical }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -281,6 +316,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
 
           {service.agentes.length > 0 ? (
             <AgentTable agentes={service.agentes} comparadoCon={comparadoCon}
+              historical={historical}
               onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null} />
           ) : (
             <p className="pw-notice" data-tone="warn">

@@ -84,6 +84,8 @@ const WorkbenchHeader = ({
   onRefresh,
   onExport,
   canExport,
+  exportHelp,
+  modo,
   onIrACargar,
   dia,
   dias,
@@ -104,6 +106,9 @@ const WorkbenchHeader = ({
     if (d === manana) return `mañana · ${fechaCorta(d)}`;
     return fechaCorta(d);
   };
+  const etiquetaDiaVacio = modo === 'plan'
+    ? `Plan de hoy${fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}`
+    : `Último ejecutado${fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}`;
 
   return (
     <>
@@ -119,7 +124,7 @@ const WorkbenchHeader = ({
                 title="● el día ya tiene programación creada"
                 onChange={(e) => onCambiarDia?.(e.target.value)}>
                 <option value="">
-                  Último ejecutado{fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}
+                  {etiquetaDiaVacio}
                 </option>
                 {diasProgramables?.length > 0 && (
                   <optgroup label="Por programar">
@@ -142,6 +147,9 @@ const WorkbenchHeader = ({
         </div>
 
         <div className="pw-actions">
+          <span className="pw-meta" role="status" title={exportHelp}>
+            {exportHelp}
+          </span>
           <button type="button" className="pw-btn" onClick={onIrACargar}>
             <Upload size={16} aria-hidden="true" />
             Cargar Excel
@@ -150,7 +158,8 @@ const WorkbenchHeader = ({
             <RefreshCw size={16} aria-hidden="true" />
             {isLoading ? 'Actualizando…' : 'Actualizar'}
           </button>
-          <button type="button" className="pw-btn pw-btn-primary" onClick={onExport} disabled={!canExport}>
+          <button type="button" className="pw-btn pw-btn-primary" onClick={onExport}
+            disabled={!canExport} title={exportHelp} aria-label={`Exportar Excel. ${exportHelp}`}>
             <FileSpreadsheet size={16} aria-hidden="true" />
             Exportar Excel
           </button>
@@ -161,9 +170,11 @@ const WorkbenchHeader = ({
         <Kpi Icon={Truck} value={kpis.servicios} label="Servicios en el tablero" />
         <Kpi
           Icon={ClipboardCheck}
-          value={0}
+          value={kpis.serviciosPorRevisar}
           label="Servicios por revisar"
-          note="Sin propuesta que revisar todavía"
+          note={kpis.serviciosPorRevisar > 0
+            ? 'Cambios detectados respecto al día anterior'
+            : 'Sin cambios detectados'}
         />
         <Kpi Icon={Users} value={kpis.agentesAsignados} label="Agentes asignados" />
         <Kpi Icon={UserPlus} value={kpis.agentesSinAsignar} label="Agentes sin asignar" />
@@ -189,4 +200,3 @@ const WorkbenchHeader = ({
 };
 
 export default WorkbenchHeader;
-

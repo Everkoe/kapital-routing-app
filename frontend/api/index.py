@@ -5378,23 +5378,60 @@ async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,
     return encontradas
 
 
-async def _rpc_programador(nombre: str, cuerpo: Dict[str, Any]) -> Any:
+PROGRAMADOR_ERROR_STATUS = {
+    "sin_programacion": (409, "El día todavía no tiene una programación guardada."),
+    "dia_no_programable": (400, "Solo se pueden crear planes dentro de la ventana programable."),
+    "sin_historico": (409, "No hay histórico válido del que partir."),
+    "sin_filas_historico": (409, "El día de origen no tiene asignaciones válidas."),
+    "accion_desconocida": (400, "La programación contiene una acción no reconocida."),
+    "entrada_invalida": (400, "La novedad contiene datos inválidos."),
+}
+
+
+def _raise_programador_result_error(nombre: str, resultado: Dict[str, Any]) -> None:
+    """Convert a structured RPC error into a real HTTP error.
+
+    PostgREST returns a successful HTTP response when a PL/pgSQL function
+    returns ``jsonb``.  Returning ``{"error": ...}`` is therefore not enough:
+    callers otherwise treat a rejected mutation as a successful save.
+    """
+    codigo = str(resultado.get("error") or "programador_error")
+    status_code, detail = PROGRAMADOR_ERROR_STATUS.get(
+        codigo, (400, "No se pudo completar la operación de programación."),
+    )
+    raise HTTPException(status_code=status_code, detail=detail)
+
+
+async def _rpc_programador(
+    nombre: str,
+    cuerpo: Dict[str, Any],
+    *,
+    write: bool = False,
+) -> Any:
     """Llama a una función de Postgres y devuelve su resultado.
 
-    Las cuatro operaciones del plan —leer, sembrar, editar y aplicar
-    novedades— viven en la base y no aquí por lo mismo que los resúmenes:
-    una tanda de cambios se resuelve en un viaje en vez de en veinte.
+    Las operaciones del plan y la lectura histórica viven en la base y no aquí
+    por lo mismo que los resúmenes: una tanda de cambios se resuelve en un
+    viaje en vez de en veinte.
     """
-    async with httpx.AsyncClient(timeout=120.0) as cliente:
-        respuesta = await cliente.post(
-            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/{nombre}",
-            headers={**HEADERS, "Content-Type": "application/json"}, json=cuerpo,
-        )
+    _ensure_storage_ready(f"programador_{nombre}", write=write)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as cliente:
+            respuesta = await cliente.post(
+                f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/{nombre}",
+                headers={**HEADERS, "Content-Type": "application/json"}, json=cuerpo,
+            )
+    except httpx.RequestError as exc:
+        _raise_database_unavailable(f"programador_{nombre}", error=exc)
     if respuesta.status_code != 200:
-        print(f"[Kapital] {nombre} devolvió {respuesta.status_code}: "
-              f"{respuesta.text[:200]}")
-        _raise_database_unavailable(nombre)
-    return respuesta.json()
+        _raise_database_unavailable(nombre, status_code=respuesta.status_code)
+    try:
+        resultado = respuesta.json()
+    except (TypeError, ValueError) as exc:
+        _raise_database_unavailable(nombre, error=exc)
+    if isinstance(resultado, dict) and resultado.get("error"):
+        _raise_programador_result_error(nombre, resultado)
+    return resultado
 
 
 # Perú no tiene horario de verano, así que el desplazamiento es fijo y no hace
@@ -5418,8 +5455,49 @@ def _hoy_en_lima() -> date:
 
 
 def _dia_o_hoy(fecha: Optional[str]) -> str:
-    """La fecha pedida, o el día de hoy si no viene ninguna."""
-    return fecha or _hoy_en_lima().isoformat()
+    """La fecha ISO pedida, o el día de hoy si no viene ninguna."""
+    if fecha in (None, ""):
+        return _hoy_en_lima().isoformat()
+    if not isinstance(fecha, str):
+        raise HTTPException(status_code=400, detail="La fecha debe tener formato ISO (AAAA-MM-DD).")
+    try:
+        parsed = date.fromisoformat(fecha)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="La fecha debe tener formato ISO (AAAA-MM-DD).",
+        ) from exc
+    if parsed.isoformat() != fecha:
+        raise HTTPException(status_code=400, detail="La fecha debe tener formato ISO (AAAA-MM-DD).")
+    return fecha
+
+
+async def _dia_mutable(fecha: Optional[str]) -> str:
+    """Validate a mutation date without allowing historical rows to be edited.
+
+    Today is intentionally included in the fourteen-day Lima window.  A plan
+    that already exists may remain reachable after the window moves, so it can
+    still be edited; a plain historical day (or a new day outside the window)
+    cannot be turned into a plan through a mutation endpoint.
+    """
+    dia = _dia_o_hoy(fecha)
+    parsed = date.fromisoformat(dia)
+    hoy = _hoy_en_lima()
+    if hoy <= parsed < hoy + timedelta(days=DIAS_PROGRAMABLES):
+        return dia
+    plan = await _rpc_programador("leer_programacion", {"dia": dia})
+    if isinstance(plan, dict) and plan.get("existe"):
+        return dia
+    raise HTTPException(
+        status_code=400,
+        detail="Solo se pueden modificar días programables o planes ya creados.",
+    )
+
+
+def _fecha_opcional(fecha: Optional[str]) -> Optional[str]:
+    """Validate an optional date used by a read-only historical endpoint."""
+    if fecha in (None, ""):
+        return None
+    return _dia_o_hoy(fecha)
 
 
 def _dias_programables(dias_con_plan: Any) -> List[str]:
@@ -5466,12 +5544,15 @@ async def sembrar_plan(cuerpo: Dict[str, Any] = Body(...),
     de una persona.
     """
     actor = await require_admin_session(session_token)
-    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    dia = await _dia_mutable(cuerpo.get("fecha"))
+    desde = cuerpo.get("desde")
+    if desde not in (None, ""):
+        desde = _dia_o_hoy(desde)
     resultado = await _rpc_programador("sembrar_programacion", {
         "dia": dia,
-        "desde": cuerpo.get("desde"),
+        "desde": desde,
         "rehacer": bool(cuerpo.get("rehacer")),
-    })
+    }, write=True)
     if resultado.get("creadas"):
         registrar_actividad(
             "Programación creada", actor=actor, entity_type="programacion",
@@ -5491,9 +5572,10 @@ async def editar_plan(cuerpo: Dict[str, Any] = Body(...),
     cambios = cuerpo.get("cambios") or []
     if not isinstance(cambios, list) or not cambios:
         raise HTTPException(status_code=400, detail="No hay ningún cambio que guardar.")
+    dia = await _dia_mutable(cuerpo.get("fecha"))
     return await _rpc_programador("editar_programacion", {
-        "dia": _dia_o_hoy(cuerpo.get("fecha")), "cambios": cambios,
-    })
+        "dia": dia, "cambios": cambios,
+    }, write=True)
 
 
 @app.post("/api/programador/plan/novedades")
@@ -5511,9 +5593,10 @@ async def aplicar_novedades_al_plan(cuerpo: Dict[str, Any] = Body(...),
     if not isinstance(entradas, list) or not entradas:
         raise HTTPException(status_code=400,
                             detail="No hay novedades que aplicar.")
-    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    dia = await _dia_mutable(cuerpo.get("fecha"))
     resultado = await _rpc_programador("aplicar_novedades",
-                                       {"dia": dia, "entradas": entradas})
+                                       {"dia": dia, "entradas": entradas},
+                                       write=True)
     if not resultado.get("error"):
         registrar_actividad(
             "Novedades aplicadas", actor=actor, entity_type="programacion",
@@ -5543,16 +5626,11 @@ async def programacion_del_dia(fecha: Optional[str] = None,
     Sin `fecha` devuelve el último día cargado.
     """
     await require_admin_session(session_token)
-    async with httpx.AsyncClient(timeout=60.0) as cliente:
-        respuesta = await cliente.post(
-            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/programacion_del_dia",
-            headers={**HEADERS, "Content-Type": "application/json"},
-            json={"dia": fecha} if fecha else {},
-        )
-    if respuesta.status_code != 200:
-        print(f"[Kapital] programacion_del_dia devolvió {respuesta.status_code}")
-        _raise_database_unavailable("programacion_del_dia")
-    return respuesta.json()
+    fecha_validada = _fecha_opcional(fecha)
+    return await _rpc_programador(
+        "programacion_del_dia",
+        {"dia": fecha_validada} if fecha_validada else {},
+    )
 
 
 @app.get("/api/programador/vehiculos")

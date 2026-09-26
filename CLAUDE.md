@@ -133,13 +133,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **Cómo se aplica lo de `supabase/`**: con `scripts/aplicar_sql.py`, que manda el archivo a la API de
   gestión de Supabase; por PostgREST no pasa el DDL y no hay ningún cliente de Postgres instalado en el
   entorno. Hasta ahora cada sesión lo hacía con un script de usar y tirar que se perdía al terminar, y
-  eso deja el esquema del repositorio y el de la base sin forma comprobable de coincidir. **Ojo: el
-  `SUPABASE_ACCESS_TOKEN` de `frontend/.env` está revocado** —devuelve 401 incluso en `GET /v1/projects`—
-  así que el script no funciona hasta que se genere uno nuevo. El MCP de Supabase tampoco sirve de
-  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación. Mientras tanto la vía
-  que sí funciona es el **editor SQL del panel** (`/dashboard/project/hathiwnnydorgxxgilmq/sql/new`) con la
-  sesión del usuario abierta; avisa de «operación destructiva» ante cualquier `create or replace`, que es
-  esperable y reversible porque la definición anterior está en git.
+  eso deja el esquema del repositorio y el de la base sin forma comprobable de coincidir. La verificación
+  del **2026-09-25** confirmó que el `SUPABASE_ACCESS_TOKEN` local funcionó tanto para consultar como para
+  aplicar cambios en el proyecto V2; no registrar ni revelar su valor. El MCP de Supabase tampoco sirve de
+  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación. **Ese mismo día se
+  aplicó y verificó `supabase/004_plan_programador_hardening.sql` en V2**: los errores de dominio de las
+  RPC se traducen a HTTP 4xx en vez de un 500 genérico, las fechas se validan antes de mutar, las
+  operaciones fuera del día/ventana programable quedan bloqueadas, las mutaciones usan bloqueo
+  transaccional por día y los pendientes se limpian al reponer, mover o asignar. La verificación quedó
+  verde con **204/204 pruebas de backend y 131/131 de frontend**. Cualquier nueva aplicación de DDL debe
+  seguir pasando por el script y mantenerse sin secretos en git.
 
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
