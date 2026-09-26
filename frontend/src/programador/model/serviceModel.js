@@ -146,6 +146,16 @@ export const buildServices = (routes, fleetIndex = {}) => {
       asignado: conductor !== UNASSIGNED,
       microZona: norm(route.micro_zona),
       horario: norm(route.horario),
+      // Lo que el motor de inserción necesita comparar. Solo lo trae el plan:
+      // en el histórico quedan en `null` y el motor no se usa.
+      turno: norm(route.turno) || null,
+      modalidad: norm(route.modalidad).toUpperCase() || null,
+      sede: norm(route.sede) || null,
+      // Lo más que ha llevado esta unidad en un servicio. No es capacidad
+      // declarada y no entra en los KPI; el motor lo usa solo cuando la flota
+      // no declara nada.
+      maxLlevado: Number.isFinite(Number(route.max_llevado)) && Number(route.max_llevado) > 0
+        ? Number(route.max_llevado) : null,
       empresa: norm(agentes[0]?.empresa),
       agentes,
       agentCount: agentes.length,
@@ -158,6 +168,10 @@ export const buildServices = (routes, fleetIndex = {}) => {
       // documentos del servicio, no de ninguna etiqueta.
       cambio: route.cambio ?? null,
       modificado: Boolean(route.cambio?.modificado),
+      // Quien estaba asignado y se retiró. Viaja aparte de `agentes` para que
+      // no cuente como ocupación: un retirado no ocupa asiento, pero tampoco
+      // se borra, porque el día siguiente necesita saber que se cayó.
+      retirados: Array.isArray(route.retirados) ? route.retirados : [],
       estado: serviceState({ conductor, capacity, agentCount: agentes.length }),
     });
     return acc;
@@ -171,7 +185,7 @@ export const buildServices = (routes, fleetIndex = {}) => {
  * `Number.isFinite` daba por ubicado a un agente sin ubicación. El origen de
  * estos datos es un Excel, donde la celda vacía es el caso frecuente.
  */
-const hasCoordinate = (value) =>
+export const hasCoordinate = (value) =>
   value !== null && value !== undefined && norm(value) !== '' && Number.isFinite(Number(value));
 
 /**

@@ -92,6 +92,111 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   la columna de cliente: la base tenía el grupo y la tabla decía «No consta» en todas las filas.
   Reiniciar el backend —o esperar a que caduque la caché— lo resuelve; en Vercel se arregla solo en el
   siguiente cold start.
+- **La programación del Programador — lo que decide, no lo que ocurrió**: desde 2026-09-25 existen
+  `public.programacion`, `programacion_dias` y `programacion_pendientes`, con sus funciones en
+  [supabase/003_plan_programador.sql](supabase/003_plan_programador.sql). **Tabla aparte del histórico a
+  propósito**: mezclarlas haría imposible distinguir un hecho de una intención, que es justo lo que hace
+  falta cuando algo sale mal. El flujo es el del trabajo real: `sembrar_programacion()` copia el último
+  día ejecutado —el «seguir el orden anterior»; 396 asignaciones en 0,9 s— y **no pisa lo ya hecho**
+  salvo que se pida rehacerlo. Encima se aplican las novedades con `aplicar_novedades()`, que hace solo
+  lo mecánico: **la baja se retira; el alta y el cambio de zona o turno salen de su servicio y quedan
+  pendientes**. No recoloca a nadie, porque elegir vehículo es el problema que necesita las reglas de la
+  operación y resolverlo a ojo sería inventarse una decisión. Un retirado **no se borra**: el día
+  siguiente necesita saber que alguien iba a viajar y se cayó. Los endpoints son
+  `GET /api/programador/plan` y los `POST .../plan/sembrar`, `.../plan/editar` y `.../plan/novedades`.
+  **Cada cambio se guarda al momento**, no al pulsar un botón: acumularlos obliga a resolver qué pasa si
+  alguien cierra la pestaña a medias, y ese «¿guardé?» es lo que no debe tener quien programa de
+  madrugada. Por lo mismo se retiró el botón «Guardar» del encabezado: anunciaba como
+  pendiente algo que ya ocurre solo.
+  **El eje de días no sale del histórico, y ese fue el fallo que dejó la función inalcanzable**: el
+  selector solo ofrecía días ya ejecutados, y el día que un programador necesita —mañana— no está en
+  `servicios_historicos` por definición. El plan del 26 existía en la base y no había manera de abrirlo
+  desde la pantalla. Ahora `GET /plan` añade `dias_programables` (hoy y trece días más, unidos a los que
+  ya tienen plan para que uno viejo siga alcanzándose) y el selector los presenta en dos grupos, «Por
+  programar» y «Ya ejecutado · no se edita». La ventana se calcula en el backend y no en Postgres a
+  propósito: cuánto se deja planificar por delante es una decisión de producto y cambiarla no debería
+  ser un DDL. **Y «hoy» es el de Lima, no el del servidor** (`_hoy_en_lima`): en Vercel el reloj es UTC
+  y Perú va cinco horas por detrás, así que desde las 19:00 `datetime.now()` ya decía mañana, justo en
+  las horas en que se programa.
+  El KPI «Agentes sin asignar» suma los pendientes del plan: sobre un plan no hay servicios huérfanos
+  —quien se cae sale de todo servicio—, así que sin ellos daba cero justo después de aplicar las
+  novedades, que es el único momento en que ese número dice algo.
+  **Un `cambio` tampoco borra su fila: la marca**, igual que una baja. Llegó a borrarla, y con ella el
+  rastro de en qué vehículo iba esa persona, que es justo el dato que hace falta para recolocarla porque
+  lo normal es que vuelva con el mismo conductor. Ahora `aplicar_novedades` devuelve `retiradas` (bajas)
+  y `movidas` (sacados de su servicio) por separado: no son lo mismo, porque quien se mueve sí viaja.
+  **Y sembrar exige `dni is not null`.** El histórico trae 161 servicios sin pasajero —139 de ellos
+  «A BORDO»— repartidos por **27 de los 32 días cargados**, y como `programacion.dni` es `not null` la
+  siembra no fallaba en esas filas sino **entera**, con un 503 genérico. Solo se libraba sembrar desde el
+  22 de septiembre, que da la casualidad de que está limpio, que es justo el día desde el que se probó
+  todo. Medido tras el arreglo: sembrar el 5 de septiembre desde el 31 de agosto crea 520 asignaciones.
+- **El motor de inserción** (desde 2026-09-26, en
+  [frontend/src/programador/model/motorInsercion.js](frontend/src/programador/model/motorInsercion.js)): para
+  cada pendiente del plan **propone** en qué servicio entra y en qué posición del orden; asigna la persona que
+  programa, de una en una o todas juntas. Es una inserción y no un optimizador porque el problema diario tiene
+  una mediana de un pasajero y un vehículo por celda (ver §9.2). Solo busca sitio en **servicios que ya
+  existen** del mismo turno, sentido y sede: no abre servicios ni encadena turnos, que es justo lo que
+  necesitaría las cuatro reglas de la operación que siguen sin escribirse (tiempo máximo a bordo, antelación
+  del recojo, margen entre turnos, qué hacer con las V###/M###). Ordena por su zona primero, después el menor
+  desvío en línea recta, y a igualdad las que dejan más plazas. Todo lo que usa está medido, no supuesto:
+  - **La sede es restricción dura**: ninguno de los 5.959 servicios del histórico mezcla sedes y solo una
+    persona ha ido alguna vez a dos. El plan no la guarda; `leer_programacion` la deduce del histórico
+    ([supabase/006_datos_del_motor.sql](supabase/006_datos_del_motor.sql)).
+  - **Capacidad de las unidades sin capacidad declarada** = lo más que han llevado en un servicio
+    (`max_llevado`). En las 39 unidades que sí la declaran, ese máximo coincide con ella en 23 y la holgura
+    mediana es 0. Eso resuelve las 36 V###/M### sin preguntar. **Tres unidades han llevado más de lo que
+    declaran** (K170 declara 4 y llevó 6; K244 y K246 declaran 4 y llevaron 5): ahí manda la declarada, y la
+    diferencia es un dato que el usuario debe revisar.
+  - **`22:00` y `22:01` son el mismo turno.** La intranet escribe las salidas habituales con `:01` (la de las
+    22:01 son 457 servicios en 32 días; la de las 22:00, 26) y las novedades piden `22:00`. Exigir el turno
+    exacto dejaba al motor sin ver la salida habitual; la tolerancia es de un minuto
+    (`TOLERANCIA_TURNO_MIN`) y nada más: si alguien puede esperar al coche de las 22:15 es una regla.
+  - **La unidad habitual no reordena, solo se enseña.** Se comprobó con las novedades reales: en los cuatro
+    casos la unidad habitual hacía ese turno pero cubría otra zona y quedaba más lejos (la de HOLGUIN, a
+    +11,7 km frente a +1,6 en su zona). Preferirla habría empeorado todas las propuestas.
+  - El desvío **no se convierte en minutos**: la geometría explica poco de la duración (§9.2) y sería una
+    promesa de hora.
+  La tanda («Asignar las N propuestas») atiende primero a **quien menos opciones tiene**, y sus cambios se
+  aplican **en el orden en que el motor eligió**, no en el de la lista: si dos personas van al mismo coche,
+  aplicarlos al revés deja a dos con la misma posición. Hay prueba de las dos cosas.
+- **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
+  lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
+  se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
+  falla; `editar` devuelve si se guardó precisamente para eso. Verificado disparando los eventos de arrastre
+  del navegador; **un arrastre físico con ratón no se pudo probar** porque la automatización no inicia el
+  arrastre nativo. En el histórico no hay asa: lo que pasó no se reordena.
+- **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
+  `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
+  Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier
+  servicio. Para eso existe `hasCoordinate` en el modelo: **usarlo siempre** que se lea una coordenada.
+- **`agregar`, `mover` y `ordenar` no funcionaron nunca hasta el 2026-09-26.** `editar_programacion` (de la
+  004) declaraba una variable `dni` igual que la columna, y Postgres rechazaba toda llamada con «column
+  reference "dni" is ambiguous»; retirar y reponer sí iban porque no la usan. Las pruebas del backend
+  simulan PostgREST y no podían verlo. **`scripts/probar_funciones_plan.py` ejecuta cada acción de verdad
+  contra la base**, sobre un día sembrado dentro de una transacción que se deshace al final: correrlo tras
+  tocar cualquier función del plan. En PL/pgSQL, **ninguna variable puede llamarse como una columna** de las
+  tablas que toca la función.
+
+- **Cómo se aplica lo de `supabase/`**: con `scripts/aplicar_sql.py`, que manda el archivo a la API de
+  gestión de Supabase; por PostgREST no pasa el DDL y no hay ningún cliente de Postgres instalado en el
+  entorno. Hasta ahora cada sesión lo hacía con un script de usar y tirar que se perdía al terminar, y
+  eso deja el esquema del repositorio y el de la base sin forma comprobable de coincidir. La verificación
+  del **2026-09-25** confirmó que el `SUPABASE_ACCESS_TOKEN` local funcionó tanto para consultar como para
+  aplicar cambios en el proyecto V2; no registrar ni revelar su valor. El MCP de Supabase tampoco sirve de
+  alternativa: solo ve el proyecto viejo e inactivo, no el v2 que usa la aplicación. **Ese mismo día se
+  aplicó y verificó `supabase/004_plan_programador_hardening.sql` en V2**: los errores de dominio de las
+  RPC se traducen a HTTP 4xx en vez de un 500 genérico, las fechas se validan antes de mutar, las
+  operaciones fuera del día/ventana programable quedan bloqueadas, las mutaciones usan bloqueo
+  transaccional por día y los pendientes se limpian al reponer, mover o asignar. La verificación quedó
+  verde con **204/204 pruebas de backend y 131/131 de frontend**. Cualquier nueva aplicación de DDL debe
+  seguir pasando por el script y mantenerse sin secretos en git.
+  **Toda función nueva en `public` necesita `revoke all ... from public`.** Postgres concede `EXECUTE` a
+  `public` por defecto, y como estas funciones son `security definer`, eso las deja invocables por
+  `/rest/v1/rpc/` con la clave anónima del proyecto, saltándose el backend y su sesión. Le pasó a las
+  cuatro del plan en la 003 (lo cerró la 004) y a `recalcular_ubicaciones()` de la 002 (lo cerró la
+  005). Comprobarlo es una consulta: `has_function_privilege('anon', oid, 'execute')` sobre `pg_proc`;
+  hoy solo da `true` en `rls_auto_enable`, que es de *event trigger* y no se puede llamar.
+
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones
@@ -256,8 +361,9 @@ Contexto que no cambia con cada lote:
 1. ~~Migrar a DB en la nube~~ — **hecho** (Supabase V2 en modo compat). Pendiente decidir si el estado en
    memoria restante se elimina o se formaliza como caché intencional.
 2. Algoritmos de optimización real de rutas — **descongelado el 2026-09-22** por decisión del usuario, que
-   pasó contexto propio (VROOM + CatBoost + OSRM). Lo hecho hasta ahora es solo la base de datos; **no hay
-   ningún motor de optimización instalado y no debe añadirse por iniciativa propia**.
+   pasó contexto propio (VROOM + CatBoost + OSRM). **Desde el 2026-09-26 hay un motor de inserción**, pedido
+   por el usuario y descrito en §2 («El motor de inserción»). No es un optimizador: no hay VROOM, OSRM ni
+   CatBoost instalados, y **no deben añadirse por iniciativa propia**.
    Dos conclusiones medidas que conviene no volver a discutir desde cero:
    - **La ruta de un pasajero es 100% estable** (cobertura + turno + modalidad); lo que rota es el vehículo,
      solo 64% estable. La variación diaria real es del 22%, no del 10%: 88 altas y 76 bajas sobre 738.

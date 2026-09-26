@@ -188,7 +188,21 @@
   color: var(--kapital-text-primary);
 }
 
-.pw-select { cursor: pointer; }
+.pw-select {
+  cursor: pointer;
+  /* En Windows el desplegable nativo no siempre hereda el fondo del select.
+     Sin un esquema explícito, el tema oscuro combina opciones blancas sobre
+     un menú blanco y vuelve ilegibles los días de la programación. */
+  color-scheme: dark;
+}
+
+[data-theme='light'] .pw-select { color-scheme: light; }
+
+.pw-select option,
+.pw-select optgroup {
+  background-color: var(--kapital-card-bg);
+  color: var(--kapital-text-primary);
+}
 
 .pw-input:focus-visible,
 .pw-select:focus-visible,
@@ -1228,3 +1242,147 @@
   color: var(--kapital-text-secondary);
   line-height: 1.4;
 }
+
+/* Los retirados de un servicio: se ven, pero apartados de quien sí viaja. */
+.pw-retirados {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pw-retirados li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 8px;
+  color: var(--kapital-text-secondary);
+  font-size: 0.85rem;
+}
+.pw-retirados small { opacity: 0.8; }
+
+/* Los botones de aplicar, uno por día del archivo. */
+.nov-aplicar { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* --- Propuesta del motor de inserción --- */
+
+.pw-propuesta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--kapital-border);
+}
+
+.pw-propuesta-titulo {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-opcion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+}
+
+/* La propuesta se distingue de las alternativas por el borde, no solo por el
+   botón: al abrir las otras opciones tiene que seguir viéndose cuál es. */
+.pw-opcion[data-principal] { border-color: var(--kapital-badge-text); }
+
+.pw-opcion-linea {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: var(--kapital-text-primary);
+}
+
+.pw-opcion-motivos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pw-propuesta-mas {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+}
+
+.pw-propuesta-mas:hover { color: var(--kapital-text-primary); }
+
+.pw-propuesta-vacia {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-propuesta-vacia[data-tone='warn'] { color: var(--kapital-accent-orange); }
+
+.pw-propuesta-vacia svg { flex-shrink: 0; margin-top: 2px; }
+
+/* --- Orden de recogida arrastrable (solo sobre un plan) --- */
+
+.pw-orden {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pw-orden-asa {
+  color: var(--kapital-text-secondary);
+  cursor: grab;
+}
+
+.pw-orden-flechas {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.pw-orden-flecha {
+  display: flex;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 0;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+}
+
+.pw-orden-flecha:hover:not(:disabled) { color: var(--kapital-text-primary); }
+
+.pw-orden-flecha:disabled { opacity: 0.3; cursor: default; }
+
+.pw-table tr[draggable='true'] { cursor: grab; }
+
+.pw-table tr[data-arrastrando] td { opacity: 0.45; }
+
+/* Una raya donde caería la fila, arriba o abajo según de dónde venga. */
+.pw-table tr[data-destino='encima'] td { box-shadow: inset 0 2px 0 var(--kapital-badge-text); }
+
+.pw-table tr[data-destino='debajo'] td { box-shadow: inset 0 -2px 0 var(--kapital-badge-text); }

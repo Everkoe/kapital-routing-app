@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import {
-  AlertTriangle, ArrowRight, CircleSlash, ClipboardList, MapPin, Minus,
-  UserMinus, UserPlus, Users,
+  AlertTriangle, ArrowRight, CalendarCheck, CircleSlash, ClipboardList, MapPin,
+  Minus, UserMinus, UserPlus, Users,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { apiRequest } from '../utils/apiClient';
+import { apiFetch, apiRequest } from '../utils/apiClient';
 import Indicador from './Indicador';
 import ZonaDeCarga from './ZonaDeCarga';
 import { fecha } from './fechas';
+import { invalidateBoardCache } from './data/useBoardData.js';
 
 /**
  * Novedades del cliente: qué cambia para los próximos días.
@@ -23,7 +24,8 @@ import { fecha } from './fechas';
  * porque no está en ninguna otra parte —una baja es idéntica al histórico, esa
  * es justamente su naturaleza—.
  *
- * No escribe nada. Enseña el resultado para que una persona lo mire.
+ * Analizar no escribe nada. El botón «Aplicar» sí persiste el resultado en el
+ * plan del día elegido y luego invalida el caché compartido del tablero.
  */
 
 const INSTRUCCION = 'El Excel que manda el cliente con las altas, bajas y '
@@ -100,6 +102,8 @@ const Entrada = ({ dato }) => {
 const PanelNovedades = () => {
   const [subiendo, setSubiendo] = useState(false);
   const [resultado, setResultado] = useState(null);
+  const [aplicando, setAplicando] = useState(false);
+  const [aplicado, setAplicado] = useState(null);
 
   const subir = async (archivo) => {
     setSubiendo(true);
@@ -113,6 +117,7 @@ const PanelNovedades = () => {
       const datos = await respuesta.json();
       if (!respuesta.ok) throw new Error(datos?.detail || 'No se pudo leer el archivo.');
       setResultado(datos);
+      setAplicado(null);
       toast.success(`${datos.filas} novedades analizadas.`, { id: aviso });
     } catch (error) {
       toast.error(error?.message || 'No se pudo leer el archivo.', { id: aviso });
@@ -120,6 +125,63 @@ const PanelNovedades = () => {
       setSubiendo(false);
     }
   };
+
+  /**
+   * Lleva al plan de un día lo que el análisis ya dedujo.
+   *
+   * Se aplica por fecha y no todo de golpe porque un archivo trae varios días
+   * —el del fin de semana trae sábado y domingo— y cada uno es una
+   * programación distinta.
+   */
+  const aplicar = async (fecha) => {
+    setAplicando(true);
+    const aviso = toast.loading(`Aplicando al ${fecha}…`);
+    try {
+      const entradas = resultado.entradas
+        .filter((e) => e.fecha === fecha)
+        .map((e) => ({
+          dni: e.dni,
+          viaja: e.viaja,
+          clasificacion: e.clasificacion,
+          etiqueta: e.etiqueta,
+          turno: e.turno,
+          sentido: e.sentido,
+          cobertura: e.cobertura,
+          resumen_cambios: e.cambios.map((c) => `${c.tipo}: ${c.antes} → ${c.ahora}`)
+            .join('; '),
+        }));
+      const r = await apiFetch('/api/programador/plan/novedades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha, entradas }),
+      });
+      if (r?.error === 'sin_programacion') {
+        throw new Error(`El ${fecha} todavía no tiene programación. `
+          + 'Créala primero en Operación.');
+      }
+      if (r?.error) {
+        throw new Error(typeof r.error === 'string'
+          ? r.error
+          : 'El plan no aceptó las novedades.');
+      }
+      // Cambian pendientes, rutas y la lista de días con plan. Vaciar todas
+      // las fechas evita que otra vista reutilice una respuesta anterior; no
+      // cancela peticiones que ya estén compartidas por otros consumidores.
+      invalidateBoardCache();
+      setAplicado({ fecha, ...r });
+      toast.success(`${r.pendientes} por colocar `
+        + `(${r.retiradas} de baja, ${r.movidas ?? 0} sacados de su servicio).`,
+        { id: aviso });
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo aplicar.', { id: aviso });
+    } finally {
+      setAplicando(false);
+    }
+  };
+
+  const fechasDelArchivo = resultado
+    ? [...new Set(resultado.entradas.map((e) => e.fecha).filter(Boolean))].sort()
+    : [];
 
   return (
     <>
@@ -160,6 +222,47 @@ const PanelNovedades = () => {
               nota={resultado.ubicacion_obsoleta > 0
                 ? 'se mudaron; su casa ya no está donde se aprendió'
                 : 'ninguna se quedó obsoleta'} />
+          </section>
+
+          {/* Analizar no es aplicar. Hasta aquí esto solo mira; el botón es
+              el único punto donde algo se escribe, y va por día porque un
+              archivo trae varios y cada uno es una programación distinta. */}
+          <section className="pw-panel">
+            <div className="pw-panel-head">
+              <h2 className="pw-panel-title">
+                <CalendarCheck size={16} /> Llevarlo a la programación
+              </h2>
+            </div>
+            <div className="pw-panel-inner">
+              <p className="historico-nota">
+                Las bajas se retiran. Las altas y los cambios de zona o turno
+                salen de su servicio y quedan <strong>pendientes de colocar</strong>:
+                en qué vehículo entra cada uno no se decide solo.
+              </p>
+              <div className="nov-aplicar">
+                {fechasDelArchivo.map((f) => (
+                  <button key={f} type="button" className="pw-btn pw-btn-primary"
+                    disabled={aplicando} onClick={() => aplicar(f)}>
+                    <CalendarCheck size={15} aria-hidden="true" />
+                    Aplicar al {fecha(f)}
+                  </button>
+                ))}
+              </div>
+              {aplicado && (
+                <p className="pw-notice" data-tone="ok">
+                  <CalendarCheck size={16} aria-hidden="true" />
+                  <span>
+                    {/* Las bajas y los traslados se cuentan aparte porque no
+                        son lo mismo: una baja no viaja, y quien se mueve sí,
+                        solo que todavía no se sabe dónde. */}
+                    {fecha(aplicado.fecha)}: <strong>{aplicado.retiradas}</strong> de baja,
+                    {' '}<strong>{aplicado.movidas ?? 0}</strong> sacados de su
+                    servicio, <strong>{aplicado.pendientes}</strong> por colocar,
+                    {' '}{aplicado.sin_cambio} sin tocar.
+                  </span>
+                </p>
+              )}
+            </div>
           </section>
 
           <section className="pw-panel">

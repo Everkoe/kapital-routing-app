@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildPendingAgents,
   buildServices,
+  hasCoordinate,
   distinctDocuments,
   indexFleet,
   markDuplicates,
@@ -17,6 +18,7 @@ import {
   filterOptions,
   sortServices,
 } from '../src/programador/model/workbenchSelectors.js';
+import { derivePlanRouteChanges } from '../src/programador/data/useBoardData.js';
 
 // La flota real declara unidades de distinta capacidad. Ese es justamente el
 // dato que el tablero anterior ignoraba al escribir 15 a mano.
@@ -169,6 +171,31 @@ test('los KPI separan la capacidad conocida de la que no lo es', () => {
   assert.equal(kpis.agentesSinAsignar, 2);
   assert.equal(kpis.capacidadLibre, 8, 'solo suma unidades que declaran capacidad');
   assert.equal(kpis.capacidadDesconocida, 1, 'y dice cuántas quedaron fuera del cálculo');
+});
+
+test('los agentes sin asignar incluyen a los que el plan dejó por colocar', () => {
+  // Sobre un plan no hay servicios huérfanos: quien se queda fuera sale de
+  // todo servicio y pasa a pendientes. Sin contarlos, el KPI daba cero justo
+  // después de aplicar las novedades, que es cuando tiene algo que decir.
+  const services = buildServices(
+    [ruta('KAP-003', 'SJM', '16:30', [agente('A1'), agente('A2')])],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(computeKpis(services).agentesSinAsignar, 0);
+  assert.equal(computeKpis(services, 4).agentesSinAsignar, 4);
+  assert.equal(computeKpis(services, 4).agentesAsignados, 2,
+    'los pendientes no se cuentan dos veces');
+});
+
+test('una coordenada ausente no es una coordenada cero', () => {
+  // El mapa usaba `Number.isFinite(Number(x))` y pintaba a quien no tenía
+  // ubicación en el (0, 0), en el golfo de Guinea.
+  assert.equal(hasCoordinate(null), false);
+  assert.equal(hasCoordinate(undefined), false);
+  assert.equal(hasCoordinate(''), false);
+  assert.equal(hasCoordinate(0), true, 'un cero escrito sí es un dato');
+  assert.equal(hasCoordinate(-12.04), true);
 });
 
 test('la búsqueda encuentra por agente, no solo por servicio', () => {
@@ -408,4 +435,59 @@ test('lo que no es un padrón se sigue buscando en agentes y direcciones', () =>
     applyFilters(services, { ...emptyFilters(), query: 'jr lima' }).map((s) => s.conductor),
     ['V026'],
   );
+});
+
+test('los retirados viajan aparte y no cuentan como ocupación', () => {
+  // Un retirado no ocupa asiento, pero tampoco se borra: el día siguiente
+  // necesita saber que alguien iba a viajar y se cayó.
+  const services = buildServices(
+    [{
+      ...ruta('K027', 'CALLAO', '03:00', [agente('A1'), agente('A2')]),
+      retirados: [{ id: 'A9', nombre: 'QUIEN SE CAYO', nota: 'Baja del cliente' }],
+    }],
+    indexFleet(FLOTA),
+  );
+
+  assert.equal(services[0].agentCount, 2, 'solo cuentan los que viajan');
+  assert.equal(services[0].capacity.used, 2);
+  assert.equal(services[0].retirados.length, 1);
+  assert.equal(services[0].retirados[0].nombre, 'QUIEN SE CAYO');
+});
+
+test('sin retirados el campo es una lista vacía, no undefined', () => {
+  // La tarjeta hace `service.retirados?.length`; devolver undefined obligaría
+  // a que cada consumidor se acordara del interrogante.
+  const services = buildServices(
+    [ruta('K027', 'CALLAO', '03:00', [agente('A1')])], indexFleet(FLOTA));
+  assert.deepEqual(services[0].retirados, []);
+});
+
+test('el plan deriva un servicio modificado desde filas persistidas', () => {
+  const route = {
+    conductor: 'K027',
+    agentes: [{ id: 'A1', origen: 'historico' }],
+    retirados: [
+      { id: '70321211', nombre: 'FIGUEROA GUZMAN CAROL', nota: 'Baja del cliente' },
+      { id: 'A2', nota: 'Sin nombre en el padrón' },
+    ],
+  };
+
+  const changed = derivePlanRouteChanges(route);
+
+  assert.equal(changed.cambio.modificado, true);
+  // Nombres, como el histórico: la tarjeta es la misma en los dos modos y un
+  // DNI no le dice nada a quien programa. El documento solo si falta el nombre.
+  assert.deepEqual(changed.cambio.salieron, ['FIGUEROA GUZMAN CAROL', 'A2']);
+  assert.notEqual(changed, route, 'la derivación no muta la respuesta del caché');
+});
+
+test('una fila manual también hace visible el servicio como modificado', () => {
+  const changed = derivePlanRouteChanges({
+    conductor: 'K027',
+    agentes: [{ id: 'A1', origen: 'manual', estado: 'programado' }],
+    retirados: [],
+  });
+
+  assert.equal(changed.cambio.modificado, true);
+  assert.equal(changed.cambio.nuevos, 1);
 });

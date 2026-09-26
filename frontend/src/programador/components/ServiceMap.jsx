@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet';
 import { MapPinOff } from 'lucide-react';
 import L from 'leaflet';
+import { hasCoordinate } from '../model/serviceModel.js';
 import 'leaflet/dist/leaflet.css';
 
 /**
@@ -36,12 +37,15 @@ const marcador = (orden, nuevo) => L.divIcon({
   iconAnchor: [12, 12],
 });
 
-const ServiceMap = ({ agentes = [], titulo }) => {
+const ServiceMap = ({ agentes = [], titulo, plan = false }) => {
   const ubicados = useMemo(
     () => agentes
       .map((agente, indice) => ({ ...agente, orden: indice + 1 }))
-      .filter((agente) => Number.isFinite(Number(agente.lat))
-        && Number.isFinite(Number(agente.lng))),
+      // `hasCoordinate` y no `Number.isFinite(Number(...))`: `Number(null)`
+      // vale 0, y cada agente sin ubicación se pintaba en el (0, 0), en el
+      // golfo de Guinea, alejando el mapa a medio mundo. Con 352 personas aún
+      // sin ubicar, pasaba en casi cualquier servicio.
+      .filter((agente) => hasCoordinate(agente.lat) && hasCoordinate(agente.lng)),
     [agentes],
   );
 
@@ -100,8 +104,9 @@ const ServiceMap = ({ agentes = [], titulo }) => {
       </MapContainer>
 
       <p className="pw-map-nota">
-        La línea es el orden de recogida del histórico, en línea recta: no es el
-        camino que hizo el vehículo.
+        {plan
+          ? 'La línea es el orden de recogida de la programación, en línea recta: no es el camino que hará el vehículo.'
+          : 'La línea es el orden de recogida del histórico, en línea recta: no es el camino que hizo el vehículo.'}
         {sinUbicar > 0 && (
           <> <strong>{sinUbicar} agente(s) no aparecen</strong> porque su domicilio
             aún no está resuelto.

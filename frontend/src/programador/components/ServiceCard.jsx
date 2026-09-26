@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -5,8 +6,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  GripVertical,
   History,
   MapPin,
+  RotateCcw,
+  UserMinus,
   UserPlus,
   Truck,
   X,
@@ -44,6 +49,39 @@ const occupancyTone = (capacity) => {
   return 'ok';
 };
 
+const ORIGEN_LABELS = {
+  historico: 'Original',
+  novedad: 'Novedad',
+  manual: 'Manual',
+};
+
+const ESTADO_LABELS = {
+  programado: { label: 'Programado', tone: 'ok' },
+  retirado: { label: 'Retirado', tone: 'danger' },
+};
+
+const AgentOrigin = ({ agente, historical }) => {
+  const origen = String(agente?.origen || '').trim().toLowerCase();
+  const label = origen
+    ? (ORIGEN_LABELS[origen] || 'No informado')
+    : (historical ? 'Original' : 'No informado');
+  return (
+    <span className="pw-tag pw-tag-quiet" title={agente?.nota || undefined}>
+      {label}
+    </span>
+  );
+};
+
+const AgentStatus = ({ agente }) => {
+  const estado = String(agente?.estado || '').trim().toLowerCase();
+  const info = ESTADO_LABELS[estado] || { label: 'No informado', tone: 'neutral' };
+  return (
+    <span className="pw-state" data-tone={info.tone} title={agente?.nota || undefined}>
+      {info.label}
+    </span>
+  );
+};
+
 const Occupancy = ({ capacity }) => {
   const pct = capacity.known && capacity.total > 0
     ? Math.min((capacity.used / capacity.total) * 100, 100)
@@ -72,16 +110,56 @@ const Occupancy = ({ capacity }) => {
   );
 };
 
-const AgentTable = ({ agentes, comparadoCon }) => (
+/** La lista con un elemento cambiado de sitio, sin tocar la original. */
+const moverEn = (lista, desde, hasta) => {
+  const copia = [...lista];
+  const [movido] = copia.splice(desde, 1);
+  copia.splice(hasta, 0, movido);
+  return copia;
+};
+
+const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical }) => {
+  // El orden recién soltado, mientras el servidor lo guarda. Sin esto la fila
+  // vuelve a su sitio hasta que llega la relectura y parece que el arrastre no
+  // funcionó. La tarjeta monta la tabla con una `key` hecha del orden, así que
+  // en cuanto llegan los datos nuevos esto se descarta solo.
+  const [enEspera, setEnEspera] = useState(null);
+  const [arrastrado, setArrastrado] = useState(null);
+  const [destino, setDestino] = useState(null);
+  const filas = enEspera ?? agentes;
+  const puedeOrdenar = Boolean(onOrdenar) && filas.length > 1;
+
+  const reordenar = async (desde, hasta) => {
+    if (desde === null || desde === hasta || hasta < 0 || hasta >= filas.length) return;
+    const nuevas = moverEn(filas, desde, hasta);
+    setEnEspera(nuevas);
+    const guardado = await onOrdenar(nuevas.map((a) => a.id));
+    if (!guardado) setEnEspera(null);
+  };
+
+  const soltarArrastre = () => {
+    setArrastrado(null);
+    setDestino(null);
+  };
+
+  // Dónde caería la fila: encima o debajo según venga de arriba o de abajo.
+  const marcaDestino = (index) => {
+    if (arrastrado === null || destino !== index || arrastrado === index) return undefined;
+    return arrastrado < index ? 'debajo' : 'encima';
+  };
+
+  return (
   <div className="pw-table-scroll">
     <table className="pw-table">
       <thead>
         <tr>
-          {/* Es el orden real en que se recogió a cada persona, según la hora
-              del histórico. No es una propuesta ni se puede reordenar: nadie
-              secuencia paradas todavía, y un asidero de arrastre que no
-              arrastra promete algo que no existe. */}
-          <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
+          {puedeOrdenar ? (
+            <th scope="col" title="Orden de recogida del plan. Arrastra la fila o usa las flechas para cambiarlo.">#</th>
+          ) : (
+            /* En el histórico es el orden real en que se recogió a cada
+               persona, según la hora. Lo que pasó no se reordena. */
+            <th scope="col" title="Orden real de recogida, según la hora del histórico.">#</th>
+          )}
           <th scope="col">Agente</th>
           <th scope="col">Documento</th>
           <th scope="col">Dirección</th>
@@ -91,9 +169,45 @@ const AgentTable = ({ agentes, comparadoCon }) => (
         </tr>
       </thead>
       <tbody>
-        {markDuplicates(agentes).map((agente, index) => (
-          <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}>
-            <td className="pw-mono">{String(index + 1).padStart(2, '0')}</td>
+        {markDuplicates(filas).map((agente, index) => (
+          <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}
+            draggable={puedeOrdenar || undefined}
+            data-arrastrando={arrastrado === index || undefined}
+            data-destino={marcaDestino(index)}
+            onDragStart={puedeOrdenar ? (e) => {
+              setArrastrado(index);
+              e.dataTransfer.effectAllowed = 'move';
+              // Firefox no empieza el arrastre sin algún dato.
+              e.dataTransfer.setData('text/plain', String(agente?.id ?? index));
+            } : undefined}
+            onDragOver={puedeOrdenar ? (e) => { e.preventDefault(); setDestino(index); } : undefined}
+            onDrop={puedeOrdenar ? (e) => {
+              e.preventDefault();
+              reordenar(arrastrado, index);
+              soltarArrastre();
+            } : undefined}
+            onDragEnd={puedeOrdenar ? soltarArrastre : undefined}>
+            <td className="pw-mono">
+              <span className="pw-orden">
+                {puedeOrdenar && <GripVertical size={14} className="pw-orden-asa" aria-hidden="true" />}
+                {String(index + 1).padStart(2, '0')}
+                {puedeOrdenar && (
+                  <span className="pw-orden-flechas">
+                    <button type="button" className="pw-orden-flecha" disabled={index === 0}
+                      aria-label={`Recoger antes a ${agente?.nombre || agente?.id}`}
+                      onClick={() => reordenar(index, index - 1)}>
+                      <ChevronUp size={12} aria-hidden="true" />
+                    </button>
+                    <button type="button" className="pw-orden-flecha"
+                      disabled={index === filas.length - 1}
+                      aria-label={`Recoger después a ${agente?.nombre || agente?.id}`}
+                      onClick={() => reordenar(index, index + 1)}>
+                      <ChevronDown size={12} aria-hidden="true" />
+                    </button>
+                  </span>
+                )}
+              </span>
+            </td>
             <td>
               {agente?.nombre || 'Sin nombre'}
               {agente?.nuevo && (
@@ -112,17 +226,33 @@ const AgentTable = ({ agentes, comparadoCon }) => (
               )}
             </td>
             <td>{agente?.direccion || 'Sin dirección'}</td>
-            {/* Todo lo cargado hoy es original: no hay motor que agregue ni mueva. */}
-            <td><span className="pw-tag pw-tag-quiet">Original</span></td>
-            <td><ServiceStateBadge estado="programado" size={13} /></td>
+            <td>
+              <AgentOrigin agente={agente} historical={historical} />
+              {agente?.nota && <small className="pw-detail-nota">{agente.nota}</small>}
+            </td>
+            <td><AgentStatus agente={agente} /></td>
             <td>
               <span className="pw-row-actions">
-                <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
-                  Aprobar
-                </PreviewAction>
-                <PreviewAction Icon={X} size="sm" entrega="Propuesta automática y revisión">
-                  Rechazar
-                </PreviewAction>
+                {onRetirar ? (
+                  /* Sobre un plan sí hay algo que hacer: sacar a alguien del
+                     servicio. Aprobar y rechazar siguen sin existir porque no
+                     hay propuesta que revisar. */
+                  <button type="button" className="pw-btn pw-btn-sm"
+                    onClick={() => onRetirar(agente)}
+                    title="Sacar a esta persona del servicio">
+                    <UserMinus size={13} aria-hidden="true" />
+                    Retirar
+                  </button>
+                ) : (
+                  <>
+                    <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
+                      Aprobar
+                    </PreviewAction>
+                    <PreviewAction Icon={X} size="sm" entrega="Propuesta automática y revisión">
+                      Rechazar
+                    </PreviewAction>
+                  </>
+                )}
               </span>
             </td>
           </tr>
@@ -130,9 +260,11 @@ const AgentTable = ({ agentes, comparadoCon }) => (
       </tbody>
     </table>
   </div>
-);
+  );
+};
 
-const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
+const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
+                      onRetirar, onReponer, onOrdenar, historical }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
 
@@ -221,7 +353,10 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
             </div>
             <div className="pw-detail-item">
               <dt>Orden de recogida</dt>
-              <dd className="pw-muted">Por la hora real del histórico</dd>
+              <dd className="pw-muted">
+                {onOrdenar ? 'El del plan: arrastra las filas para cambiarlo'
+                  : 'Por la hora real del histórico'}
+              </dd>
             </div>
           </dl>
 
@@ -231,7 +366,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
               <span>
                 {service.cambio?.servicio_nuevo
                   ? 'Este servicio no existía en el día cargado anterior: la unidad no hacía este turno.'
-                  : 'Cambió respecto al día cargado anterior.'}
+                  : `Cambió respecto ${comparadoCon ? `al ${comparadoCon}` : 'al día cargado anterior'}.`}
                 {service.cambio?.nuevos > 0 && (
                   <> <strong>{service.cambio.nuevos}</strong> agente(s) entraron.</>
                 )}
@@ -243,7 +378,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
           )}
 
           <h4 className="pw-detail-heading">Dónde viven</h4>
-          <ServiceMap agentes={service.agentes} titulo={service.id} />
+          <ServiceMap agentes={service.agentes} titulo={service.id} plan={Boolean(onOrdenar)} />
 
           <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
 
@@ -263,12 +398,47 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon }) => {
           )}
 
           {service.agentes.length > 0 ? (
-            <AgentTable agentes={service.agentes} comparadoCon={comparadoCon} />
+            <AgentTable key={service.agentes.map((a) => a?.id).join('|')}
+              agentes={service.agentes} comparadoCon={comparadoCon}
+              historical={historical}
+              onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null}
+              onOrdenar={onOrdenar ? (dnis) => onOrdenar(service, dnis) : null} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />
               Este servicio no tiene agentes asignados.
             </p>
+          )}
+
+          {/* Los retirados no se borran: el día siguiente necesita saber que
+              alguien iba a viajar y se cayó, y quien revisa necesita poder
+              deshacerlo sin volver a buscar a la persona. Van fuera del
+              condicional de arriba porque un servicio puede quedarse sin nadie
+              a bordo y seguir teniendo retirados que enseñar. */}
+          {service.retirados?.length > 0 && (
+            <>
+              <h4 className="pw-detail-heading">
+                Retirados de este servicio ({service.retirados.length})
+              </h4>
+              <ul className="pw-retirados">
+                {service.retirados.map((agente) => (
+                  <li key={agente.id}>
+                    <span className="pw-truncate">
+                      {agente.nombre || agente.id}
+                      {agente.nota && <small> · {agente.nota}</small>}
+                    </span>
+                    {onReponer && (
+                      <button type="button" className="pw-btn pw-btn-sm"
+                        onClick={() => onReponer(service, agente)}
+                        title="Devolver a esta persona al servicio">
+                        <RotateCcw size={13} aria-hidden="true" />
+                        Reponer
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
 
           <div className="pw-detail-footer">

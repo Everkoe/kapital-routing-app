@@ -3575,6 +3575,137 @@ class StorageConfigurationTestCase(unittest.TestCase):
         self.assertEqual(headers["Authorization"], f"Bearer {key}")
         self.assertEqual(headers["Content-Type"], "application/json")
 
+class DiasProgramablesTestCase(unittest.TestCase):
+    """El eje de días del Programador, que no sale del histórico.
+
+    Es la distinción que faltaba: un programador trabaja sobre mañana, y mañana
+    no está en `servicios_historicos` por definición. Mientras la pantalla solo
+    supo ofrecer días ejecutados, la programación existía en la base y no había
+    forma de abrirla desde la aplicación.
+    """
+
+    def test_empieza_hoy_y_cubre_la_ventana_completa(self):
+        dias = backend._dias_programables([])
+
+        self.assertEqual(len(dias), backend.DIAS_PROGRAMABLES)
+        self.assertEqual(dias[0], backend._hoy_en_lima().isoformat())
+        self.assertEqual(dias, sorted(dias))
+
+    def test_incluye_un_plan_anterior_a_la_ventana(self):
+        # Un día que ya pasó pero tiene programación tiene que seguir
+        # abriéndose: si no, el trabajo hecho queda inalcanzable en cuanto
+        # cambia la fecha.
+        dias = backend._dias_programables(["2020-01-01"])
+
+        self.assertIn("2020-01-01", dias)
+        self.assertEqual(dias[0], "2020-01-01")
+
+    def test_no_repite_un_dia_que_ya_esta_en_la_ventana(self):
+        hoy = backend._hoy_en_lima().isoformat()
+
+        dias = backend._dias_programables([hoy])
+
+        self.assertEqual(dias.count(hoy), 1)
+
+    def test_aguanta_que_la_base_no_devuelva_lista(self):
+        self.assertEqual(len(backend._dias_programables(None)),
+                         backend.DIAS_PROGRAMABLES)
+
+    def test_hoy_es_el_de_lima_y_no_el_del_servidor(self):
+        # A las 02:00 UTC en Lima todavía es el día anterior. Dar por vencido
+        # un día que aún se está trabajando desplazaría toda la programación,
+        # y justo en las horas en que se programa.
+        from datetime import datetime as _dt, timezone as _tz
+
+        momento = _dt(2026, 9, 26, 2, 0, tzinfo=_tz.utc)
+        with mock.patch.object(backend, "datetime") as reloj:
+            reloj.now.side_effect = lambda zona=None: momento.astimezone(zona)
+            self.assertEqual(backend._hoy_en_lima().isoformat(), "2026-09-25")
+
+
+class ProgramadorHardeningTestCase(unittest.IsolatedAsyncioTestCase):
+    """Contracts for the persisted-plan boundary; no Supabase calls are made."""
+
+    def test_invalid_dates_are_rejected_instead_of_sent_to_postgres(self):
+        for value in ("2026-9-25", "2026-02-30", "25/09/2026", 20260925):
+            with self.subTest(value=value), self.assertRaises(HTTPException) as ctx:
+                backend._dia_o_hoy(value)
+            self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_past_mutation_requires_an_existing_plan(self):
+        with patch.object(
+            backend, "_rpc_programador", new=AsyncMock(return_value={"existe": False}),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await backend._dia_mutable("2020-01-01")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_existing_past_plan_remains_reachable_for_editing(self):
+        with patch.object(
+            backend, "_rpc_programador", new=AsyncMock(return_value={"existe": True}),
+        ) as rpc:
+            self.assertEqual(await backend._dia_mutable("2020-01-01"), "2020-01-01")
+        rpc.assert_awaited_once_with("leer_programacion", {"dia": "2020-01-01"})
+
+    def test_rpc_error_payload_becomes_a_http_error(self):
+        with self.assertRaises(HTTPException) as ctx:
+            backend._raise_programador_result_error(
+                "editar_programacion", {"error": "sin_programacion"},
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_rpc_json_error_is_not_returned_as_success(self):
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"error": "accion_desconocida"}
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return FakeResponse()
+
+        with (
+            patch.object(backend, "_ensure_storage_ready"),
+            patch.object(backend.httpx, "AsyncClient", return_value=FakeClient()),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await backend._rpc_programador("editar_programacion", {}, write=True)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_incremental_sql_keeps_privileges_and_cleans_pending_assignments(self):
+        sql = Path(__file__).parents[2].joinpath(
+            "supabase", "004_plan_programador_hardening.sql",
+        ).read_text(encoding="utf-8")
+        self.assertIn("delete from programacion_pendientes", sql.lower())
+        self.assertIn("revoke all on function public.editar_programacion", sql.lower())
+        self.assertIn("grant execute on function public.aplicar_novedades", sql.lower())
+        self.assertIn("accion_desconocida", sql)
+
+    def test_reponer_clears_pending_only_after_successful_restore(self):
+        sql = Path(__file__).parents[2].joinpath(
+            "supabase", "004_plan_programador_hardening.sql",
+        ).read_text(encoding="utf-8").lower()
+        start = sql.index("elsif accion = 'reponer' then")
+        end = sql.index("elsif accion = 'mover' then", start)
+        reponer = sql[start:end]
+        delete = "delete from programacion_pendientes"
+
+        self.assertIn("and p.estado = 'retirado';", reponer)
+        self.assertIn(delete, reponer)
+        self.assertIn("x.fecha = dia and x.dni = cambio ->> 'dni'", reponer)
+        self.assertIn("aplicados := aplicados + tocadas", reponer)
+        success_branch = reponer.index("if tocadas > 0 then")
+        cleanup = reponer.index(delete)
+        no_op_branch = reponer.index("else", cleanup)
+        self.assertGreater(cleanup, success_branch)
+        self.assertLess(cleanup, no_op_branch)
 
 
 if __name__ == "__main__":

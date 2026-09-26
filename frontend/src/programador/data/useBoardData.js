@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '../../utils/apiClient';
+import { apiFetch } from '../../utils/apiClient.js';
 import { buildServices, indexFleet } from '../model/serviceModel.js';
 
 /**
@@ -10,8 +10,9 @@ import { buildServices, indexFleet } from '../model/serviceModel.js';
  * y el tablero llevaba tiempo enseñando ceros sin decir por qué. La fuente es
  * ahora el histórico que el Programador carga cada día, servido por
  * `/api/programador/programacion` con la misma forma que el contrato anterior
- * —`conductor`, `micro_zona`, `horario`, `agentes`— para que las tarjetas, los
- * filtros y la exportación sigan funcionando sin tocarlos.
+ * —`conductor`, `micro_zona`, `horario`, `agentes`— para que las tarjetas y
+ * filtros sigan consumiendo el mismo contrato; la exportación añade además
+ * los pendientes persistidos del plan en una hoja separada.
  *
  * Un día completo son ~96 KB. Con varias secciones leyendo lo mismo, recargar
  * en cada cambio de pestaña multiplicaría el egress sin aportar nada: el día
@@ -25,6 +26,42 @@ const TTL_MS = 45_000;
 const cache = new Map(); // fecha|'' -> { routes, fleet, fecha, dias, loadedAt }
 const inFlight = new Map();
 
+/**
+ * El plan guarda los cambios por fila, mientras que la mesa los presenta por
+ * servicio. Cuando una baja deja el servicio con sus filas retiradas, por
+ * ejemplo, no hay un `cambio` de servicio explícito en la respuesta de SQL.
+ * Derivarlo aquí mantiene el KPI y el filtro «Modificados» alineados con lo
+ * que realmente se guardó, sin inventar un estado de aprobación.
+ */
+export const derivePlanRouteChanges = (route) => {
+  if (!route || typeof route !== 'object') return route;
+
+  const agentes = Array.isArray(route.agentes) ? route.agentes : [];
+  const retirados = Array.isArray(route.retirados) ? route.retirados : [];
+  const filasNoHistoricas = agentes.filter((agente) => {
+    const origen = String(agente?.origen || '').trim().toLowerCase();
+    return origen && origen !== 'historico';
+  });
+  const yaMarcado = Boolean(route.cambio?.modificado);
+  if (yaMarcado || (filasNoHistoricas.length === 0 && retirados.length === 0)) {
+    return route;
+  }
+
+  return {
+    ...route,
+    cambio: {
+      ...(route.cambio || {}),
+      modificado: true,
+      nuevos: route.cambio?.nuevos ?? filasNoHistoricas.length,
+      // Nombres y no documentos, igual que `salieron` en el histórico: la
+      // tarjeta es la misma en los dos modos, y en el plan enseñaba DNIs.
+      salieron: route.cambio?.salieron
+        ?? retirados.map((agente) => agente?.nombre || agente?.id).filter(Boolean),
+      servicio_nuevo: route.cambio?.servicio_nuevo ?? false,
+    },
+  };
+};
+
 const isFresh = (dia) => {
   const hit = cache.get(dia);
   return hit && Date.now() - hit.loadedAt < TTL_MS;
@@ -35,16 +72,33 @@ const fetchBoard = async (dia) => {
   // el componente que la inició, desmontarlo —cambiar de sección mientras
   // carga— dejaría colgados a los demás consumidores esperando una promesa
   // muerta. Quien se va simplemente ignora el resultado.
-  const [programacion, fleet] = await Promise.all([
-    apiFetch(`/api/programador/programacion${dia ? `?fecha=${dia}` : ''}`),
+  //
+  // Se pregunta primero por el plan y solo se cae al histórico si ese día no
+  // tiene ninguno: son dos cosas distintas y no da igual cuál se enseñe. El
+  // plan se edita; el histórico es lo que pasó y no se toca.
+  const sufijo = dia ? `?fecha=${dia}` : '';
+  const [plan, fleet] = await Promise.all([
+    apiFetch(`/api/programador/plan${sufijo}`),
     apiFetch('/api/flota').catch(() => null),
   ]);
+
+  const origen = plan?.existe
+    ? plan
+    : await apiFetch(`/api/programador/programacion${sufijo}`);
+
   return {
-    routes: Array.isArray(programacion?.rutas) ? programacion.rutas : [],
-    fecha: programacion?.fecha ?? null,
-    comparadoCon: programacion?.comparado_con ?? null,
-    dias: Array.isArray(programacion?.dias_disponibles)
-      ? programacion.dias_disponibles : [],
+    modo: plan?.existe ? 'plan' : 'historico',
+    routes: Array.isArray(origen?.rutas) ? origen.rutas.map(derivePlanRouteChanges) : [],
+    fecha: origen?.fecha ?? plan?.fecha ?? null,
+    comparadoCon: origen?.comparado_con ?? null,
+    sembradoDesde: plan?.sembrado_desde ?? null,
+    pendientes: Array.isArray(plan?.pendientes) ? plan.pendientes : [],
+    dias: Array.isArray(plan?.dias_disponibles) ? plan.dias_disponibles : [],
+    // Los días que se pueden programar no son los del histórico: el trabajo
+    // del Programador es sobre mañana, que por definición no está ejecutado.
+    diasProgramables: Array.isArray(plan?.dias_programables)
+      ? plan.dias_programables : [],
+    diasConPlan: Array.isArray(plan?.dias_con_plan) ? plan.dias_con_plan : [],
     fleet: indexFleet(fleet),
     loadedAt: Date.now(),
   };
@@ -71,14 +125,26 @@ const load = async ({ force = false, dia = '' } = {}) => {
   return peticion;
 };
 
+/**
+ * Invalida las respuestas guardadas después de una escritura en el plan.
+ * No cancela peticiones compartidas que ya estén en vuelo: otro consumidor
+ * puede necesitarlas y quien vuelva a la mesa leerá una respuesta nueva.
+ */
+export const invalidateBoardCache = (dia = null) => {
+  if (dia) cache.delete(dia);
+  else cache.clear();
+};
+
 /** Solo para pruebas y para el cierre de sesión: deja el caché sin contenido. */
 export const resetBoardCache = () => {
-  cache.clear();
+  invalidateBoardCache();
   inFlight.clear();
 };
 
 const vacio = {
-  routes: [], fleet: {}, fecha: null, comparadoCon: null, dias: [], loadedAt: null,
+  modo: 'historico', routes: [], fleet: {}, fecha: null, comparadoCon: null,
+  sembradoDesde: null, pendientes: [], dias: [], diasProgramables: [],
+  diasConPlan: [], loadedAt: null,
 };
 
 export const useBoardData = (dia = '') => {
