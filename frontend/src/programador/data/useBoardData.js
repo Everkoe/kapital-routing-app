@@ -53,8 +53,10 @@ export const derivePlanRouteChanges = (route) => {
       ...(route.cambio || {}),
       modificado: true,
       nuevos: route.cambio?.nuevos ?? filasNoHistoricas.length,
+      // Nombres y no documentos, igual que `salieron` en el histórico: la
+      // tarjeta es la misma en los dos modos, y en el plan enseñaba DNIs.
       salieron: route.cambio?.salieron
-        ?? retirados.map((agente) => agente?.id).filter(Boolean),
+        ?? retirados.map((agente) => agente?.nombre || agente?.id).filter(Boolean),
       servicio_nuevo: route.cambio?.servicio_nuevo ?? false,
     },
   };

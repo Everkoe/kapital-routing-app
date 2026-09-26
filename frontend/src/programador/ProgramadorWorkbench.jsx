@@ -119,6 +119,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // distinción el botón de crear sembraba el día del histórico que estabas
   // mirando, o sea programaba el pasado.
   const esProgramable = Boolean(dia) && diasProgramables.includes(dia);
+
+  // Contra qué se mide «Cambió»: en el histórico, el día cargado anterior; en
+  // un plan, el día del que se copió.
+  const referencia = modo === 'plan' ? sembradoDesde : comparadoCon;
   const [guardando, setGuardando] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
@@ -391,13 +395,16 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           <div className="pw-panel-head">
             <h2 className="pw-panel-title" id="pw-board-title">
               Programación
-              {comparadoCon && (
+              {referencia && (
                 // Sin esto, «Cambió» no dice cambió respecto a qué, y el día
                 // de comparación no tiene por qué ser el natural anterior:
-                // es el último que se cargó.
+                // es el último que se cargó. En un plan es otro: el día del
+                // que se copió, porque lo que cambia es lo que se ha tocado.
                 <small className="pw-panel-sub">
-                  Los cambios se miden contra el {formatoFecha(comparadoCon)},
-                  que es el día anterior que tienes cargado.
+                  {modo === 'plan'
+                    ? <>Los cambios se miden contra lo copiado del {formatoFecha(referencia)}.</>
+                    : <>Los cambios se miden contra el {formatoFecha(referencia)},
+                      que es el día anterior que tienes cargado.</>}
                 </small>
               )}
             </h2>
@@ -463,7 +470,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   ordinal={index + 1}
                   isOpen={openServiceId === service.id}
                   onToggle={toggleService}
-                  comparadoCon={comparadoCon ? formatoFecha(comparadoCon) : null}
+                  comparadoCon={referencia ? formatoFecha(referencia) : null}
                   historical={modo !== 'plan'}
                   onRetirar={modo === 'plan' ? retirar : null}
                   onReponer={modo === 'plan' ? reponer : null}

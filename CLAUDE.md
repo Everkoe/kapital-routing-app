@@ -143,6 +143,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   transaccional por día y los pendientes se limpian al reponer, mover o asignar. La verificación quedó
   verde con **204/204 pruebas de backend y 131/131 de frontend**. Cualquier nueva aplicación de DDL debe
   seguir pasando por el script y mantenerse sin secretos en git.
+  **Toda función nueva en `public` necesita `revoke all ... from public`.** Postgres concede `EXECUTE` a
+  `public` por defecto, y como estas funciones son `security definer`, eso las deja invocables por
+  `/rest/v1/rpc/` con la clave anónima del proyecto, saltándose el backend y su sesión. Le pasó a las
+  cuatro del plan en la 003 (lo cerró la 004) y a `recalcular_ubicaciones()` de la 002 (lo cerró la
+  005). Comprobarlo es una consulta: `has_function_privilege('anon', oid, 'execute')` sobre `pg_proc`;
+  hoy solo da `true` en `rls_auto_enable`, que es de *event trigger* y no se puede llamar.
 
 - **Las pantallas del Programador, y de dónde sale cada una** (auditado el 2026-09-23):
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban

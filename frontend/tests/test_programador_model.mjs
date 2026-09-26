@@ -455,13 +455,18 @@ test('el plan deriva un servicio modificado desde filas persistidas', () => {
   const route = {
     conductor: 'K027',
     agentes: [{ id: 'A1', origen: 'historico' }],
-    retirados: [{ id: 'A2', nota: 'Baja del cliente' }],
+    retirados: [
+      { id: '70321211', nombre: 'FIGUEROA GUZMAN CAROL', nota: 'Baja del cliente' },
+      { id: 'A2', nota: 'Sin nombre en el padrón' },
+    ],
   };
 
   const changed = derivePlanRouteChanges(route);
 
   assert.equal(changed.cambio.modificado, true);
-  assert.deepEqual(changed.cambio.salieron, ['A2']);
+  // Nombres, como el histórico: la tarjeta es la misma en los dos modos y un
+  // DNI no le dice nada a quien programa. El documento solo si falta el nombre.
+  assert.deepEqual(changed.cambio.salieron, ['FIGUEROA GUZMAN CAROL', 'A2']);
   assert.notEqual(changed, route, 'la derivación no muta la respuesta del caché');
 });
 

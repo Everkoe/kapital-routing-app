@@ -283,7 +283,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
               <span>
                 {service.cambio?.servicio_nuevo
                   ? 'Este servicio no existía en el día cargado anterior: la unidad no hacía este turno.'
-                  : 'Cambió respecto al día cargado anterior.'}
+                  : `Cambió respecto ${comparadoCon ? `al ${comparadoCon}` : 'al día cargado anterior'}.`}
                 {service.cambio?.nuevos > 0 && (
                   <> <strong>{service.cambio.nuevos}</strong> agente(s) entraron.</>
                 )}
