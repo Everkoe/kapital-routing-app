@@ -1288,9 +1288,16 @@ _normalized_snapshot_ready = False
 # registra lo que mete en memoria, y solo eso.
 _base_remota: Dict[str, str] = {}
 _base_rutas: Optional[str] = None
+# Sube cada vez que una carga reemplaza algo de la memoria. Un guardado la
+# anota antes de calcular sus cambios: si al terminar ha cambiado, una lectura
+# se le coló entre medias —con datos de antes de su escritura— y la base que
+# dejó esa lectura es la que manda. Ver `_guardar_cambios`.
+_generacion_base = 0
 
 
 def _recordar_base(valores: Mapping[str, Any]) -> None:
+    global _generacion_base
+    _generacion_base += 1
     for clave, valor in valores.items():
         _base_remota[str(clave)] = escritura_estado.huella(valor)
 
@@ -2043,12 +2050,17 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
     # instancia acaba de reconstruir con las cuentas que tenía cargadas puede
     # estar a medias, así que se vuelve a leer cuando haga falta.
     _login_index_loaded_at = None
+    generacion = _generacion_base
     try:
-        cambios, base_nueva = escritura_estado.calcular(
+        cambios, base_nueva, sin_leer = escritura_estado.calcular(
             _base_remota, payload.get("usuarios") or {}, alias_de=_alias_de_login
         )
     except escritura_estado.BorradoSospechoso as exc:
         _raise_database_unavailable(operation, error=exc, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    if sin_leer:
+        # Un endpoint cambió algo que no había cargado: ese cambio no se guarda.
+        # No debería pasar; si pasa, que quede rastro de cuál.
+        print(f"[Kapital] {operation}: sin escribir {sorted(sin_leer)}, no se habían leído")
     rutas = payload.get("rutas")
     huella_rutas = escritura_estado.huella(rutas) if "rutas" in payload else None
     # La columna de rutas va entera, y solo si se leyó: sin lectura, lo que hay
@@ -2067,21 +2079,33 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
             json_payload={"p_cambios": cambios},
             failure_detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
         )
+        if response.status_code == 409:
+            # Una cuenta que esta instancia creía nueva ya existe en la base.
+            # La función lo rechazó entero: nada se escribió.
+            _invalidate_db_cache()
+            print(f"[Kapital] {operation}: rechazado, una cuenta nueva ya existía")
+            raise HTTPException(
+                status_code=409,
+                detail="Esa cuenta ya existe. Vuelve a cargar la página e inténtalo de nuevo.",
+            )
         if response.status_code not in (200, 204):
             _raise_database_unavailable(
                 operation,
                 status_code=response.status_code,
                 detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
             )
-        # Dentro del candado: una lectura que entrara entre la escritura y esto
-        # dejaría la base con una versión y la memoria con otra.
-        for clave, huella_clave in base_nueva.items():
-            if huella_clave is None:
-                _base_remota.pop(clave, None)
-            else:
-                _base_remota[clave] = huella_clave
-        if "rutas" in cambios:
-            _base_rutas = huella_rutas
+        # Si una lectura se coló entre el cálculo y aquí, memoria y base son las
+        # de esa lectura —anteriores a esta escritura—, y apuntar encima lo que
+        # esta escribió las descuadraría: el siguiente guardado desharía el
+        # cambio. Mejor que la próxima carga las ponga al día.
+        if _generacion_base == generacion:
+            for clave, huella_clave in base_nueva.items():
+                if huella_clave is None:
+                    _base_remota.pop(clave, None)
+                else:
+                    _base_remota[clave] = huella_clave
+            if "rutas" in cambios:
+                _base_rutas = huella_rutas
     _invalidate_db_cache()
 
 
@@ -2997,8 +3021,9 @@ async def _load_compat_routes_locked() -> None:
         await _load_full_state_locked(include_defaults=False)
         return
     rutas_estado_actual = value
-    global _base_rutas
+    global _base_rutas, _generacion_base
     _base_rutas = escritura_estado.huella(value)
+    _generacion_base += 1
     _routes_projection_loaded_at = time.monotonic()
 
 
@@ -4467,8 +4492,9 @@ def _next_notification_id() -> int:
     Y no puede depender solo de lo que haya en memoria: si esta instancia no
     cargó los avisos, «el mayor más uno» daría 1, y como los avisos se
     guardan fusionándolos por id, ese 1 sustituiría al aviso 1 que ya existe.
-    Con el reloj en milisegundos —el mismo formato que ya usan otros avisos—
-    dos instancias solo chocan si crean uno en el mismo milisegundo.
+    Con el reloj en microsegundos, dos instancias solo chocan si crean uno en
+    el mismo microsegundo. Sigue siendo creciente, que es lo que necesita el
+    panel de Administración para saber qué avisos son nuevos.
     """
     highest = 0
     for notification in notifications_db:
@@ -4478,7 +4504,7 @@ def _next_notification_id() -> int:
             highest = max(highest, int(float(str(notification.get("id", 0)))))
         except (TypeError, ValueError):
             continue
-    return max(highest + 1, int(time.time() * 1000))
+    return max(highest + 1, time.time_ns() // 1000)
 
 
 def _require_admin(admin_email: str) -> Dict[str, Any]:
@@ -4594,6 +4620,11 @@ async def permanent_delete_user(target_email: str, admin_email: str, session_tok
 async def review_driver_doc(payload: DriverDocReviewPayload, session_token: SessionCookie = None):
     """Admin marca un documento individual del conductor como aprobado o rechazado."""
     await require_admin_session(session_token)
+    # Toca la cuenta del conductor, sus avisos, la actividad y, al aprobar el
+    # último documento, su unidad: todo tiene que estar cargado. Sin esto, en
+    # una instancia fría el conductor no aparecía y se guardaba encima de su
+    # cuenta una vacía, sin contraseña.
+    await reload_db()
 
     req_user = usuarios_db.get(payload.admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
@@ -4601,14 +4632,9 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
 
     conductor = get_user_by_identifier(payload.conductor_email)
     if not conductor:
-        conductor = {
-            "identifier": payload.conductor_email,
-            "email": payload.conductor_email,
-            "rol": "Conductor",
-            "estado": "Pendiente Revisión",
-            "perfil_conductor": {}
-        }
-        usuarios_db[payload.conductor_email] = conductor
+        # Antes se inventaba una cuenta vacía con esa clave. Si la real existía
+        # y no estaba en memoria, el guardado la sustituía.
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
 
     if "perfil_conductor" not in conductor:
         conductor["perfil_conductor"] = {}
@@ -4625,7 +4651,7 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
 
     # Save the notification to notifications_db so it persists
     conductor_key = conductor.get("identifier") or payload.conductor_email
-    notif_id = int(__import__('time').time() * 1000)
+    notif_id = _next_notification_id()
     notifications_db.append({
         "id": notif_id,
         "tipo": "documento_revisado",
@@ -4691,16 +4717,11 @@ async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCook
 
     conductor = get_user_by_identifier(payload.conductor_email)
     if not conductor:
-        conductor = {
-            "identifier": payload.conductor_email,
-            "email": payload.conductor_email,
-            "rol": "Conductor",
-            "estado": "Pendiente Revisión",
-            "perfil_conductor": {}
-        }
-        usuarios_db[payload.conductor_email] = conductor
+        # Antes se inventaba una cuenta vacía con esa clave. Si la real existía
+        # y no estaba en memoria, el guardado la sustituía.
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
 
-    notif_id = int(__import__('time').time() * 1000)
+    notif_id = _next_notification_id()
     notifications_db.append({
         "id": notif_id,
         "tipo": "aviso_admin",
@@ -6094,6 +6115,10 @@ async def publish_routes_summary(rutas: list = Body(...), session_token: Session
 @app.post("/api/routes")
 async def update_routes(rutas: list = Body(...), session_token: SessionCookie = None):
     await require_admin_session(session_token)
+    # Sustituye el tablero entero, pero hay que haberlo leído: la columna de
+    # rutas solo se escribe si se leyó (ver `_guardar_cambios`), y sin esto el
+    # cambio se perdía con un 200.
+    await _load_compat_routes()
     global rutas_estado_actual
     rutas_estado_actual = rutas
     await persist()
@@ -6493,6 +6518,18 @@ def _normalize_fleet_expiries(values: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+class EscrituraSinConfirmar(HTTPException):
+    """La escritura llegó a la base, pero la relectura no la confirma.
+
+    Quien la recibe no debe deshacer nada en memoria: la relectura ya dejó
+    memoria y base al día, y volver al valor anterior haría que el siguiente
+    guardado revirtiera lo que sí se escribió.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(status_code=503, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+
+
 async def _persist_and_verify_fleet(
     unit_id: str, expected: Optional[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
@@ -6500,6 +6537,10 @@ async def _persist_and_verify_fleet(
 
     ``expected=None`` verifies a removal: the unit must be gone after the
     re-read, so a silently rejected delete cannot report success.
+
+    ``expected`` debe traer solo los campos que se cambiaron: los guardados se
+    fusionan campo a campo, así que otro campo de la misma unidad puede haber
+    cambiado a la vez sin que eso sea un fallo de esta escritura.
     """
     await _persist_app_state({
         "id": 1,
@@ -6523,11 +6564,9 @@ async def _persist_and_verify_fleet(
             stored.get(key) == value for key, value in expected.items()
         )
     if not verified:
-        _raise_database_unavailable(
-            "verify_fleet_write",
-            error=ValueError("fleet write could not be verified"),
-            detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
-        )
+        print("[Supabase] verify_fleet_write failed error=ValueError")
+        _invalidate_db_cache()
+        raise EscrituraSinConfirmar()
     return stored
 
 
@@ -6614,6 +6653,8 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
         )
     try:
         stored = await _persist_and_verify_fleet(unit_id, values)
+    except EscrituraSinConfirmar:
+        raise
     except Exception:
         conductores_db.pop(unit_id, None)
         if conductor_nuevo:
@@ -6660,7 +6701,9 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
         ) if c],
     )
     try:
-        stored = await _persist_and_verify_fleet(placa, updated)
+        stored = await _persist_and_verify_fleet(placa, changes)
+    except EscrituraSinConfirmar:
+        raise
     except Exception:
         conductores_db[placa] = previous
         actividad_db[:] = actividad_previa
@@ -6725,6 +6768,8 @@ async def rename_flota(placa: str, datos: FlotaRenombrar, session_token: Session
 
     try:
         await _persist_and_verify_fleet(destino, conductores_db[destino])
+    except EscrituraSinConfirmar:
+        raise
     except Exception:
         conductores_db = previo_flota
         rutas_estado_actual = previo_rutas
@@ -6758,6 +6803,8 @@ async def delete_flota(placa: str, session_token: SessionCookie = None):
     del conductores_db[placa]
     try:
         await _persist_and_verify_fleet(placa, None)
+    except EscrituraSinConfirmar:
+        raise
     except Exception:
         conductores_db[placa] = previous
         raise

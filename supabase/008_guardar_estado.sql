@@ -17,10 +17,14 @@
 --
 -- Forma de `p_cambios`:
 --   quitar: [{ruta: [..], si_vale?: valor}]        -- borra; con `si_vale`, solo si vale eso
---   poner:  [{ruta: [..], valor, si_existe?: [..], si_libre?: bool}]
+--   poner:  [{ruta: [..], valor, si_existe?: [..], si_libre?: bool, si_ausente?: bool}]
 --           `si_existe`: solo si esa ruta sigue siendo un objeto (un campo de una
 --           cuenta que otra instancia borró no la resucita a medias).
 --           `si_libre`: solo si la ruta está vacía o ya vale eso (alias de acceso).
+--           `si_ausente`: la ruta no puede existir ya (una cuenta nueva). Si existe,
+--           se rechaza el guardado entero con HTTP 409: escribirla encima
+--           sustituiría una cuenta real —con su contraseña— por lo que esta
+--           instancia creyó que era nueva.
 --   listas: [{clave, poner: [elementos], quitar: [ids]}]  -- avisos y actividad, por `id`
 --   rutas:  valor                                   -- la columna `rutas`, entera
 
@@ -110,8 +114,15 @@ begin
       end if;
     end if;
     v_actual := v_estado #> v_ruta;
+    if coalesce((v_op ->> 'si_ausente')::boolean, false)
+       and v_actual is not null and v_actual <> 'null'::jsonb then
+      -- PT409: PostgREST lo devuelve como HTTP 409, y la excepción deshace
+      -- todo lo aplicado antes en esta misma llamada.
+      raise exception 'guardar_estado: % ya existe', v_ruta[1] using errcode = 'PT409';
+    end if;
+    -- Un `null` de JSON cuenta como libre, igual que la ausencia.
     if coalesce((v_op ->> 'si_libre')::boolean, false)
-       and v_actual is not null and v_actual <> (v_op -> 'valor') then
+       and v_actual is not null and v_actual <> 'null'::jsonb and v_actual <> (v_op -> 'valor') then
       v_omitidos := v_omitidos + 1;
       continue;
     end if;

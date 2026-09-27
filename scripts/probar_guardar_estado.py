@@ -117,6 +117,32 @@ begin
   res := res || jsonb_build_object('lista_quitar', jsonb_array_length(despues -> '__notifications__')
                                                    = jsonb_array_length(antes -> '__notifications__'));
 
+  -- Una cuenta «nueva» que ya existe no se escribe encima: se rechaza todo con 409.
+  begin
+    r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(
+      jsonb_build_object('ruta', jsonb_build_array(cuenta, 'estado'), 'valor', 'Tocado',
+                         'si_existe', jsonb_build_array(cuenta)),
+      jsonb_build_object('ruta', jsonb_build_array(cuenta), 'valor', '{}'::jsonb, 'si_ausente', true))));
+    fallo := 'no';
+  exception when others then
+    fallo := sqlstate;
+  end;
+  select usuarios into despues from app_state where id = 1;
+  res := res || jsonb_build_object(
+    'nueva_sobre_existente_409', fallo = 'PT409',
+    'nueva_sobre_existente_no_toca', despues -> cuenta ->> 'estado' = 'Activo'
+                                     and despues -> cuenta ->> 'rol' = 'Conductor');
+
+  -- Un alias que vale `null` cuenta como libre.
+  r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(jsonb_build_object(
+    'ruta', jsonb_build_array('__login__', alias), 'valor', 'null'::jsonb))));
+  r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(jsonb_build_object(
+    'ruta', jsonb_build_array('__login__', alias), 'valor', cuenta, 'si_libre', true))));
+  select usuarios into despues from app_state where id = 1;
+  res := res || jsonb_build_object('alias_nulo_es_libre', despues -> '__login__' ->> alias = cuenta);
+  r := guardar_estado(jsonb_build_object('quitar', jsonb_build_array(jsonb_build_object(
+    'ruta', jsonb_build_array('__login__', alias)))));
+
   -- Un cambio mal formado se rechaza entero, sin tocar la fila.
   begin
     r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(jsonb_build_object(

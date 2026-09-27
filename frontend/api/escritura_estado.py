@@ -18,7 +18,9 @@ por tanto no puede pisar nada, por vieja que sea su copia.
 
 Reglas
 ------
-- Una cuenta que no estaba en la base es nueva: va entera. Una que estaba se
+- Una cuenta que no estaba en la base es nueva: va entera, con `si_ausente`
+  para que, si en la base ya existe, el guardado se rechace (409) en vez de
+  sustituirla. Una que estaba se
   compara campo a campo (y un nivel más dentro de `perfil_conductor`), y cada
   campo lleva `si_existe` para que, si otra instancia la borró, no resucite a
   medias. Una que estaba y ya no está se borra.
@@ -27,7 +29,7 @@ Reglas
   conservan las dos cosas.
 - `__login__` no se copia de memoria —se reconstruye con las cuentas que haya
   cargadas, que pueden ser una sola—: se ponen y quitan los alias de las cuentas
-  que cambiaron, sin robar el de otra.
+  que cambiaron, sin robar el de otra ni recrear los de una cuenta borrada.
 - Una clave reservada que la instancia no leyó nunca **no se escribe**: lo que
   tiene en memoria es el valor vacío con que arranca, no un dato.
 """
@@ -45,7 +47,7 @@ PROFUNDIDAD = 3
 
 # Un guardado que borrara más que esto es casi seguro una copia en memoria a
 # medias y no una decisión de nadie. Mejor un error que vaciar la fila.
-MAX_BORRADOS = 25
+MAX_BORRADOS = 50
 
 
 class BorradoSospechoso(ValueError):
@@ -116,7 +118,9 @@ def _alias_cambiados(clave: str, antes: Any, despues: Any,
     for alias in actuales:
         # Todos, no solo los nuevos: así un índice al que le faltaba alguno se
         # completa solo. `si_libre` impide quitarle el alias a otra cuenta.
-        poner.append({"ruta": [INDICE_LOGIN, alias], "valor": clave, "si_libre": True})
+        # `si_existe`: si otra instancia borró la cuenta, sus alias no vuelven.
+        poner.append({"ruta": [INDICE_LOGIN, alias], "valor": clave,
+                      "si_libre": True, "si_existe": [clave]})
     for alias in previos:
         if alias not in actuales:
             quitar.append({"ruta": [INDICE_LOGIN, alias], "si_vale": clave})
@@ -127,11 +131,14 @@ def calcular(
     deseado: Mapping[str, Any],
     *,
     alias_de: Callable[[str, Dict[str, Any]], List[str]],
-) -> Tuple[Dict[str, Any], Dict[str, Optional[str]]]:
-    """Los cambios para `guardar_estado()` y cómo queda la base si se aplican.
+) -> Tuple[Dict[str, Any], Dict[str, Optional[str]], List[str]]:
+    """Los cambios para `guardar_estado()`, cómo queda la base si se aplican, y
+    qué claves reservadas con datos se dejaron sin escribir por no haberse leído.
 
     La base nueva trae una huella por clave tocada, o `None` para las que se
-    borraron. Solo debe aplicarse cuando la escritura haya ido bien.
+    borraron. Solo debe aplicarse cuando la escritura haya ido bien. Lo tercero
+    es para dejar rastro: un endpoint que modifica algo sin haberlo cargado
+    perdería el cambio en silencio.
     """
     poner: List[Dict[str, Any]] = []
     quitar: List[Dict[str, Any]] = []
@@ -139,6 +146,7 @@ def calcular(
     alias_poner: List[Dict[str, Any]] = []
     alias_quitar: List[Dict[str, Any]] = []
     base_nueva: Dict[str, Optional[str]] = {}
+    sin_leer: List[str] = []
     borradas = {"cuentas": 0, "unidades": 0}
 
     for clave, valor in deseado.items():
@@ -149,7 +157,7 @@ def calcular(
         conocido = base.get(clave)
         if es_cuenta(clave):
             if conocido is None:
-                poner.append({"ruta": [clave], "valor": valor})
+                poner.append({"ruta": [clave], "valor": valor, "si_ausente": True})
                 _alias_cambiados(clave, None, valor, alias_de, alias_poner, alias_quitar)
             elif conocido != actual:
                 previo = json.loads(conocido)
@@ -173,6 +181,8 @@ def calcular(
 
         if conocido is None:
             # Nunca se leyó: lo que hay en memoria es el valor de arranque.
+            if valor not in (None, [], {}):
+                sin_leer.append(clave)
             continue
         if conocido != actual:
             previo = json.loads(conocido)
@@ -203,4 +213,4 @@ def calcular(
         cambios["quitar"] = quitar + alias_quitar
     if listas:
         cambios["listas"] = listas
-    return cambios, base_nueva
+    return cambios, base_nueva, sin_leer

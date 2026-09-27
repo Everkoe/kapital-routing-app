@@ -310,8 +310,17 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **toda carga nueva que meta algo de la fila en memoria debe llamar a `_recordar_base`** (o
   `_recordar_base_de_cuentas` si reemplaza las cuentas), porque una clave reservada que no está en la base
   no se escribe nunca —en memoria sería el valor vacío del arranque— y una cuenta que está en la base pero
-  no en memoria se toma por borrada. Y hay un tope: un guardado que borraría más de 25 cuentas o unidades
-  se rechaza con 503, por ser casi seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
+  no en memoria se toma por borrada. **Y ningún endpoint puede modificar algo sin haberlo cargado**: lo que
+  no se leyó no se escribe (queda un `[Kapital] … sin escribir` en el log), y una cuenta que no estaba en
+  la base se trata como nueva y va con `si_ausente`, de modo que si ya existe el guardado entero se
+  rechaza con **409** en vez de sustituirla. Pasaba de verdad: revisar un documento en una instancia fría
+  no cargaba nada, inventaba una cuenta vacía con la clave del conductor y la guardaba encima de la real,
+  contraseña incluida (lo encontró una revisión independiente antes de desplegar; hay prueba). Una
+  lectura que se cuele entre el cálculo y la escritura sube `_generacion_base`, y entonces la escritura
+  no toca la base. La flota se verifica solo en los campos cambiados, y si la relectura no confirma,
+  `EscrituraSinConfirmar` avisa a quien llama de que **no** deshaga en memoria lo que ya se escribió. Y
+  hay un tope: un guardado que borraría más de 50 cuentas o unidades se rechaza con 503, por ser casi
+  seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
   Los scripts de `scripts/` que escriben la fila entera (importar bases, cifrar contraseñas) siguen
   pudiendo pisar lo que pase a la vez: correrlos con la aplicación tranquila. Para comprobar contra la base
   real: `scripts/probar_guardar_estado.py` (la función, dentro de una transacción que se deshace) y

@@ -114,6 +114,19 @@ async def main() -> int:
                   and fila[CUENTA]["estado"] == "Rechazado",
                   {k: fila[CUENTA][k] for k in ("nombre", "estado")})
 
+        # Esta instancia «cree» que la cuenta es nueva (no la tiene en su base):
+        # la base debe rechazarlo con 409 en vez de escribirla encima.
+        backend._base_remota.pop(CUENTA, None)
+        backend.usuarios_db[CUENTA] = {"identifier": CUENTA, "rol": "Cliente"}
+        try:
+            await backend.persist_users_only()
+            rechazo = None
+        except backend.HTTPException as exc:
+            rechazo = exc.status_code
+        fila = await leer_fila()
+        comprobar("una «nueva» que ya existe: 409", rechazo == 409
+                  and fila[CUENTA]["nombre"] == "Cambiado por otra instancia", rechazo)
+
         await backend.reload_db(force=True)
         del backend.usuarios_db[CUENTA]
         await backend.persist_users_only()

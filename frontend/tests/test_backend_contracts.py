@@ -426,6 +426,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         })
 
         with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()),
             patch.object(backend.ws_manager, "send", new=AsyncMock()) as send,
         ):
@@ -3267,10 +3268,11 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def test_a_notification_id_never_restarts_from_one(self):
         """Sin avisos cargados, «el mayor más uno» daba 1 y pisaba al aviso 1 al fusionar."""
         backend.notifications_db.clear()
-        antes = int(time.time() * 1000)
+        antes = time.time_ns() // 1000
         self.assertGreaterEqual(backend._next_notification_id(), antes)
-        backend.notifications_db.append({"id": 10 ** 13})
-        self.assertEqual(backend._next_notification_id(), 10 ** 13 + 1)
+        # Creciente aunque el reloj vaya por detrás del último id visto.
+        backend.notifications_db.append({"id": 10 ** 17})
+        self.assertEqual(backend._next_notification_id(), 10 ** 17 + 1)
 
     def test_the_websocket_refuses_a_handshake_without_a_session(self):
         from fastapi.testclient import TestClient
@@ -3284,11 +3286,16 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.code, 1008)
         self.assertNotIn("chofer@k.com", backend.ws_manager.active)
 
+class _YaExiste(Exception):
+    """Lo que en Postgres es el `PT409` de `si_ausente`."""
+
+
 def _aplicar_como_postgres(fila, cambios):
     """Lo que hace `guardar_estado()` (008), para simular la base en las pruebas.
 
     La función de verdad se prueba contra Postgres con
     `scripts/probar_guardar_estado.py`; esto solo necesita comportarse igual.
+    Un `null` de JSON cuenta como ausente, como allí.
     """
     estado = copy.deepcopy(fila)
 
@@ -3310,6 +3317,8 @@ def _aplicar_como_postgres(fila, cambios):
         if "si_existe" in op and not isinstance(leer(op["si_existe"]), dict):
             continue
         actual = leer(op["ruta"])
+        if op.get("si_ausente") and actual is not None:
+            raise _YaExiste(op["ruta"])
         if op.get("si_libre") and actual is not None and actual != op["valor"]:
             continue
         nodo = estado
@@ -3317,13 +3326,16 @@ def _aplicar_como_postgres(fila, cambios):
             nodo = nodo.setdefault(tramo, {})
         nodo[op["ruta"][-1]] = copy.deepcopy(op["valor"])
     for lista in cambios.get("listas", []):
-        nuevos = {json.dumps(e["id"]): e for e in lista["poner"]}
+        # Los elementos sin `id` de la base se conservan, como en la función.
+        def id_de(e):
+            return json.dumps(e.get("id")) if isinstance(e, dict) and e.get("id") is not None else None
+        nuevos = {id_de(e): e for e in lista["poner"]}
         quitar = {json.dumps(i) for i in lista["quitar"]}
         actual = estado.get(lista["clave"]) or []
-        vistos = {json.dumps(e["id"]) for e in actual}
-        fusion = [nuevos.get(json.dumps(e["id"]), e) for e in actual
-                  if json.dumps(e["id"]) not in quitar]
-        fusion += [e for e in lista["poner"] if json.dumps(e["id"]) not in vistos]
+        vistos = {id_de(e) for e in actual} - {None}
+        fusion = [nuevos.get(id_de(e), e) if id_de(e) else e for e in actual
+                  if id_de(e) is None or id_de(e) not in quitar]
+        fusion += [e for e in lista["poner"] if id_de(e) not in vistos]
         estado[lista["clave"]] = fusion
     return estado
 
@@ -3336,6 +3348,7 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
     """
 
     CUENTA = {"identifier": "ana@kapital.com", "email": "ana@kapital.com", "dni": "11111111",
+              "password": "pbkdf2_sha256$1$sal$hash-de-ana", "unidad_id": "K-001",
               "nombre": "Ana", "rol": "Conductor", "estado": "Pendiente Revisión",
               "perfil_conductor": {"direccion": "Calle 1", "documentos": {"dni": "a.pdf"}}}
 
@@ -3343,7 +3356,10 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         self._storage_config = backend.STORAGE_CONFIG
         self._globales = {nombre: copy.deepcopy(getattr(backend, nombre)) for nombre in (
             "usuarios_db", "conductores_db", "notifications_db", "actividad_db",
-            "rutas_estado_actual", "routes_summary", "historial_rutas", "board_lock", "db_loaded")}
+            "rutas_estado_actual", "routes_summary", "historial_rutas", "board_lock", "db_loaded",
+            "AUTH_ENFORCED")}
+        # Aquí se prueba la escritura; la sesión tiene sus propias pruebas.
+        backend.AUTH_ENFORCED = False
         backend._reset_db_runtime_state()
         backend._activate_storage_config(backend._build_storage_config({
             "KAPITAL_STORAGE_BACKEND": "V2_COMPAT",
@@ -3367,6 +3383,10 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         }
         self.rutas = []
         self.escrituras = []
+        # Para simular lo que otra instancia —u otra petición de esta— hace
+        # justo antes o justo después de que la escritura llegue a la base.
+        self.antes_de_escribir = None
+        self.despues_de_escribir = None
 
     def tearDown(self):
         backend._reset_db_runtime_state()
@@ -3383,9 +3403,16 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metodo, "POST")
         self.assertTrue(url.endswith("/rpc/guardar_estado"), url)
         self.escrituras.append(json_payload["p_cambios"])
-        self.fila = _aplicar_como_postgres(self.fila, json_payload["p_cambios"])
+        if self.antes_de_escribir:
+            self.antes_de_escribir()
+        try:
+            self.fila = _aplicar_como_postgres(self.fila, json_payload["p_cambios"])
+        except _YaExiste:
+            return httpx.Response(409, json={"code": "PT409"})
         if "rutas" in json_payload["p_cambios"]:
             self.rutas = json_payload["p_cambios"]["rutas"]
+        if self.despues_de_escribir:
+            self.despues_de_escribir()
         return httpx.Response(200, json={"aplicados": 1, "omitidos": 0})
 
     async def _cargar(self):
@@ -3542,7 +3569,7 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_implausible_mass_deletion_is_refused(self):
         await self._cargar()
-        for n in range(30):
+        for n in range(backend.escritura_estado.MAX_BORRADOS + 5):
             backend._recordar_base({f"fantasma{n}@kapital.com": {"rol": "Conductor"}})
         with self.assertRaises(HTTPException) as caught:
             await self._guardar()
@@ -3589,16 +3616,120 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         await self._guardar(backend.persist)
         self.assertEqual(self.rutas, [{"conductor": "K-001", "agentes": []}])
 
+    # --- Hallazgos de la revisión --------------------------------------------------------
+
+    async def test_reviewing_a_document_on_a_cold_instance_keeps_the_account(self):
+        """En frío, el conductor no estaba en memoria y se guardaba una cuenta vacía encima."""
+        self.fila["admin@kapital.com"] = {"identifier": "admin@kapital.com", "rol": "Administración",
+                                          "nombre": "Admin", "estado": "Activo"}
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await backend.review_driver_doc(backend.DriverDocReviewPayload(
+                admin_email="admin@kapital.com", conductor_email="ana@kapital.com",
+                campo="dniScaneado", estado="rechazado", nota="Borroso"))
+
+        ana = self.fila["ana@kapital.com"]
+        self.assertEqual(ana["password"], self.CUENTA["password"], "la contraseña sigue ahí")
+        self.assertEqual(ana["dni"], "11111111")
+        self.assertEqual(ana["perfil_conductor"]["documentos"], {"dni": "a.pdf"})
+        self.assertEqual(ana["perfil_conductor"]["revision_docs"]["dniScaneado"]["estado"], "rechazado")
+        self.assertEqual(ana["estado"], "Documentos Observados")
+
+    async def test_reviewing_a_document_of_an_unknown_driver_is_a_404_not_a_new_account(self):
+        self.fila["admin@kapital.com"] = {"identifier": "admin@kapital.com", "rol": "Administración"}
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.review_driver_doc(backend.DriverDocReviewPayload(
+                    admin_email="admin@kapital.com", conductor_email="nadie@kapital.com",
+                    campo="dniScaneado", estado="aprobado"))
+        self.assertEqual(caught.exception.status_code, 404)
+        self.assertEqual(self.escrituras, [])
+
+    async def test_a_new_account_that_already_exists_is_refused_not_overwritten(self):
+        await self._cargar()
+        # Otra instancia la creó después de que esta leyera.
+        self.fila["zeta@kapital.com"] = {"identifier": "zeta@kapital.com", "password": "real"}
+        backend.usuarios_db["zeta@kapital.com"] = {"identifier": "zeta@kapital.com", "rol": "Cliente"}
+        backend.notifications_db.append({"id": 99, "message": "de esta"})
+        with self.assertRaises(HTTPException) as caught:
+            await self._guardar()
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(self.fila["zeta@kapital.com"]["password"], "real")
+        self.assertEqual(len(self.fila["__notifications__"]), 2, "nada del guardado se aplicó")
+
+    async def test_a_read_that_slips_in_before_the_write_does_not_revert_it_later(self):
+        """Una lectura con datos de antes de la escritura no puede quedar como base «nueva»."""
+        await self._cargar()
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+
+        def lectura_colada():
+            # Lo que haría una carga que empezó antes de la escritura.
+            backend.usuarios_db = {k: copy.deepcopy(v) for k, v in self.fila.items()
+                                   if not k.startswith("__")}
+            backend._recordar_base_de_cuentas(backend.usuarios_db)
+
+        self.antes_de_escribir = lectura_colada
+        await self._guardar()
+        self.antes_de_escribir = None
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Activo")
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Activo", "no se deshizo")
+        self.assertEqual(self.fila["beto@kapital.com"]["nombre"], "Roberto")
+
+    async def test_the_aliases_of_an_account_deleted_elsewhere_do_not_come_back(self):
+        await self._cargar()
+        del self.fila["ana@kapital.com"]
+        self.fila["__login__"] = {k: v for k, v in self.fila["__login__"].items() if v != "ana@kapital.com"}
+        backend.usuarios_db["ana@kapital.com"]["email"] = "ana.nueva@kapital.com"
+        await self._guardar()
+        self.assertNotIn("ana@kapital.com", self.fila)
+        self.assertNotIn("ana.nueva@kapital.com", self.fila["__login__"])
+        self.assertNotIn("ana@kapital.com", self.fila["__login__"])
+
+    async def test_a_concurrent_edit_to_another_field_of_the_unit_is_not_a_503(self):
+        """Los campos se fusionan: que otro cambie el chofer no invalida mi capacidad."""
+        def otra_instancia():
+            self.fila["__flota__"]["K-001"]["chofer"] = "Cambiado por otra instancia"
+
+        self.despues_de_escribir = otra_instancia
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            respuesta = await backend.update_flota("K-001", backend.FlotaUpdate(capacidad=6))
+        self.assertEqual(respuesta["unidad"]["capacidad"], 6)
+        self.assertEqual(self.fila["__flota__"]["K-001"],
+                         {"capacidad": 6, "chofer": "Cambiado por otra instancia"})
+
+        # Y el siguiente guardado no deshace nada.
+        self.despues_de_escribir = None
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()
+        self.assertEqual(self.fila["__flota__"]["K-001"]["capacidad"], 6)
+
+    async def test_replacing_the_board_writes_it_even_on_a_cold_instance(self):
+        tablero = [{"conductor": "K-001", "micro_zona": "SURCO", "horario": "08:00", "agentes": []}]
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await backend.update_routes(tablero)
+        self.assertEqual(self.rutas, tablero)
+
+    async def test_a_list_element_without_id_in_the_base_survives_a_merge(self):
+        self.fila["__notifications__"].insert(0, {"message": "antiguo, sin id"})
+        await self._cargar()
+        backend.notifications_db.append({"id": 3, "message": "nuevo"})
+        await self._guardar()
+        self.assertEqual(self.fila["__notifications__"][0], {"message": "antiguo, sin id"})
+        self.assertEqual(self.fila["__notifications__"][-1]["id"], 3)
+
     def test_the_diff_is_pure_and_symmetric(self):
         """Sin cambios, sin nada que hacer; y lo que calcula es exactamente la diferencia."""
         base = {"a@k.com": backend.escritura_estado.huella({"x": 1, "y": {"z": 2}})}
-        cambios, base_nueva = backend.escritura_estado.calcular(
+        cambios, base_nueva, sin_leer = backend.escritura_estado.calcular(
             base, {"a@k.com": {"x": 1, "y": {"z": 3}}}, alias_de=lambda clave, cuenta: [])
+        self.assertEqual(sin_leer, [])
         self.assertEqual(cambios, {"poner": [
             {"ruta": ["a@k.com", "y", "z"], "valor": 3, "si_existe": ["a@k.com", "y"]}]})
         self.assertEqual(base_nueva["a@k.com"], backend.escritura_estado.huella({"x": 1, "y": {"z": 3}}))
 
-        cambios, _ = backend.escritura_estado.calcular(
+        cambios, _, _ = backend.escritura_estado.calcular(
             base, {"a@k.com": {"x": 1, "y": {"z": 2}}}, alias_de=lambda clave, cuenta: [])
         self.assertTrue(backend.escritura_estado.vacio(cambios))
 
