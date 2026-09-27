@@ -297,17 +297,25 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
   Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
 - **Tope de intentos** (desde el 2026-09-27): el login y el cambio de contraseña no tenían límite, y muchas
-  cuentas de conductor conservan la provisional de la importación. Ahora 10 fallos por cuenta o 50 por
-  origen en 15 minutos dan **429**, y agotado el tope **ni la contraseña correcta entra** (si no, seguir
-  probando diría cuándo se acierta). Acertar borra los fallos de la cuenta. Un contador en memoria no
-  serviría en Vercel, así que van a `public.intentos_acceso`
+  cuentas de conductor conservan la provisional de la importación. En 15 minutos, más de **10 intentos a
+  una cuenta desde un mismo origen**, **30 a una cuenta desde donde sea** o **50 desde un origen a
+  cualquier cuenta** dan **429**, y agotado el tope **ni la contraseña correcta entra** (si no, seguir
+  probando diría cuándo se acierta). El más bajo es por cuenta *y* origen a propósito: así quien adivina
+  no puede dejar fuera a la persona, que sigue entrando desde su red. Se cuenta por **la clave de la
+  cuenta**, no por lo tecleado (DNI, correo y clave son el mismo tope). Cada intento se **anota y se
+  cuenta en un solo paso** (`registrar_intento()`, con un candado por cuenta) antes de comprobar la
+  contraseña, y acertar borra los de esa cuenta: la primera versión contaba y anotaba por separado y
+  una ráfaga simultánea pasaba entera; contra la base, 20 a la vez reciben 20 números distintos. Un
+  contador en memoria no serviría en Vercel, así que van a `public.intentos_acceso`
   ([supabase/009_intentos_acceso.sql](supabase/009_intentos_acceso.sql), almacén en
-  [frontend/api/intentos_acceso.py](frontend/api/intentos_acceso.py)), que solo guarda el SHA-256 del
-  identificador y el de la IP, y borra lo de más de un día. La IP sale de `x-forwarded-for`, que en
-  Vercel escribe su proxy. **Si la tabla no responde, se deja pasar** y queda en el log: el tope frena a
-  quien adivina, no puede ser la razón de que nadie entre. Contra la base real:
-  `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el permiso de leer
-  `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
+  [frontend/api/intentos_acceso.py](frontend/api/intentos_acceso.py)), que solo guarda el SHA-256 de la
+  clave y el de la IP, y borra lo de más de un día. La IP sale de `x-forwarded-for`, que en Vercel
+  sobrescribe su proxy (fuera de Vercel se puede falsear). **Si la tabla no responde, se deja pasar** y
+  queda en el log: el tope frena a quien adivina, no puede ser la razón de que nadie entre. Por eso sus
+  llamadas van por `_pedir_sin_reintentos` —2 s, sin reintentos y sin contar para el cortacircuitos de la
+  base—: con `_db_http_request`, un tope caído alargaba el login ~20 s y podía dejar la instancia en 503.
+  Contra la base real: `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el
+  permiso de leer `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
 - **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
   `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
   memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que
@@ -331,10 +339,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   una instancia fría no cargaba nada, inventaba una cuenta vacía con la clave del conductor y la guardaba
   encima de la real, contraseña incluida (lo encontró una revisión independiente antes de desplegar; hay
   prueba). Una lectura que se cuele entre el cálculo y la escritura sube la generación de las claves que
-  reemplaza (`_generacion_de`; una lectura completa, `_epoca_base`), y la escritura no apunta en la base
-  esas claves, pero sí las demás. La flota se verifica solo en los campos cambiados, y si la relectura no
-  confirma o falla, `EscrituraSinConfirmar` avisa a quien llama de que **no** deshaga en memoria lo que ya
-  se escribió. Y
+  reemplaza (`_generacion_de`; una lectura de todas las cuentas, `_epoca_cuentas`; una completa,
+  `_epoca_base`), y la escritura no apunta en la base esas claves, pero sí las demás. La flota se verifica
+  solo en los campos cambiados. **Si un guardado falla con `EscrituraSinDeshacer`** —el 409
+  (`EscrituraRechazada`) o una relectura que no confirma (`EscrituraSinConfirmar`)—, la memoria ya está al
+  día con la base y quien llama **no debe deshacer nada**: todo `except Exception` que restaure valores
+  tras un guardado tiene que dejarla pasar antes. Pasó: cuando dos administradores daban de alta al mismo
+  conductor, la vuelta atrás del segundo quitaba de memoria la cuenta real del primero y el siguiente
+  guardado la borraba. Y
   hay un tope: un guardado que borraría más de 50 cuentas o unidades se rechaza con 503, por ser casi
   seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
   Los scripts de `scripts/` que escriben la fila entera (importar bases, cifrar contraseñas) siguen

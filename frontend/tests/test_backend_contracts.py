@@ -3291,10 +3291,10 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     # --- Tope de intentos de acceso ----------------------------------------------------
 
-    def _cuenta_con_clave(self, clave="chofer@k.com", contrasena="la-buena"):
+    def _cuenta_con_clave(self, clave="chofer@k.com", contrasena="la-buena", **campos):
         backend.usuarios_db[clave] = {
             "identifier": clave, "email": clave, "rol": "Conductor", "estado": "Activo",
-            "password": backend.hash_password(contrasena),
+            "password": backend.hash_password(contrasena), **campos,
         }
 
     async def _entrar(self, identificador, contrasena, ip="203.0.113.7"):
@@ -3308,29 +3308,64 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         """Agotado el tope, ni la buena entra: si no, seguir probando diría cuándo se acierta."""
         self._cuenta_con_clave()
         with patch.object(backend, "reload_db", new=AsyncMock()):
-            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
                 self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
-            with patch.object(backend, "_usuario_para_sesion", new=AsyncMock()) as leer:
+            with patch.object(backend, "verify_password", wraps=backend.verify_password) as verificar:
                 bloqueado = await self._entrar("chofer@k.com", "la-buena")
         self.assertEqual(bloqueado.status_code, 429)
         self.assertIn("Espera", bloqueado.json()["detail"])
-        leer.assert_not_awaited()  # ni se llega a leer la cuenta
+        verificar.assert_not_called()  # ni se llega a comprobar la contraseña
 
-    async def test_the_limit_counts_however_the_identifier_is_typed(self):
+    async def test_an_attacker_cannot_lock_out_the_owner_from_elsewhere(self):
+        """Diez fallos desde un sitio bloquean ese sitio, no a la persona en el suyo."""
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
+                await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena", ip="198.51.100.66")).status_code, 429)
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena", ip="203.0.113.7")).status_code, 200)
+
+    async def test_spreading_attempts_across_many_addresses_still_hits_a_limit(self):
         self._cuenta_con_clave()
         with patch.object(backend, "reload_db", new=AsyncMock()):
             for n in range(backend.intentos_acceso.MAX_POR_CUENTA):
-                await self._entrar(" CHOFER@k.com " if n % 2 else "chofer@K.COM", "otra")
-            self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 429)
+                self.assertEqual((await self._entrar("chofer@k.com", "otra", ip=f"198.51.100.{n}")).status_code, 401)
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena", ip="203.0.113.99")).status_code, 429)
+
+    async def test_a_burst_of_simultaneous_attempts_cannot_slip_past_the_limit(self):
+        """Contar y anotar por separado dejaba pasar una ráfaga entera: 40 a la vez, 40 respuestas 401."""
+        self._cuenta_con_clave()
+        rafaga = 4 * backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuestas = await asyncio.gather(*(self._entrar("chofer@k.com", "otra") for _ in range(rafaga)))
+        codigos = [r.status_code for r in respuestas]
+        self.assertEqual(codigos.count(401), backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN)
+        self.assertEqual(codigos.count(429), rafaga - backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN)
+
+    async def test_every_alias_of_an_account_shares_one_limit(self):
+        """DNI, correo y clave son la misma cuenta: alternarlos no multiplica los intentos."""
+        self._cuenta_con_clave(email="otro-correo@k.com", dni="74538840")
+        del backend.usuarios_db["chofer@k.com"]["identifier"]
+        alias = ["74538840", "otro-correo@k.com", "chofer@k.com"]
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for n in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
+                self.assertEqual((await self._entrar(alias[n % 3], "otra")).status_code, 401)
+            self.assertEqual((await self._entrar("74538840", "la-buena")).status_code, 429)
+
+    async def test_the_limit_counts_however_the_identifier_is_typed(self):
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for n in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
+                await self._entrar(" NADIE@k.com " if n % 2 else "nadie@K.COM", "otra")
+            self.assertEqual((await self._entrar("nadie@k.com", "x")).status_code, 429)
 
     async def test_a_successful_login_forgets_the_accounts_failures(self):
         self._cuenta_con_clave()
         with patch.object(backend, "reload_db", new=AsyncMock()):
-            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA - 1):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN - 1):
                 await self._entrar("chofer@k.com", "otra")
             self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 200)
-            # Tras acertar vuelve a tener todos sus intentos.
-            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA - 1):
+            self.assertEqual(backend.almacen_intentos.filas, [], "ni los fallos ni el intento que acertó")
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
                 self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
 
     async def test_one_origin_trying_many_accounts_is_stopped(self):
@@ -3354,16 +3389,37 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self._cuenta_con_clave()
 
         class Caida(backend.intentos_acceso.IntentosEnMemoria):
-            async def fallidos(self, clave, origen):
-                raise HTTPException(status_code=503, detail="caída")
-
-            async def anotar(self, clave, origen):
-                raise RuntimeError("caída")
+            async def registrar(self, clave, origen):
+                raise httpx.ReadTimeout("caída")
 
         backend.almacen_intentos = Caida()
         with patch.object(backend, "reload_db", new=AsyncMock()):
             self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 200)
             self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
+
+    async def test_the_limiter_request_never_retries_nor_trips_the_database_breaker(self):
+        """Con los reintentos de siempre, un tope caído alargaba el login ~20 s y abría el cortacircuitos."""
+        backend._activate_storage_config(backend._build_storage_config({
+            "KAPITAL_STORAGE_BACKEND": "V2_COMPAT",
+            "KAPITAL_V2_SUPABASE_URL": "https://v2-compat.invalid/rest/v1",
+            "KAPITAL_V2_SUPABASE_KEY": "compat-key",
+            "KAPITAL_V2_ENABLED": "true",
+            "KAPITAL_V2_REMOTE_ENABLED": "true",
+            "KAPITAL_V2_READ_ONLY": "false",
+        }))
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        client.request.side_effect = httpx.ConnectTimeout("lenta")
+        fallos_antes = backend._db_circuit_failures
+        with patch.object(backend.httpx, "AsyncClient", return_value=client) as creado:
+            with self.assertRaises(httpx.ConnectTimeout):
+                await backend._pedir_sin_reintentos(
+                    "POST", "https://v2-compat.invalid/rest/v1/rpc/registrar_intento",
+                    operation="intentos_registrar_intento", headers={}, timeout=2.0, json_payload={})
+        self.assertEqual(client.request.await_count, 1)
+        self.assertEqual(creado.call_args.kwargs["timeout"], 2.0)
+        self.assertEqual(backend._db_circuit_failures, fallos_antes)
 
     async def test_changing_the_password_shares_the_limit(self):
         """Pide la actual sin sesión: es otra puerta para adivinarla."""
@@ -3372,7 +3428,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
         ):
-            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
                 with self.assertRaises(HTTPException):
                     await backend.change_password(backend.ChangePasswordRequest(
                         identifier="chofer@k.com", old_password="otra", new_password="nueva-clave"))
@@ -3386,24 +3442,25 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         llamadas = []
 
         async def pedir(metodo, url, **kwargs):
-            llamadas.append((metodo, url.rsplit("/", 1)[-1], kwargs["json_payload"]))
-            return httpx.Response(200, json={"cuenta": 3, "origen": 5})
+            llamadas.append((metodo, url.rsplit("/", 1)[-1], kwargs["json_payload"], kwargs["timeout"]))
+            return httpx.Response(200, json={"cuenta": 3, "cuenta_origen": 2, "origen": 5})
 
         almacen = backend.intentos_acceso.IntentosEnTabla(
             pedir=pedir, url_base=lambda: "https://x.invalid/rest/v1/", cabeceras=lambda: {})
-        self.assertEqual(await almacen.fallidos("a" * 64, None), {"cuenta": 3, "origen": 5})
-        await almacen.anotar("a" * 64, "b" * 64)
+        self.assertEqual(await almacen.registrar("a" * 64, "b" * 64),
+                         {"cuenta": 3, "cuenta_origen": 2, "origen": 5})
         await almacen.olvidar("a" * 64)
-        self.assertEqual([(m, f) for m, f, _ in llamadas], [
-            ("POST", "intentos_fallidos"), ("POST", "anotar_intento_fallido"), ("POST", "olvidar_intentos")])
+        self.assertEqual([(m, f) for m, f, _, _ in llamadas],
+                         [("POST", "registrar_intento"), ("POST", "olvidar_intentos")])
         self.assertEqual(llamadas[0][2]["p_minutos"], backend.intentos_acceso.VENTANA_MINUTOS)
+        self.assertEqual(llamadas[0][3], backend.intentos_acceso.TIEMPO_LIMITE_S)
 
         async def rota(metodo, url, **kwargs):
             return httpx.Response(404, json={})
 
         with self.assertRaises(backend.intentos_acceso.IntentosNoDisponibles):
             await backend.intentos_acceso.IntentosEnTabla(
-                pedir=rota, url_base=lambda: "https://x.invalid", cabeceras=lambda: {}).fallidos("a" * 64, None)
+                pedir=rota, url_base=lambda: "https://x.invalid", cabeceras=lambda: {}).registrar("a" * 64, None)
 
 class _YaExiste(Exception):
     """Lo que en Postgres es el `PT409` de `si_ausente`."""
@@ -3924,6 +3981,52 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
         await self._guardar(backend.persist)
         self.assertNotIn("K-002", self.fila["__flota__"], "y el siguiente guardado no la resucita")
+
+    # --- Tercera ronda de la revisión ------------------------------------------------------
+
+    async def test_a_users_read_during_a_creation_does_not_delete_it_later(self):
+        """Una lectura de las cuentas que empezó antes del alta no la conoce, y no puede borrarla."""
+        await self._cargar()
+        self._nueva_cuenta()
+
+        def lectura_de_cuentas_colada():
+            backend.usuarios_db = {k: copy.deepcopy(v) for k, v in self.fila.items()
+                                   if not k.startswith("__")}
+            backend._recordar_base_de_cuentas(backend.usuarios_db)
+
+        self.antes_de_escribir = lectura_de_cuentas_colada
+        await self._guardar()
+        self.antes_de_escribir = None
+        self.assertIn("caro@kapital.com", self.fila)
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()
+        self.assertIn("caro@kapital.com", self.fila, "el siguiente guardado no la borra")
+
+    async def test_two_admins_creating_the_same_driver_do_not_delete_each_others_account(self):
+        """El 409 del segundo no puede deshacer en memoria lo que creó el primero."""
+        la_del_primero = {"identifier": "40000001", "dni": "40000001", "rol": "Conductor",
+                          "nombre": "Del primero", "password": "hash-del-primero", "unidad_id": "K-900"}
+
+        def el_primero_guarda_antes():
+            self.fila["40000001"] = copy.deepcopy(la_del_primero)
+            self.fila["__flota__"]["K-900"] = {"capacidad": 4, "chofer": "Del primero"}
+
+        self.antes_de_escribir = el_primero_guarda_antes
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.add_flota(backend.FlotaRegistro(
+                    padron="K-900", dni="40000001", password="provisional", capacidad=4,
+                    tipo="AUTO", chofer="Del segundo"))
+        self.antes_de_escribir = None
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(backend.usuarios_db["40000001"]["nombre"], "Del primero",
+                         "la memoria tiene la cuenta real, no la vuelta atrás")
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar(backend.persist)
+        self.assertEqual(self.fila["40000001"], la_del_primero)
+        self.assertIn("K-900", self.fila["__flota__"])
 
     def test_the_diff_is_pure_and_symmetric(self):
         """Sin cambios, sin nada que hacer; y lo que calcula es exactamente la diferencia."""

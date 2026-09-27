@@ -1181,7 +1181,7 @@ almacen_sesiones: Any = sesiones.SesionesEnTabla(
 # Los intentos fallidos de acceso, compartidos entre instancias (ver
 # `intentos_acceso.py`). Las pruebas lo sustituyen por `IntentosEnMemoria`.
 almacen_intentos: Any = intentos_acceso.IntentosEnTabla(
-    pedir=lambda *args, **kwargs: _db_http_request(*args, **kwargs),
+    pedir=lambda *args, **kwargs: _pedir_sin_reintentos(*args, **kwargs),
     url_base=lambda: str(STORAGE_CONFIG.url),
     cabeceras=lambda: _build_supabase_headers(STORAGE_CONFIG.key),
 )
@@ -1304,6 +1304,10 @@ _base_rutas: Optional[str] = None
 # escrito las descuadraría. Ver `_guardar_cambios`.
 _generacion_de: Dict[str, int] = {}
 _epoca_base = 0
+# Sube cuando una lectura reemplaza las cuentas enteras. Esa lectura no
+# conoce las cuentas que se estén creando a la vez: si luego se apuntaran en la
+# base sin estar en memoria, el siguiente guardado las tomaría por borradas.
+_epoca_cuentas = 0
 _generacion_rutas = 0
 
 
@@ -1332,6 +1336,8 @@ def _recordar_base_de_cuentas(cuentas: Mapping[str, Any]) -> None:
     borrada en el siguiente guardado. Por eso se sustituyen todas a la vez, sea
     la lectura completa o no.
     """
+    global _epoca_cuentas
+    _epoca_cuentas += 1
     for clave in [c for c in _base_remota if escritura_estado.es_cuenta(c)]:
         del _base_remota[clave]
         _tocar_base(clave)
@@ -1522,6 +1528,34 @@ async def _db_http_request(
         if status in {402, 429, 503, 504}:
             _record_db_failure()
         return response
+
+
+async def _pedir_sin_reintentos(
+    method: str,
+    url: str,
+    *,
+    operation: str,
+    headers: Dict[str, str],
+    timeout: float,
+    json_payload: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Una sola petición corta, para lo que puede fallar sin arrastrar a nadie.
+
+    `_db_http_request` reintenta y alimenta el cortacircuitos: con él, un
+    fallo del tope de intentos podía alargar un login unos veinte segundos
+    —más de lo que Vercel deja a una función— y dejar la instancia entera
+    respondiendo 503. Aquí no hay reintentos ni cortacircuitos; quien llama
+    decide qué hacer si falla.
+    """
+    STORAGE_ADAPTER.assert_ready(write=True)
+    started_at = time.perf_counter()
+    response = None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(method, url, headers=headers, json=json_payload)
+        return response
+    finally:
+        _log_db_metric(operation, getattr(response, "status_code", None), started_at, response)
 
 
 def _app_state_url(select: Optional[str] = None) -> str:
@@ -2082,6 +2116,7 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
         _raise_database_unavailable(operation, error=exc, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
     # Anotadas en el mismo paso síncrono que el cálculo: nada puede colarse.
     epoca = _epoca_base
+    epoca_cuentas = _epoca_cuentas
     generaciones = {clave: _generacion_de.get(clave, 0) for clave in base_nueva}
     generacion_rutas = _generacion_rutas
     if sin_leer:
@@ -2118,10 +2153,7 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
             except Exception as exc:  # noqa: BLE001 - el 409 se devuelve igual
                 print(f"[Kapital] {operation}: no se pudo recargar tras el 409: {type(exc).__name__}")
             _invalidate_db_cache()
-            raise HTTPException(
-                status_code=409,
-                detail="Esa cuenta ya existe. Vuelve a cargar la página e inténtalo de nuevo.",
-            )
+            raise EscrituraRechazada()
         if response.status_code not in (200, 204):
             _raise_database_unavailable(
                 operation,
@@ -2136,6 +2168,8 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
         if _epoca_base == epoca:
             for clave, huella_clave in base_nueva.items():
                 if _generacion_de.get(clave, 0) != generaciones[clave]:
+                    continue
+                if escritura_estado.es_cuenta(clave) and _epoca_cuentas != epoca_cuentas:
                     continue
                 if huella_clave is None:
                     _base_remota.pop(clave, None)
@@ -3910,32 +3944,40 @@ def _origen_de_peticion(request: Optional[Request]) -> Optional[str]:
     )
 
 
-async def _exigir_intentos_disponibles(clave: str, origen: Optional[str]) -> Dict[str, int]:
-    """429 si esa cuenta o ese origen agotaron sus intentos; si no, cuántos llevan.
+def _clave_de_intentos(user: Optional[Dict[str, Any]], tecleado: str) -> str:
+    """Bajo qué clave se cuentan los intentos.
+
+    Una cuenta se puede teclear de varias formas —DNI, correo, la clave— y
+    contar por lo tecleado daba un tope por cada una. Si la cuenta existe,
+    cuenta la cuenta; si no, lo tecleado.
+    """
+    clave_cuenta = _clave_de_cuenta(user) if user else None
+    return intentos_acceso.clave_de(clave_cuenta or tecleado)
+
+
+async def _registrar_intento(clave: str, origen: Optional[str]) -> bool:
+    """Anota el intento y responde 429 si agotó algún tope. Devuelve si quedó anotado.
+
+    Se anota antes de comprobar la contraseña, y contando en el mismo paso: si
+    se contara primero y se anotara después, una ráfaga de intentos a la vez
+    leería la cuenta antes de que ninguno quedara anotado y pasaría entera.
 
     Si la tabla no responde se deja pasar (ver `intentos_acceso.py`): el tope
     frena a quien adivina, no puede convertirse en la razón de que nadie entre.
     """
     try:
-        fallidos = await almacen_intentos.fallidos(clave, origen)
-    except Exception as exc:  # noqa: BLE001 - incluye el 503 de la base
+        cuentas = await almacen_intentos.registrar(clave, origen)
+    except Exception as exc:  # noqa: BLE001 - incluye tiempo agotado y 5xx
         print(f"[Kapital] intentos_acceso no disponible: {type(exc).__name__}")
-        return {"cuenta": 0, "origen": 0}
-    if intentos_acceso.superado(fallidos):
+        return False
+    if intentos_acceso.superado(cuentas):
         raise HTTPException(status_code=429, detail=intentos_acceso.DEMASIADOS_INTENTOS)
-    return fallidos
+    return True
 
 
-async def _anotar_intento_fallido(clave: str, origen: Optional[str]) -> None:
-    try:
-        await almacen_intentos.anotar(clave, origen)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[Kapital] intentos_acceso no se pudo anotar: {type(exc).__name__}")
-
-
-async def _olvidar_intentos(clave: str, fallidos: Dict[str, int]) -> None:
-    """Tras acertar, los fallos de la cuenta dejan de contar. Sin fallos, nada que borrar."""
-    if not fallidos.get("cuenta"):
+async def _olvidar_intentos(clave: str, anotado: bool) -> None:
+    """Tras acertar, los intentos de la cuenta —este incluido— dejan de contar."""
+    if not anotado:
         return
     try:
         await almacen_intentos.olvidar(clave)
@@ -3945,19 +3987,16 @@ async def _olvidar_intentos(clave: str, fallidos: Dict[str, int]) -> None:
 
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin, response: Response, request: Request = None):
-    # Se comprueba antes de leer la cuenta: agotado el tope, ni la contraseña
-    # correcta entra, o probar seguiría sirviendo para saber cuándo se acierta.
-    clave_intento = intentos_acceso.clave_de(usuario.identifier)
-    origen = _origen_de_peticion(request)
-    fallidos = await _exigir_intentos_disponibles(clave_intento, origen)
-
     user_in_db = await _usuario_para_sesion(usuario.identifier)
+    # Se anota antes de comprobar la contraseña: agotado el tope, ni la
+    # correcta entra, o seguir probando serviría para saber cuándo se acierta.
+    clave_intento = _clave_de_intentos(user_in_db, usuario.identifier)
+    anotado = await _registrar_intento(clave_intento, _origen_de_peticion(request))
 
     stored_password = user_in_db.get("password") if user_in_db else None
     if not user_in_db or not verify_password(usuario.password, stored_password):
-        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
-    await _olvidar_intentos(clave_intento, fallidos)
+    await _olvidar_intentos(clave_intento, anotado)
 
     # Transparent migration: a successful login upgrades legacy plaintext (or
     # an older PBKDF2 cost) without forcing a password reset or changing UX.
@@ -4048,20 +4087,17 @@ async def logout_user(response: Response, session_token: SessionCookie = None):
 async def change_password(req: ChangePasswordRequest, request: Request = None):
     # Pide la contraseña actual sin sesión, así que es otra puerta para
     # adivinarla: comparte el tope con el login.
-    clave_intento = intentos_acceso.clave_de(req.identifier)
-    origen = _origen_de_peticion(request)
-    fallidos = await _exigir_intentos_disponibles(clave_intento, origen)
     await reload_db()
     user_in_db = get_user_by_identifier(req.identifier)
+    clave_intento = _clave_de_intentos(user_in_db, req.identifier)
+    anotado = await _registrar_intento(clave_intento, _origen_de_peticion(request))
 
     if not user_in_db:
-        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
     if not verify_password(req.old_password, user_in_db.get("password")):
-        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=401, detail="La contraseña actual es incorrecta.")
-    await _olvidar_intentos(clave_intento, fallidos)
+    await _olvidar_intentos(clave_intento, anotado)
         
     if len(req.new_password) < 4:
         raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
@@ -6617,16 +6653,36 @@ def _normalize_fleet_expiries(values: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-class EscrituraSinConfirmar(HTTPException):
-    """La escritura llegó a la base, pero la relectura no la confirma.
+class EscrituraSinDeshacer(HTTPException):
+    """Un guardado falló, pero quien lo recibe **no** debe deshacer nada en memoria.
 
-    Quien la recibe no debe deshacer nada en memoria: la relectura ya dejó
-    memoria y base al día, y volver al valor anterior haría que el siguiente
-    guardado revirtiera lo que sí se escribió.
+    La memoria ya está al día con la base —se releyó—, y volver a los valores
+    anteriores haría que el siguiente guardado revirtiera lo que sí está
+    escrito, o borrara lo que otra persona creó. Quien deshace en un
+    `except Exception` tiene que dejar pasar esta antes.
     """
+
+
+class EscrituraSinConfirmar(EscrituraSinDeshacer):
+    """La escritura llegó a la base, pero la relectura no la confirma o falló."""
 
     def __init__(self) -> None:
         super().__init__(status_code=503, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+
+
+class EscrituraRechazada(EscrituraSinDeshacer):
+    """`guardar_estado()` rechazó el guardado (409): una cuenta «nueva» ya existía.
+
+    Nada se escribió, y la memoria se recargó. Deshacer ahora quitaría de
+    memoria la cuenta real —la que creó otra persona a la vez— y el siguiente
+    guardado la borraría de la base.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=409,
+            detail="Esa cuenta ya existe. Vuelve a cargar la página e inténtalo de nuevo.",
+        )
 
 
 async def _persist_and_verify_fleet(
@@ -6759,7 +6815,7 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
         )
     try:
         stored = await _persist_and_verify_fleet(unit_id, values)
-    except EscrituraSinConfirmar:
+    except EscrituraSinDeshacer:
         raise
     except Exception:
         conductores_db.pop(unit_id, None)
@@ -6808,7 +6864,7 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     )
     try:
         stored = await _persist_and_verify_fleet(placa, changes)
-    except EscrituraSinConfirmar:
+    except EscrituraSinDeshacer:
         raise
     except Exception:
         conductores_db[placa] = previous
@@ -6874,7 +6930,7 @@ async def rename_flota(placa: str, datos: FlotaRenombrar, session_token: Session
 
     try:
         await _persist_and_verify_fleet(destino, conductores_db[destino])
-    except EscrituraSinConfirmar:
+    except EscrituraSinDeshacer:
         raise
     except Exception:
         conductores_db = previo_flota
@@ -6909,7 +6965,7 @@ async def delete_flota(placa: str, session_token: SessionCookie = None):
     del conductores_db[placa]
     try:
         await _persist_and_verify_fleet(placa, None)
-    except EscrituraSinConfirmar:
+    except EscrituraSinDeshacer:
         raise
     except Exception:
         conductores_db[placa] = previous
