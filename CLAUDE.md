@@ -16,12 +16,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   histórico; no asumir que es el activo. El backend accede vía REST directo con `httpx` (sin SDK `supabase-py`).
   Todo el estado vive en **una sola fila**: `public.app_state` con `id = 1`, donde `usuarios` contiene los
   usuarios reales más las pseudo-claves `__flota__`, `__notifications__`, `__routes_summary__`,
-  `__historial_rutas__`, `__lock__`, `__sessions__`, `__actividad__` y `__login__`. El egress es una
+  `__historial_rutas__`, `__lock__`, `__actividad__` y `__login__` (`__sessions__` quedó como resto: las
+  sesiones viven en su propia tabla desde el 2026-09-27, ver «Sesiones»). El egress es una
   restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas. La fila llegó a pesar
-  3,95 MB; hoy son **228 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
+  3,95 MB; hoy son **~255 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
   entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
-  (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 238 KB, y lo que queda es la escritura de la sesión,
-  que obliga a bajar la columna antes de reescribirla porque PostgREST no sabe hacer escrituras parciales).
+  (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 21 KB —el índice y la cuenta—, y no escribe nada salvo que cifre una
+  contraseña vieja). **Escribir tampoco reescribe la fila** (desde el 2026-09-27, ver «Escritura por
+  diferencias» más abajo).
   **PostgREST no devuelve más de mil filas por petición**, pida uno el límite que pida: hay que recorrerlas
   con `offset` y parar en la tanda corta. Pedir 5.000 y dar la lectura por terminada al recibir 1.000 dejaba
   fuera veinte mil servicios en silencio, y un historial recortado convierte un cambio real en «sin novedad».
@@ -255,14 +257,135 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   conductor o un cliente, pero no la de otra cuenta de administración ni la suya propia: sería tomarla.
 - **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
-  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual:
-  **36 de 47 endpoints**; los 11 restantes —todos de lectura— están inventariados en
-  `docs/handoff/2026-09-15-relevo.md` §7. Las escrituras destructivas y las integraciones de pago
-  (Gemini, API de verificación) ya están cerradas.
-  **Validar una sesión NO debe costar el blob de usuarios**: existe `usuarios.__sessions__`, una pseudo-clave
-  con una instantánea de autorización por token. Al añadir un gate nuevo, usar `require_session_owner`, y si
-  se muta `rol` o `estado` de un usuario **llamar a `refresh_session_index_for()`** o la instantánea quedará
-  obsoleta y una desactivación no desactivará nada.
+  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. **Desde el 2026-09-27 todos
+  los endpoints piden sesión** salvo `GET /api`, el login, el registro y el cambio de contraseña (que
+  exige la actual); los tres llevan tope de intentos (ver «Tope de intentos»). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
+  dejaba a cualquiera cambiar los documentos de cualquier conductor —y, mandando `revision_docs` como si
+  fuera un documento, aprobárselos solo—, `request-update` y `mark-read` escribían, `actualizar-pasajero`
+  subía fotos a un bucket público, y `GET /api/conductor/info/{unidad}` y `/api/flota/export` entregaban
+  documento, dirección y teléfonos de los conductores a cualquiera (los padrones se adivinan). La ficha
+  del conductor la ven Administración, el Cliente (su panel de auditoría la enseña, con DNI, dirección y
+  teléfonos: **decisión de producto pendiente de confirmar**) y el propio conductor, solo la suya.
+  `resubmit-docs` solo acepta campos de documento (`_CAMPOS_DOCUMENTO`, con una prueba que la compara con
+  `src/constants/documentosConductor.js`). El WebSocket exige la cookie y que uno se conecte como sí
+  mismo. Para comprobar que no queda ninguno abierto, la prueba
+  `test_endpoints_that_never_asked_for_a_session_now_do` los llama sin cookie.
+  **Desde el 2026-09-27 las sesiones viven en `public.sesiones`**, una fila por sesión
+  ([supabase/007_sesiones.sql](supabase/007_sesiones.sql), almacén en
+  [frontend/api/sesiones.py](frontend/api/sesiones.py)). Antes vivían dos veces dentro de la fila única
+  —`_auth_sessions` en cada usuario y el índice `__sessions__`— y **abrir una reescribía la columna
+  `usuarios` entera**: como cada instancia de Vercel escribe su copia en memoria, dos inicios cercanos se
+  pisaban y ganaba el último, sin error. Ahora iniciar sesión es un `insert`, validar es leer una fila por
+  clave primaria (o nada, con la caché de la instancia de `DB_CACHE_TTL_SECONDS`) y cerrarla es marcar la
+  fila. **Comprobado con la huella `md5` de la fila compartida: idéntica antes y después de entrar y salir.**
+  `/api/auth/me` —se llama al abrir la aplicación— dejó de descargar el estado completo. La «última
+  conexión» de Accesos y los «Usuario inició sesión» del historial salen de la tabla (las filas se
+  conservan 90 días como registro de accesos); antes se escribían en la fila y además los accesos de los
+  conductores expulsaban del historial, limitado a 500, las acciones de administración.
+  **La sesión pertenece a la clave de la cuenta, no al campo `identifier`**: 124 de las 128 cuentas —casi
+  todos los conductores— no lo llevan escrito. Usar siempre `_clave_de_cuenta(user)`. El código viejo usaba
+  `identifier`, dejaba esas sesiones sin dueño y en cada petición de un conductor acababa descargando a
+  todos los usuarios para encontrarlo. Hay prueba con una cuenta sin `identifier`, que es lo que las pruebas
+  de siempre no cubrían porque sus usuarios de ejemplo sí lo llevan.
+  Al añadir un gate nuevo, usar `require_session_owner`, y si se muta `rol`, `estado`, correo o unidad de un
+  usuario **`await refrescar_sesiones_de(user)`**, o la instantánea quedará obsoleta y una desactivación no
+  desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
+  `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
+  nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
+  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. Al desplegar este cambio,
+  **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
+  sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
+  Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+- **Tope de intentos** (desde el 2026-09-27): el login y el cambio de contraseña no tenían límite, y muchas
+  cuentas de conductor conservan la provisional de la importación. En 15 minutos, más de **10 intentos a
+  una cuenta desde un mismo origen**, **30 a una cuenta desde donde sea** o **50 desde un origen a
+  cualquier cuenta** dan **429**, y agotado el tope **ni la contraseña correcta entra** (si no, seguir
+  probando diría cuándo se acierta). El más bajo es por cuenta *y* origen a propósito: así quien adivina
+  no puede dejar fuera a la persona, que sigue entrando desde su red. Se cuenta por **la clave de la
+  cuenta**, no por lo tecleado (DNI, correo y clave son el mismo tope). Cada intento se **anota y se
+  cuenta en un solo paso** (`registrar_intento()`, con un candado por cuenta y otro por origen) antes de
+  comprobar la contraseña, y acertar borra los de esa cuenta **desde ese origen** (no los de quien la
+  ataca desde otro): la primera versión contaba y anotaba por separado y una ráfaga simultánea pasaba
+  entera; contra la base, 20 a la vez reciben 20 números distintos. **El registro, que es público, tiene
+  su propio tope** —3 altas por origen y 5 en total cada 15 minutos—, mirado antes de leer nada, y ya no
+  descarga el estado entero: comprueba si la cuenta existe por el índice de acceso y por todos sus
+  alias (un conductor importado podía volver a darse de alta con su DNI). Sin tope, cualquiera podía
+  llenar la fila única de cuentas y gastar la transferencia del plan. La promoción de «la primera
+  cuenta» a Administración solo se decide con el índice lleno o una lectura completa: una instancia fría
+  con la memoria vacía habría regalado el rol. Un
+  contador en memoria no serviría en Vercel, así que van a `public.intentos_acceso`
+  ([supabase/009_intentos_acceso.sql](supabase/009_intentos_acceso.sql), almacén en
+  [frontend/api/intentos_acceso.py](frontend/api/intentos_acceso.py)), que solo guarda el SHA-256 de la
+  clave y el de la IP, y borra lo de más de un día. La IP sale de `x-forwarded-for`, que en Vercel
+  sobrescribe su proxy (fuera de Vercel se puede falsear). **Si la tabla no responde, se deja pasar** y
+  queda en el log: el tope frena a quien adivina, no puede ser la razón de que nadie entre. Por eso sus
+  llamadas van por `_pedir_sin_reintentos` —2 s, sin reintentos y sin contar para el cortacircuitos de la
+  base—: con `_db_http_request`, un tope caído alargaba el login ~20 s y podía dejar la instancia en 503.
+  Contra la base real: `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el
+  permiso de leer `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
+- **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
+  `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
+  memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que
+  otra instancia hubiera escrito entretanto. Ahora `_guardar_cambios` compara la memoria con la **base**
+  (`_base_remota`: la huella JSON de cada clave tal como esta instancia la leyó), calcula solo lo que cambió
+  ([frontend/api/escritura_estado.py](frontend/api/escritura_estado.py)) y lo manda a
+  `guardar_estado()` ([supabase/008_guardar_estado.sql](supabase/008_guardar_estado.sql)), que lo aplica
+  sobre la fila actual con `for update`. Cuentas y flota van **por campo** (tres niveles: cuenta → campo →
+  subcampo; flota → unidad → campo), avisos y actividad se **fusionan por `id`**, y `__login__` se mantiene
+  alias a alias sin robarle uno a otra cuenta. Medido contra la fila real: cambiar un campo son **410 bytes
+  en vez de 255 KB**, y un cambio simultáneo desde otra instancia sobrevive. Dos cosas a respetar:
+  **toda carga nueva que meta algo de la fila en memoria debe llamar a `_recordar_base`** (o
+  `_recordar_base_de_cuentas` si reemplaza las cuentas), porque una clave reservada que no está en la base
+  no se escribe nunca —en memoria sería el valor vacío del arranque— y una cuenta que está en la base pero
+  no en memoria se toma por borrada. **Y ningún endpoint puede modificar algo sin haberlo cargado**: lo que
+  no se leyó no se escribe (queda un `[Kapital] … sin escribir` en el log), y una cuenta que no estaba en
+  la base se trata como nueva y va con `si_ausente`, de modo que si ya existe el guardado entero se
+  rechaza con **409** en vez de sustituirla (con el mismo valor pasa: es un reintento de esa misma
+  escritura), y la instancia recarga la memoria en el acto para que la cuenta fantasma y lo que la
+  petición fallida añadió no se cuelen en el guardado siguiente. Pasaba de verdad: revisar un documento en
+  una instancia fría no cargaba nada, inventaba una cuenta vacía con la clave del conductor y la guardaba
+  encima de la real, contraseña incluida (lo encontró una revisión independiente antes de desplegar; hay
+  prueba). Una lectura que se cuele entre el cálculo y la escritura sube la generación de las claves que
+  reemplaza (`_generacion_de`; una lectura de todas las cuentas, `_epoca_cuentas`; una completa,
+  `_epoca_base`), y la escritura no apunta en la base esas claves, pero sí las demás. La flota se verifica
+  solo en los campos cambiados. **Si un guardado falla con `EscrituraSinDeshacer`** —el 409
+  (`EscrituraRechazada`) o una relectura que no confirma (`EscrituraSinConfirmar`)—, la memoria ya está al
+  día con la base y quien llama **no debe deshacer nada**: todo `except Exception` que restaure valores
+  tras un guardado tiene que dejarla pasar antes. Pasó: cuando dos administradores daban de alta al mismo
+  conductor, la vuelta atrás del segundo quitaba de memoria la cuenta real del primero y el siguiente
+  guardado la borraba. Y
+  hay un tope: un guardado que borraría más de 50 cuentas o unidades se rechaza con 503, por ser casi
+  seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
+  Los scripts de `scripts/` que escriben la fila entera (importar bases, cifrar contraseñas) siguen
+  pudiendo pisar lo que pase a la vez: correrlos con la aplicación tranquila. Para comprobar contra la base
+  real: `scripts/probar_guardar_estado.py` (la función, dentro de una transacción que se deshace) y
+  `scripts/probar_escritura.py` (el camino entero del backend, con una cuenta de prueba que se borra).
+
+## 2 bis. Escalabilidad: lo medido y lo que queda (2026-09-27)
+
+Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muchos usuarios a la vez:
+
+- **Planes: Vercel está en Hobby y Supabase en el gratuito** (comprobado en sus paneles). Vercel Hobby es para
+  uso personal y no comercial según sus condiciones. El gratuito de Supabase tiene tope de tamaño y de
+  transferencia, no trae copias de seguridad diarias y pausa los proyectos inactivos: el proyecto viejo
+  `kapital-routing` está pausado. **El usuario lo presentará a los dueños** junto con qué planes pagar.
+- **Datos**: la base ocupa 28 MB y el histórico crece ~356 KB por día (~130 MB al año). No es lo primero
+  que se queda corto.
+- **Hecho — sesiones fuera de la fila única** (ver «Sesiones» en §2).
+- **Hecho — los guardados ya no se pisan** (ver «Escritura por diferencias» en §2). Usuarios, flota, avisos
+  y actividad **siguen viviendo en la fila única**, pero cada guardado escribe solo lo suyo. Lo que queda es
+  de tamaño, no de corrección: leer la fila entera cuesta ~255 KB y crece con cada cuenta. Con cientos de
+  cuentas más conviene pasarlas a tablas; el código tiene a medio hacer un modo «normalizado»
+  (`app_users`, `fleet_units`, `notifications`), pero esas tablas no existen en la base y nunca se activó.
+- **El tiempo real no funciona en producción, y los avisos llegan por sondeo**: los portales abren un
+  WebSocket en `/ws/…`, pero en Vercel esa ruta devuelve la página (comprobado) y una función serverless
+  no mantiene conexiones abiertas. Lo que de verdad entrega los avisos es el sondeo de respaldo, cada 90 s
+  con la pestaña visible. Desde el 2026-09-27 los portales dejan de reintentar el WebSocket tras tres
+  intentos sin abrir (`WS_MAX_INTENTOS_SIN_ABRIR`), en vez de insistir cada 30 s para siempre, y el
+  apretón de manos exige sesión. **Pendiente de decidir**: si hace falta aviso inmediato (un SOS no
+  debería esperar 90 s), la vía es Supabase Realtime con canales que solo lleven «hay novedades» y el
+  dato por el API con sesión; exige publicar la clave pública del proyecto en el frontend, cosa que hoy
+  se evita a propósito.
 
 ## 3. Stack Tecnológico
 
@@ -374,7 +497,8 @@ Contexto que no cambia con cada lote:
      plantillas desde cero, que es un problema distinto y no urgente.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
    El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
-   Lo que falta es cerrar los 11 endpoints de lectura restantes y el handshake del WebSocket. El usuario
+   Los endpoints y el handshake del WebSocket están cerrados desde el 2026-09-27 (ver «Sesiones» en §2),
+   y el login y el cambio de contraseña tienen tope de intentos (ver «Tope de intentos» en §2). El usuario
    sembrado con contraseña por defecto que inyectaba `_decode_full_state` ya está retirado, y hay una prueba
    que falla si vuelve a aparecer una contraseña escrita en el módulo.
 4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.

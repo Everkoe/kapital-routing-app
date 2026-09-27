@@ -16,6 +16,12 @@ const DRIVER_POLL_BACKOFF_MAX_MS = 10 * 60_000;
 const DRIVER_REQUEST_TIMEOUT_MS = 12_000;
 const DRIVER_POLL_ACTIVITY_COOLDOWN_MS = 15_000;
 const RETRYABLE_POLL_STATUS_CODES = new Set([402, 408, 429, 500, 502, 503, 504]);
+// En Vercel el WebSocket no llega a abrirse nunca: una función serverless no
+// mantiene conexiones y `/ws/…` devuelve la página. Reintentarlo cada 30 s
+// solo gastaba peticiones, así que tras unos intentos sin abrir ni una vez se
+// deja de probar y los avisos llegan por el sondeo. Donde sí abre (en local),
+// una vez abierto se reintenta siempre, como antes.
+const WS_MAX_INTENTOS_SIN_ABRIR = 3;
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = DRIVER_REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
@@ -66,6 +72,8 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const connectWebSocketRef = useRef(null);
   const lastKnownNotifCountRef = useRef(-1); // -1 = not initialized yet
   const wsConnectedRef = useRef(false);
+  const wsAbiertoAlgunaVezRef = useRef(false);
+  const wsDescartadoRef = useRef(false);
   const pollTimerRef = useRef(null);
   const pollAbortRef = useRef(null);
   const [webSocketConnected, setWebSocketConnected] = useState(false);
@@ -99,6 +107,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
   const connectWebSocket = useCallback(() => {
     const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
     if (!userKey || typeof window === 'undefined' || typeof WebSocket === 'undefined' || document.hidden) return;
+    if (wsDescartadoRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     // Usar ws:// o wss:// según el protocolo de la página
@@ -115,6 +124,7 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
         return;
       }
       console.log('[WS] Conectado al servidor en tiempo real');
+      wsAbiertoAlgunaVezRef.current = true;
       reconnectAttemptsRef.current = 0;
       // Heartbeat ping cada 30s para mantener la conexión viva
       if (wsHeartbeatRef.current) clearInterval(wsHeartbeatRef.current);
@@ -201,6 +211,10 @@ const DriverPortal = ({ usuario, setUsuarioActual, onLogout, theme, toggleTheme 
       setWebSocketConnected(false);
       console.log('[WS] Conexión cerrada, reintentando...');
       if (wsIntentionalCloseRef.current || document.hidden) return;
+      if (!wsAbiertoAlgunaVezRef.current && reconnectAttemptsRef.current + 1 >= WS_MAX_INTENTOS_SIN_ABRIR) {
+        wsDescartadoRef.current = true;
+        return;
+      }
       // Reconexión con backoff exponencial (máx 30s)
       const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 30000);
       reconnectAttemptsRef.current += 1;
