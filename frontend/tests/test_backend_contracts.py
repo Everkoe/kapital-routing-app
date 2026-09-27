@@ -37,6 +37,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self._storage_config = backend.STORAGE_CONFIG
         self._almacen_sesiones = backend.almacen_sesiones
         backend.almacen_sesiones = backend.sesiones.SesionesEnMemoria()
+        self._almacen_intentos = backend.almacen_intentos
+        backend.almacen_intentos = backend.intentos_acceso.IntentosEnMemoria()
         backend.sesiones_en_cache.clear()
         backend._reset_db_runtime_state()
         backend._activate_storage_config(backend._build_storage_config({
@@ -84,6 +86,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.actividad_db = self._state.get("actividad_db", backend.actividad_db)
         backend._activate_storage_config(self._storage_config)
         backend.almacen_sesiones = self._almacen_sesiones
+        backend.almacen_intentos = self._almacen_intentos
         backend.sesiones_en_cache.clear()
 
     async def test_first_registered_user_becomes_active_administration(self):
@@ -3286,6 +3289,122 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.code, 1008)
         self.assertNotIn("chofer@k.com", backend.ws_manager.active)
 
+    # --- Tope de intentos de acceso ----------------------------------------------------
+
+    def _cuenta_con_clave(self, clave="chofer@k.com", contrasena="la-buena"):
+        backend.usuarios_db[clave] = {
+            "identifier": clave, "email": clave, "rol": "Conductor", "estado": "Activo",
+            "password": backend.hash_password(contrasena),
+        }
+
+    async def _entrar(self, identificador, contrasena, ip="203.0.113.7"):
+        transport = httpx.ASGITransport(app=backend.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/auth/login",
+                                     json={"identifier": identificador, "password": contrasena},
+                                     headers={"x-forwarded-for": ip})
+
+    async def test_too_many_failed_logins_lock_the_account_even_with_the_right_password(self):
+        """Agotado el tope, ni la buena entra: si no, seguir probando diría cuándo se acierta."""
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA):
+                self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
+            with patch.object(backend, "_usuario_para_sesion", new=AsyncMock()) as leer:
+                bloqueado = await self._entrar("chofer@k.com", "la-buena")
+        self.assertEqual(bloqueado.status_code, 429)
+        self.assertIn("Espera", bloqueado.json()["detail"])
+        leer.assert_not_awaited()  # ni se llega a leer la cuenta
+
+    async def test_the_limit_counts_however_the_identifier_is_typed(self):
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for n in range(backend.intentos_acceso.MAX_POR_CUENTA):
+                await self._entrar(" CHOFER@k.com " if n % 2 else "chofer@K.COM", "otra")
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 429)
+
+    async def test_a_successful_login_forgets_the_accounts_failures(self):
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA - 1):
+                await self._entrar("chofer@k.com", "otra")
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 200)
+            # Tras acertar vuelve a tener todos sus intentos.
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA - 1):
+                self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
+
+    async def test_one_origin_trying_many_accounts_is_stopped(self):
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for n in range(backend.intentos_acceso.MAX_POR_ORIGEN):
+                await self._entrar(f"cuenta{n}@k.com", "x", ip="198.51.100.9")
+            desde_ahi = await self._entrar("otra@k.com", "x", ip="198.51.100.9")
+            desde_otro = await self._entrar("otra@k.com", "x", ip="198.51.100.10")
+        self.assertEqual(desde_ahi.status_code, 429)
+        self.assertEqual(desde_otro.status_code, 401)
+
+    async def test_nothing_readable_is_stored_about_a_failed_attempt(self):
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            await self._entrar("74538840", "x", ip="198.51.100.9")
+        (clave, origen), = backend.almacen_intentos.filas
+        self.assertEqual(len(clave), 64)
+        self.assertNotIn("74538840", clave + origen)
+        self.assertNotIn("198.51.100.9", clave + origen)
+
+    async def test_the_limit_failing_never_locks_everyone_out(self):
+        self._cuenta_con_clave()
+
+        class Caida(backend.intentos_acceso.IntentosEnMemoria):
+            async def fallidos(self, clave, origen):
+                raise HTTPException(status_code=503, detail="caída")
+
+            async def anotar(self, clave, origen):
+                raise RuntimeError("caída")
+
+        backend.almacen_intentos = Caida()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena")).status_code, 200)
+            self.assertEqual((await self._entrar("chofer@k.com", "otra")).status_code, 401)
+
+    async def test_changing_the_password_shares_the_limit(self):
+        """Pide la actual sin sesión: es otra puerta para adivinarla."""
+        self._cuenta_con_clave()
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA):
+                with self.assertRaises(HTTPException):
+                    await backend.change_password(backend.ChangePasswordRequest(
+                        identifier="chofer@k.com", old_password="otra", new_password="nueva-clave"))
+            with self.assertRaises(HTTPException) as caught:
+                await backend.change_password(backend.ChangePasswordRequest(
+                    identifier="chofer@k.com", old_password="la-buena", new_password="nueva-clave"))
+        self.assertEqual(caught.exception.status_code, 429)
+        guardar.assert_not_awaited()
+
+    async def test_the_table_store_calls_the_009_functions(self):
+        llamadas = []
+
+        async def pedir(metodo, url, **kwargs):
+            llamadas.append((metodo, url.rsplit("/", 1)[-1], kwargs["json_payload"]))
+            return httpx.Response(200, json={"cuenta": 3, "origen": 5})
+
+        almacen = backend.intentos_acceso.IntentosEnTabla(
+            pedir=pedir, url_base=lambda: "https://x.invalid/rest/v1/", cabeceras=lambda: {})
+        self.assertEqual(await almacen.fallidos("a" * 64, None), {"cuenta": 3, "origen": 5})
+        await almacen.anotar("a" * 64, "b" * 64)
+        await almacen.olvidar("a" * 64)
+        self.assertEqual([(m, f) for m, f, _ in llamadas], [
+            ("POST", "intentos_fallidos"), ("POST", "anotar_intento_fallido"), ("POST", "olvidar_intentos")])
+        self.assertEqual(llamadas[0][2]["p_minutos"], backend.intentos_acceso.VENTANA_MINUTOS)
+
+        async def rota(metodo, url, **kwargs):
+            return httpx.Response(404, json={})
+
+        with self.assertRaises(backend.intentos_acceso.IntentosNoDisponibles):
+            await backend.intentos_acceso.IntentosEnTabla(
+                pedir=rota, url_base=lambda: "https://x.invalid", cabeceras=lambda: {}).fallidos("a" * 64, None)
+
 class _YaExiste(Exception):
     """Lo que en Postgres es el `PT409` de `si_ausente`."""
 
@@ -3741,6 +3860,8 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
         self._storage_config = backend.STORAGE_CONFIG
         self._almacen_sesiones = backend.almacen_sesiones
         backend.almacen_sesiones = backend.sesiones.SesionesEnMemoria()
+        self._almacen_intentos = backend.almacen_intentos
+        backend.almacen_intentos = backend.intentos_acceso.IntentosEnMemoria()
         backend.sesiones_en_cache.clear()
         self._db_loaded = backend.db_loaded
         self._state = {
@@ -3785,6 +3906,7 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
         backend.actividad_db = self._state.get("actividad_db", backend.actividad_db)
         backend._activate_storage_config(self._storage_config)
         backend.almacen_sesiones = self._almacen_sesiones
+        backend.almacen_intentos = self._almacen_intentos
         backend.sesiones_en_cache.clear()
 
     def _row_response(self, rows):

@@ -296,6 +296,18 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
   sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
   Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+- **Tope de intentos** (desde el 2026-09-27): el login y el cambio de contraseña no tenían límite, y muchas
+  cuentas de conductor conservan la provisional de la importación. Ahora 10 fallos por cuenta o 50 por
+  origen en 15 minutos dan **429**, y agotado el tope **ni la contraseña correcta entra** (si no, seguir
+  probando diría cuándo se acierta). Acertar borra los fallos de la cuenta. Un contador en memoria no
+  serviría en Vercel, así que van a `public.intentos_acceso`
+  ([supabase/009_intentos_acceso.sql](supabase/009_intentos_acceso.sql), almacén en
+  [frontend/api/intentos_acceso.py](frontend/api/intentos_acceso.py)), que solo guarda el SHA-256 del
+  identificador y el de la IP, y borra lo de más de un día. La IP sale de `x-forwarded-for`, que en
+  Vercel escribe su proxy. **Si la tabla no responde, se deja pasar** y queda en el log: el tope frena a
+  quien adivina, no puede ser la razón de que nadie entre. Contra la base real:
+  `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el permiso de leer
+  `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
 - **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
   `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
   memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que
@@ -462,8 +474,8 @@ Contexto que no cambia con cada lote:
      plantillas desde cero, que es un problema distinto y no urgente.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
    El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
-   Los endpoints y el handshake del WebSocket están cerrados desde el 2026-09-27 (ver «Sesiones» en §2);
-   lo que queda es limitar los intentos de login y de cambio de contraseña, que hoy no tienen tope. El usuario
+   Los endpoints y el handshake del WebSocket están cerrados desde el 2026-09-27 (ver «Sesiones» en §2),
+   y el login y el cambio de contraseña tienen tope de intentos (ver «Tope de intentos» en §2). El usuario
    sembrado con contraseña por defecto que inyectaba `_decode_full_state` ya está retirado, y hay una prueba
    que falla si vuelve a aparecer una contraseña escrita en el módulo.
 4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.

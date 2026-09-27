@@ -5,10 +5,11 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import escritura_estado, historico_intranet, novedades_intranet, sesiones
+    from api import escritura_estado, historico_intranet, intentos_acceso, novedades_intranet, sesiones
 except ImportError:  # ejecucion desde dentro de `api/`
     import escritura_estado
     import historico_intranet
+    import intentos_acceso
     import novedades_intranet
     import sesiones
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
@@ -1176,6 +1177,13 @@ almacen_sesiones: Any = sesiones.SesionesEnTabla(
     pedir=lambda *args, **kwargs: _db_http_request(*args, **kwargs),
     url_base=lambda: str(STORAGE_CONFIG.url),
     cabeceras=lambda prefer=None: _build_supabase_headers(STORAGE_CONFIG.key, prefer=prefer),
+)
+# Los intentos fallidos de acceso, compartidos entre instancias (ver
+# `intentos_acceso.py`). Las pruebas lo sustituyen por `IntentosEnMemoria`.
+almacen_intentos: Any = intentos_acceso.IntentosEnTabla(
+    pedir=lambda *args, **kwargs: _db_http_request(*args, **kwargs),
+    url_base=lambda: str(STORAGE_CONFIG.url),
+    cabeceras=lambda: _build_supabase_headers(STORAGE_CONFIG.key),
 )
 
 # --- WebSocket Manager ---
@@ -3864,13 +3872,63 @@ async def _usuario_para_sesion(identifier: str) -> Optional[Dict[str, Any]]:
     return get_user_by_identifier(identifier)
 
 
+def _origen_de_peticion(request: Optional[Request]) -> Optional[str]:
+    if request is None:
+        return None
+    return intentos_acceso.origen_de(
+        {k.lower(): v for k, v in request.headers.items()},
+        request.client.host if request.client else None,
+    )
+
+
+async def _exigir_intentos_disponibles(clave: str, origen: Optional[str]) -> Dict[str, int]:
+    """429 si esa cuenta o ese origen agotaron sus intentos; si no, cuántos llevan.
+
+    Si la tabla no responde se deja pasar (ver `intentos_acceso.py`): el tope
+    frena a quien adivina, no puede convertirse en la razón de que nadie entre.
+    """
+    try:
+        fallidos = await almacen_intentos.fallidos(clave, origen)
+    except Exception as exc:  # noqa: BLE001 - incluye el 503 de la base
+        print(f"[Kapital] intentos_acceso no disponible: {type(exc).__name__}")
+        return {"cuenta": 0, "origen": 0}
+    if intentos_acceso.superado(fallidos):
+        raise HTTPException(status_code=429, detail=intentos_acceso.DEMASIADOS_INTENTOS)
+    return fallidos
+
+
+async def _anotar_intento_fallido(clave: str, origen: Optional[str]) -> None:
+    try:
+        await almacen_intentos.anotar(clave, origen)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Kapital] intentos_acceso no se pudo anotar: {type(exc).__name__}")
+
+
+async def _olvidar_intentos(clave: str, fallidos: Dict[str, int]) -> None:
+    """Tras acertar, los fallos de la cuenta dejan de contar. Sin fallos, nada que borrar."""
+    if not fallidos.get("cuenta"):
+        return
+    try:
+        await almacen_intentos.olvidar(clave)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Kapital] intentos_acceso no se pudo limpiar: {type(exc).__name__}")
+
+
 @app.post("/api/auth/login")
-async def login_user(usuario: UsuarioLogin, response: Response):
+async def login_user(usuario: UsuarioLogin, response: Response, request: Request = None):
+    # Se comprueba antes de leer la cuenta: agotado el tope, ni la contraseña
+    # correcta entra, o probar seguiría sirviendo para saber cuándo se acierta.
+    clave_intento = intentos_acceso.clave_de(usuario.identifier)
+    origen = _origen_de_peticion(request)
+    fallidos = await _exigir_intentos_disponibles(clave_intento, origen)
+
     user_in_db = await _usuario_para_sesion(usuario.identifier)
 
     stored_password = user_in_db.get("password") if user_in_db else None
     if not user_in_db or not verify_password(usuario.password, stored_password):
+        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
+    await _olvidar_intentos(clave_intento, fallidos)
 
     # Transparent migration: a successful login upgrades legacy plaintext (or
     # an older PBKDF2 cost) without forcing a password reset or changing UX.
@@ -3958,15 +4016,23 @@ async def logout_user(response: Response, session_token: SessionCookie = None):
 
 
 @app.post("/api/auth/change-password")
-async def change_password(req: ChangePasswordRequest):
+async def change_password(req: ChangePasswordRequest, request: Request = None):
+    # Pide la contraseña actual sin sesión, así que es otra puerta para
+    # adivinarla: comparte el tope con el login.
+    clave_intento = intentos_acceso.clave_de(req.identifier)
+    origen = _origen_de_peticion(request)
+    fallidos = await _exigir_intentos_disponibles(clave_intento, origen)
     await reload_db()
     user_in_db = get_user_by_identifier(req.identifier)
-                
+
     if not user_in_db:
+        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-        
+
     if not verify_password(req.old_password, user_in_db.get("password")):
+        await _anotar_intento_fallido(clave_intento, origen)
         raise HTTPException(status_code=401, detail="La contraseña actual es incorrecta.")
+    await _olvidar_intentos(clave_intento, fallidos)
         
     if len(req.new_password) < 4:
         raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
