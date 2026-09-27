@@ -203,6 +203,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones
     leen ahora el histórico**, que es la única entrada real de información.
+  - **Y el plan no llega a nadie más** (comprobado el 2026-09-27): el portal del conductor
+    (`GET /api/mis-rutas/{unidad}`) y el del cliente (`GET /api/cliente/rutas/{empresa}`) siguen leyendo
+    ese tablero vacío, no `programacion`. Lo que el Programador decide se queda en su pantalla: el
+    conductor no ve sus recojos ni el cliente sus servicios. Conectarlos es lo que cierra el circuito.
   - **Cargar datos** es esa entrada: las dos pestañas descritas arriba.
   - **Operación** (la mesa) muestra la programación **realmente ejecutada** del día elegido, vía
     `GET /api/programador/programacion?fecha=`. Eso no es proponer rutas —el motor sigue congelado,
@@ -292,10 +296,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
   `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
   nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
-  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. Al desplegar este cambio,
-  **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
-  sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
-  Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. **Desplegado en producción
+  el 2026-09-27** (merge `bee7f21`, junto con la escritura por diferencias, los endpoints cerrados y el
+  tope de intentos); `migrar_sesiones.py --aplicar` no encontró sesiones abiertas en el índice viejo.
+  Comprobado en producción: sin sesión, todo lo cerrado responde 401, y un login fallido queda anotado
+  en `intentos_acceso` con su origen. Volver a una versión anterior obligaría a todo el mundo a entrar
+  de nuevo una vez, y nada más.
 - **Tope de intentos** (desde el 2026-09-27): el login y el cambio de contraseña no tenían límite, y muchas
   cuentas de conductor conservan la provisional de la importación. En 15 minutos, más de **10 intentos a
   una cuenta desde un mismo origen**, **30 a una cuenta desde donde sea** o **50 desde un origen a
