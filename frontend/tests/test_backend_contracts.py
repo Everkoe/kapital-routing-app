@@ -17,6 +17,15 @@ from fastapi import HTTPException, Response, UploadFile
 from api import index as backend
 
 
+async def actor_de(token):
+    """El actor que ve esta instancia para un token, o `None`.
+
+    Sustituye a `session_actor_from_index`, que desapareció con el índice.
+    """
+    entrada = await backend.sesion_de(token)
+    return backend._actor_de_entrada(entrada) if entrada else None
+
+
 class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     """Protect the observable MVP behavior without contacting Supabase."""
 
@@ -26,6 +35,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self._auth_enforced = backend.AUTH_ENFORCED
         self._db_loaded = backend.db_loaded
         self._storage_config = backend.STORAGE_CONFIG
+        self._almacen_sesiones = backend.almacen_sesiones
+        backend.almacen_sesiones = backend.sesiones.SesionesEnMemoria()
+        backend.sesiones_en_cache.clear()
         backend._reset_db_runtime_state()
         backend._activate_storage_config(backend._build_storage_config({
             "KAPITAL_STORAGE_BACKEND": "OLD",
@@ -50,7 +62,6 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.routes_summary = []
         backend.historial_rutas = []
         backend.board_lock = {}
-        backend.session_index.clear()
 
     def tearDown(self):
         random.setstate(self._random_state)
@@ -69,6 +80,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.historial_rutas = self._state["historial_rutas"]
         backend.board_lock = self._state["board_lock"]
         backend._activate_storage_config(self._storage_config)
+        backend.almacen_sesiones = self._almacen_sesiones
+        backend.sesiones_en_cache.clear()
 
     async def test_first_registered_user_becomes_active_administration(self):
         request = backend.UsuarioRegistro(
@@ -165,10 +178,10 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response["profileComplete"])
         self.assertTrue(backend.usuarios_db["driver-001"]["password"].startswith("pbkdf2_sha256$"))
         self.assertIn("HttpOnly", http_response.headers["set-cookie"])
-        self.assertNotIn(
-            http_response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1],
-            str(backend.usuarios_db["driver-001"]["_auth_sessions"]),
-        )
+        token = http_response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+        self.assertNotIn(token, json.dumps(backend.almacen_sesiones.filas))
+        self.assertIn(hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                      backend.almacen_sesiones.filas)
 
     async def test_route_assignment_preserves_passengers_and_capacity(self):
         backend.conductores_db["K-001"] = {
@@ -562,7 +575,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(backend.usuarios_db["driver-001"]["password"], "legacy-password")
 
-    def test_session_lookup_accepts_valid_token_and_rejects_unknown_token(self):
+    async def test_session_lookup_accepts_valid_token_and_rejects_unknown_token(self):
         user = {
             "identifier": "driver-001",
             "nombre": "Driver Baseline",
@@ -570,10 +583,10 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "estado": "Activo",
         }
         backend.usuarios_db["driver-001"] = user
-        raw_token = backend.issue_session(user)
+        raw_token = await backend.abrir_sesion(user)
 
-        self.assertIs(backend.get_user_by_session(raw_token), user)
-        self.assertIsNone(backend.get_user_by_session("unknown-token"))
+        self.assertIs(await backend.get_user_by_session(raw_token), user)
+        self.assertIsNone(await backend.get_user_by_session("unknown-token"))
 
     async def test_current_user_dependency_accepts_session_cookie(self):
         user = {
@@ -583,7 +596,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "estado": "Activo",
         }
         backend.usuarios_db["driver-001"] = user
-        raw_token = backend.issue_session(user)
+        raw_token = await backend.abrir_sesion(user)
 
         with patch.object(backend, "reload_db", new=AsyncMock()):
             current_user = await backend.get_current_user(raw_token)
@@ -607,7 +620,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "estado": "Activo",
         }
         backend.usuarios_db.update({"driver-001": owner, "driver-002": other})
-        other_token = backend.issue_session(other)
+        other_token = await backend.abrir_sesion(other)
 
         with patch.object(backend, "reload_db", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
@@ -632,7 +645,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "estado": "Activo",
         }
         backend.usuarios_db.update({"admin@example.com": admin, "driver-001": driver})
-        driver_token = backend.issue_session(driver)
+        driver_token = await backend.abrir_sesion(driver)
 
         with patch.object(backend, "reload_db", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
@@ -1512,7 +1525,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "identifier": "driver-1", "rol": "Conductor", "estado": "Activo",
         }
         backend.usuarios_db["driver-1"] = driver
-        token = backend.issue_session(driver)
+        token = await backend.abrir_sesion(driver)
         with patch.object(backend, "reload_db", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
                 await backend.update_flota(
@@ -1556,7 +1569,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.AUTH_ENFORCED = True
         driver = {"identifier": "drv", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv"] = driver
-        token = backend.issue_session(driver)
+        token = await backend.abrir_sesion(driver)
         with patch.object(backend, "reload_db", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
                 await backend.clear_routes(token)
@@ -1579,115 +1592,336 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.AUTH_ENFORCED = True
         admin = {"identifier": "adm", "rol": "Administrador", "estado": "Activo"}
         backend.usuarios_db["adm"] = admin
-        token = backend.issue_session(admin)
+        token = await backend.abrir_sesion(admin)
         with patch.object(backend, "_load_compat_users", new=AsyncMock()) as heavy:
             self.assertIs(await backend.require_admin_session(token), admin)
         heavy.assert_not_awaited()
 
-    # --- Índice de sesiones ---
+    # --- Sesiones en su propia tabla ---
+    #
+    # Antes vivían dentro de la fila única de `app_state` y abrir una obligaba a
+    # reescribirla entera. Estas pruebas cuidan lo que ganamos al sacarlas: que
+    # entrar, salir y validar no toquen la fila compartida, y que ninguna
+    # instancia autorice con lo que no está en la tabla.
 
-    async def test_issue_session_indexes_an_authorization_snapshot(self):
+    def _fila_de(self, token):
+        return backend.almacen_sesiones.filas[hashlib.sha256(token.encode("utf-8")).hexdigest()]
+
+    async def test_a_session_stores_only_the_hash_and_an_authorization_snapshot(self):
         user = {
-            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo",
+            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo", "nombre": "Uno",
             "unidad_id": "K-001", "empresa_id": None, "email": "d@e.com",
             "password": "secret",
         }
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
-        entry = backend.session_index[
-            hashlib.sha256(token.encode("utf-8")).hexdigest()
-        ]
-        self.assertEqual(entry["identifier"], "drv-1")
-        self.assertEqual(entry["unidad_id"], "K-001")
-        self.assertNotIn("password", entry)
-        self.assertNotIn("_auth_sessions", entry)
+        token = await backend.abrir_sesion(user)
+
+        fila = self._fila_de(token)
+        self.assertEqual(fila["usuario"], "drv-1")
+        self.assertEqual(fila["instantanea"]["unidad_id"], "K-001")
+        self.assertEqual(fila["instantanea"]["nombre"], "Uno", "el historial lo necesita")
+        self.assertNotIn("password", fila["instantanea"])
+        # Quien lea la tabla no puede entrar con lo que ve.
+        self.assertNotIn(token, json.dumps(backend.almacen_sesiones.filas))
+        self.assertGreater(backend.sesiones.epoch_de_iso(fila["expira_en"]),
+                           int(time.time()) + 11 * 3600)
 
     async def test_session_resolves_without_loading_the_users_blob(self):
-        """El objetivo del índice: autorizar sin los ~3,42 MB de usuarios."""
+        """Autorizar sin los usuarios cargados: es lo que hace una instancia en frío."""
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
-        backend.usuarios_db.clear()  # simula una instancia sin usuarios cargados
+        token = await backend.abrir_sesion(user)
+        backend.usuarios_db.clear()
 
-        actor = backend.session_actor_from_index(token)
+        actor = await actor_de(token)
         self.assertEqual(actor["identifier"], "drv-1")
         self.assertEqual(actor["unidad_id"], "K-001")
         self.assertEqual(actor["estado"], "Activo")
 
-    async def test_legacy_sessions_still_resolve_without_an_index(self):
-        """Rollback: una sesión emitida antes del índice sigue siendo válida."""
+    async def test_a_cold_instance_reads_the_session_from_the_table(self):
+        """Otra instancia de Vercel no tiene la sesión en su caché, y aun así vale."""
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
-        backend.session_index.clear()  # como si el índice no existiera
-        self.assertIs(backend.get_user_by_session(token), user)
+        token = await backend.abrir_sesion(user)
+        backend.sesiones_en_cache.clear()
 
-    async def test_deactivation_updates_the_indexed_snapshot(self):
-        """Una desactivación debe surtir efecto en el índice, no solo en el usuario."""
+        self.assertIs(await backend.get_user_by_session(token), user)
+        self.assertIsNone(await backend.get_user_by_session("un-token-que-nadie-emitio"))
+
+    async def test_deactivation_reaches_the_table_not_only_this_instance(self):
+        """Desactivar tiene que valer en todas las instancias, no solo en la que lo hizo."""
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
         user["estado"] = "Inactivo"
-        backend.refresh_session_index_for(user)
+        await backend.refrescar_sesiones_de(user)
         backend.usuarios_db.clear()
+        backend.sesiones_en_cache.clear()  # otra instancia
 
-        actor = backend.session_actor_from_index(token)
+        actor = await actor_de(token)
         self.assertEqual(actor["estado"], "Inactivo")
         self.assertIsNotNone(backend.account_block_reason(actor))
 
-    async def test_logout_revokes_the_indexed_entry_too(self):
+    async def test_logout_marks_the_row_and_keeps_it_as_a_record(self):
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
+        await backend.logout_user(Response(), token)
+
+        backend.sesiones_en_cache.clear()  # también en otra instancia
+        self.assertIsNone(await actor_de(token))
+        self.assertIsNone(await backend.get_user_by_session(token))
+        # No se borra: es el registro de ese acceso.
+        self.assertIsNotNone(self._fila_de(token)["revocada_en"])
+
+    async def test_an_expired_session_never_authorizes_even_when_cached(self):
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
+        backend.usuarios_db["drv-1"] = user
+        token = await backend.abrir_sesion(user)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        backend.sesiones_en_cache[digest]["expires_at"] = 1
+        self.assertIsNone(await actor_de(token))
+
+        backend.sesiones_en_cache.clear()
+        self._fila_de(token)["expira_en"] = "2020-01-01T00:00:00+00:00"
+        self.assertIsNone(await actor_de(token), "tampoco leyendo la tabla")
+
+    async def test_a_driver_without_the_identifier_field_can_log_in(self):
+        """124 de las 128 cuentas reales no llevan `identifier`: son casi todos los conductores.
+
+        Las pruebas de siempre crean usuarios con ese campo y no lo veían. La
+        sesión tiene que ser de la clave de la cuenta, que es lo que existe
+        siempre, o esos conductores no podrían entrar.
+        """
+        backend.AUTH_ENFORCED = True
+        chofer = {  # tal cual está en la base: sin `identifier`
+            "email": "de.los@kapital.com", "dni": "74538840", "nombre": "De Los",
+            "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001",
+            "password": backend.hash_password("clave-segura"),
+        }
+        backend.usuarios_db["de.los@kapital.com"] = chofer
+        respuesta = Response()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            await backend.login_user(
+                backend.UsuarioLogin(identifier="74538840", password="clave-segura"), respuesta)
+        token = respuesta.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+
+        fila = self._fila_de(token)
+        self.assertEqual(fila["usuario"], "de.los@kapital.com", "la clave, no el DNI tecleado")
+
+        # En otra instancia, sin caché ni usuarios cargados, sigue valiendo.
+        backend.sesiones_en_cache.clear()
+        backend.usuarios_db.clear()
+        actor = await backend.require_any_session(token)
+        self.assertEqual(actor["unidad_id"], "K-001")
+
+        # Y desactivarlo le alcanza igual que a una cuenta con `identifier`.
+        backend.usuarios_db["de.los@kapital.com"] = chofer
+        chofer["estado"] = "Inactivo"
+        await backend.refrescar_sesiones_de(chofer)
+        backend.sesiones_en_cache.clear()
+        backend.usuarios_db.clear()
+        with self.assertRaises(HTTPException) as caught:
+            await backend.require_any_session(token)
+        self.assertEqual(caught.exception.status_code, 403)
+
+        # Y reiniciarle la contraseña le cierra la sesión.
+        backend.usuarios_db["de.los@kapital.com"] = chofer
+        self.assertEqual(await backend.revocar_sesiones_de(chofer), 1)
+
+    async def test_logging_in_no_longer_rewrites_the_shared_row(self):
+        """Lo que motivó el cambio: dos inicios cercanos ya no pueden pisarse."""
+        backend.usuarios_db["drv-1"] = {
+            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo", "nombre": "Uno",
+            "password": backend.hash_password("clave-segura"),
+        }
+        actividad_antes = list(backend.actividad_db)
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
-            patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
         ):
-            await backend.logout_user(Response(), token)
-        self.assertIsNone(backend.session_actor_from_index(token))
-        self.assertIsNone(backend.get_user_by_session(token))
+            await backend.login_user(
+                backend.UsuarioLogin(identifier="drv-1", password="clave-segura"), Response())
 
-    async def test_expired_entries_are_pruned_and_never_authorize(self):
+        persist.assert_not_awaited()
+        self.assertEqual(len(backend.almacen_sesiones.filas), 1)
+        self.assertEqual(backend.actividad_db, actividad_antes, "el acceso ya no se apunta en la fila")
+        self.assertNotIn("last_login", backend.usuarios_db["drv-1"])
+
+    async def test_a_login_that_upgrades_the_password_still_saves_it(self):
+        """La única escritura de la fila que queda al entrar, y solo si hace falta."""
+        backend.usuarios_db["drv-1"] = {
+            "identifier": "drv-1", "rol": "Conductor", "estado": "Activo",
+            "password": "en-claro",
+        }
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            await backend.login_user(
+                backend.UsuarioLogin(identifier="drv-1", password="en-claro"), Response())
+
+        persist.assert_awaited_once()
+        self.assertTrue(backend.usuarios_db["drv-1"]["password"].startswith("pbkdf2_sha256$"))
+
+    async def test_logout_no_longer_downloads_or_rewrites_the_state(self):
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
-        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        backend.session_index[digest]["expires_at"] = 1
-        self.assertIsNone(backend.session_actor_from_index(token))
+        token = await backend.abrir_sesion(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as recarga,
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            result = await backend.logout_user(Response(), token)
 
-        other = {"identifier": "drv-2", "rol": "Conductor", "estado": "Activo"}
-        backend.usuarios_db["drv-2"] = other
-        backend.issue_session(other)  # poda al emitir
-        self.assertNotIn(digest, backend.session_index)
+        self.assertTrue(result["revoked"])
+        recarga.assert_not_awaited()
+        persist.assert_not_awaited()
 
-    async def test_index_travels_inside_the_users_payload(self):
+    async def test_auth_me_reads_one_user_not_the_whole_state(self):
+        """Se llama cada vez que alguien abre la aplicación: no puede costar el estado entero."""
+        user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo", "nombre": "Uno"}
+        backend.usuarios_db["drv-1"] = user
+        token = await backend.abrir_sesion(user)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as recarga,
+            patch.object(backend, "_usuario_para_sesion", new=AsyncMock(return_value=user)) as uno,
+        ):
+            payload = await backend.get_authenticated_user(token)
+
+        self.assertEqual(payload["identifier"], "drv-1")
+        recarga.assert_not_awaited()
+        uno.assert_awaited_once_with("drv-1")
+
+    async def test_a_database_outage_is_a_503_never_a_logout(self):
+        """Si la tabla no responde no se echa a todo el mundo ni se deja entrar a nadie."""
+        backend.AUTH_ENFORCED = True
+
+        class Caida(backend.sesiones.SesionesEnMemoria):
+            async def buscar(self, token_hash):
+                raise backend.sesiones.SesionesNoDisponibles("sesion_buscar", 503)
+
+        backend.almacen_sesiones = Caida()
+        with self.assertRaises(HTTPException) as caught:
+            await backend.require_any_session("cualquier-token")
+        self.assertEqual(caught.exception.status_code, 503)
+
+    async def test_last_login_comes_from_the_sessions_table(self):
+        admin = {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo"}
+        chofer = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo",
+                  "last_login": "2026-09-01T10:00:00"}
+        antiguo = {"identifier": "drv-2", "rol": "Conductor", "estado": "Activo",
+                   "last_login": "2026-08-01T10:00:00"}
+        backend.usuarios_db.update({"admin@e.com": admin, "drv-1": chofer, "drv-2": antiguo})
+        await backend.abrir_sesion(chofer)
+
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()), \
+                patch.object(backend, "reload_db", new=AsyncMock()):
+            listado = await backend.get_all_users("admin@e.com")
+        por_clave = {u["email"]: u for u in listado["usuarios"]}
+
+        self.assertTrue(por_clave["drv-1"]["last_login"].startswith(time.strftime("%Y-")))
+        self.assertNotEqual(por_clave["drv-1"]["last_login"], "2026-09-01T10:00:00")
+        # Quien no ha vuelto a entrar conserva la fecha que ya tenía.
+        self.assertEqual(por_clave["drv-2"]["last_login"], "2026-08-01T10:00:00")
+
+    async def test_logins_still_appear_in_the_activity_history(self):
+        admin = {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo",
+                 "nombre": "Admin", "email": "admin@e.com"}
+        backend.usuarios_db["admin@e.com"] = admin
+        await backend.abrir_sesion(admin)
+        backend.actividad_db.clear()
+
+        with patch.object(backend, "reload_actividad", new=AsyncMock()):
+            historial = await backend.listar_actividad(None, tipo="Usuario inició sesión")
+
+        self.assertEqual(historial["resumen"]["total"], 1)
+        evento = historial["eventos"][0]
+        self.assertEqual(evento["actor_name"], "Admin")
+        self.assertEqual(evento["description"], "Acceso al sistema como Administración.")
+        self.assertIn("Usuario inició sesión", historial["tipos"])
+
+    async def test_sessions_no_longer_travel_inside_the_users_payload(self):
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        backend.issue_session(user)
+        await backend.abrir_sesion(user)
         with patch.object(backend, "_persist_app_state", new=AsyncMock()) as persisted:
             await backend.persist_users_only()
         payload = persisted.await_args.args[0]
-        self.assertIn("__sessions__", payload["usuarios"])
+        self.assertNotIn("__sessions__", payload["usuarios"])
+        self.assertNotIn("_auth_sessions", payload["usuarios"]["drv-1"])
 
-    async def test_decoding_state_restores_the_index_as_a_reserved_key(self):
+    async def test_the_old_index_left_in_the_row_is_never_taken_for_a_user(self):
         decoded = backend._decode_full_state(
             {"usuarios": {"drv-1": {"identifier": "drv-1"}, "__sessions__": {"abc": {"identifier": "drv-1"}}}},
             include_defaults=False,
         )
-        self.assertEqual(decoded["sessions"], {"abc": {"identifier": "drv-1"}})
         self.assertNotIn("__sessions__", decoded["usuarios"])
+
+    def test_supabase_timestamps_are_read_whatever_their_precision(self):
+        """Supabase recorta decimales; leerlos mal daría todas las sesiones por caducadas."""
+        epoch = backend.sesiones.epoch_de_iso
+        referencia = epoch("2026-09-27T05:15:00.356720+00:00")
+        self.assertEqual(epoch("2026-09-27T05:15:00.35672+00:00"), referencia)
+        self.assertEqual(epoch("2026-09-27T05:15:00.3567201234+00:00"), referencia)
+        self.assertEqual(epoch("2026-09-27T05:15:00Z"), epoch("2026-09-27T05:15:00+00:00"))
+        self.assertEqual(epoch("2026-09-27T00:15:00-05:00"), epoch("2026-09-27T05:15:00+00:00"))
+        self.assertEqual(epoch("no es una fecha"), 0, "ilegible se da por caducada")
+        self.assertEqual(epoch(None), 0)
+
+    async def test_the_table_store_builds_safe_requests_and_fails_loudly(self):
+        """El almacén de verdad: filtros bien escapados y un error que no pase por éxito."""
+        llamadas = []
+
+        class Respuesta:
+            def __init__(self, estado, cuerpo):
+                self.status_code, self._cuerpo = estado, cuerpo
+
+            def json(self):
+                return self._cuerpo
+
+        async def pedir(metodo, url, **kwargs):
+            llamadas.append((metodo, url, kwargs))
+            if "revocada_en=is.null" in url and metodo == "PATCH":
+                return Respuesta(200, [{"token_hash": "x"}, {"token_hash": "y"}])
+            return Respuesta(200, [])
+
+        almacen = backend.sesiones.SesionesEnTabla(
+            pedir=pedir, url_base=lambda: "https://x.test/rest/v1/",
+            cabeceras=lambda prefer=None: {"prefer": prefer or ""})
+
+        self.assertEqual(await almacen.revocar_de("ana+prueba@e.com"), 2)
+        metodo, url, kwargs = llamadas[-1]
+        self.assertEqual(metodo, "PATCH")
+        self.assertIn("usuario=eq.ana%2Bprueba%40e.com", url, "un + sin escapar sería un espacio")
+        self.assertIn("revocada_en", kwargs["json_payload"])
+
+        await almacen.refrescar("drv-1", {"estado": "Inactivo"})
+        self.assertRegex(llamadas[-1][1], r"expira_en=gt\.\d{4}-\d{2}-\d{2}T[^&]*%2B00%3A00")
+
+        self.assertIsNone(await almacen.buscar("a" * 64))
+        self.assertIn("select=usuario,instantanea,expira_en,revocada_en", llamadas[-1][1])
+
+        async def caida(metodo, url, **kwargs):
+            return Respuesta(500, {"message": "boom"})
+
+        rota = backend.sesiones.SesionesEnTabla(
+            pedir=caida, url_base=lambda: "https://x.test/rest/v1",
+            cabeceras=lambda prefer=None: {})
+        with self.assertRaises(backend.sesiones.SesionesNoDisponibles):
+            await rota.buscar("a" * 64)
 
     # --- Lote 3: acceso cruzado ---
 
-    def _session_for(self, identifier, **extra):
+    async def _session_for(self, identifier, **extra):
         user = {"identifier": identifier, "rol": "Conductor", "estado": "Activo", **extra}
         backend.usuarios_db[identifier] = user
-        return user, backend.issue_session(user)
+        return user, await backend.abrir_sesion(user)
 
     async def test_driver_cannot_read_another_units_routes(self):
         backend.AUTH_ENFORCED = True
-        self._session_for("drv-1", unidad_id="K-001")
-        _, token = self._session_for("drv-1", unidad_id="K-001")
+        await self._session_for("drv-1", unidad_id="K-001")
+        _, token = await self._session_for("drv-1", unidad_id="K-001")
         backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
         with self.assertRaises(HTTPException) as caught:
             await backend.mis_rutas("K-002", token)
@@ -1695,7 +1929,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_driver_reads_their_own_unit_routes(self):
         backend.AUTH_ENFORCED = True
-        _, token = self._session_for("drv-1", unidad_id="K-001")
+        _, token = await self._session_for("drv-1", unidad_id="K-001")
         backend.rutas_estado_actual = [
             {"conductor": "K-001", "agentes": []}, {"conductor": "K-002", "agentes": []},
         ]
@@ -1705,14 +1939,14 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_may_read_any_units_routes(self):
         backend.AUTH_ENFORCED = True
-        _, token = self._session_for("adm", rol="Administrador")
+        _, token = await self._session_for("adm", rol="Administrador")
         backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
         with patch.object(backend, "reload_db", new=AsyncMock()):
             self.assertEqual(len(await backend.mis_rutas("K-002", token)), 1)
 
     async def test_client_cannot_read_another_companys_routes(self):
         backend.AUTH_ENFORCED = True
-        _, token = self._session_for("cli", rol="Cliente", empresa_id="GLOBO_AZUL")
+        _, token = await self._session_for("cli", rol="Cliente", empresa_id="GLOBO_AZUL")
         with self.assertRaises(HTTPException) as caught:
             await backend.get_rutas_cliente("OTRA_EMPRESA", token)
         self.assertEqual(caught.exception.status_code, 403)
@@ -1727,7 +1961,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "perfil_conductor": {"numDoc": "74538840"},
         }
         backend.usuarios_db["anyelo@kapital.com"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
         backend.notifications_db.append({"id": 1, "para": "anyelo@kapital.com", "fecha": "2026-01-01"})
         for alias in ("anyelo@kapital.com", "74538840", "ANYELO@KAPITAL.COM"):
             with self.subTest(alias=alias):
@@ -1742,9 +1976,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "dni": "74538840",
         }
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
         digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        backend.session_index[digest].pop("dni")  # instantánea antigua, sin dni
+        backend.sesiones_en_cache[digest].pop("dni")  # instantánea antigua, sin dni
         with (
             patch.object(backend, "_load_compat_users", new=AsyncMock()),
             patch.object(backend, "reload_notifications", new=AsyncMock()),
@@ -1753,7 +1987,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_driver_cannot_read_another_drivers_notifications(self):
         backend.AUTH_ENFORCED = True
-        _, token = self._session_for("drv-1", email="uno@e.com")
+        _, token = await self._session_for("drv-1", email="uno@e.com")
         backend.notifications_db.append({"id": 1, "para": "otro@e.com", "fecha": "2026-01-01"})
         with self.assertRaises(HTTPException) as caught:
             await backend.get_conductor_notifications("otro@e.com", token)
@@ -1774,7 +2008,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_gating_does_not_load_the_users_blob(self):
         """El objetivo del lote: gatear sin volver a los ~3,42 MB de usuarios."""
         backend.AUTH_ENFORCED = True
-        _, token = self._session_for("drv-1", unidad_id="K-001")
+        _, token = await self._session_for("drv-1", unidad_id="K-001")
         backend.rutas_estado_actual = []
         with (
             patch.object(backend, "_load_compat_users", new=AsyncMock()) as heavy,
@@ -1822,8 +2056,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_reset_hands_over_a_one_time_password_and_forces_a_change(self):
         """Es la única salida a un olvido desde que las contraseñas se cifran."""
         admin, _gerente, chofer = self._escenario_de_reinicio()
-        token_admin = backend.issue_session(admin)
-        token_chofer = backend.issue_session(chofer)
+        token_admin = await backend.abrir_sesion(admin)
+        token_chofer = await backend.abrir_sesion(chofer)
         anterior = chofer["password"]
 
         with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
@@ -1843,7 +2077,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # La sesión que tuviera abierta se cierra: si no, seguiría dentro doce
         # horas más con la contraseña que acaba de dejar de ser válida.
         self.assertEqual(respuesta["sesiones_cerradas"], 1)
-        self.assertIsNone(backend.session_actor_from_index(token_chofer))
+        self.assertIsNone(await actor_de(token_chofer))
 
         # Y la provisional no se queda escrita en el historial.
         for evento in backend.actividad_db:
@@ -1852,7 +2086,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_reset_never_becomes_a_way_to_take_over_an_admin(self):
         """Reiniciar la contraseña de quien tiene más permisos es tomar su cuenta."""
         admin, gerente, chofer = self._escenario_de_reinicio()
-        token_gerente = backend.issue_session(gerente)
+        token_gerente = await backend.abrir_sesion(gerente)
 
         with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
             # Un gerente sí puede con un conductor: es el caso cotidiano.
@@ -1886,7 +2120,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         otro = {"identifier": "otro@kapital.com", "rol": "Conductor",
                 "estado": "Activo", "password": "y"}
         backend.usuarios_db["otro@kapital.com"] = otro
-        token_chofer = backend.issue_session(chofer)
+        token_chofer = await backend.abrir_sesion(chofer)
 
         with patch.object(backend, "reload_db", new=AsyncMock()),              patch.object(backend, "persist_users_only", new=AsyncMock()):
             for etiqueta, admin_email, token in (
@@ -1922,8 +2156,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             with self.subTest(estado=estado):
                 user = {"identifier": "drv", "rol": "Conductor", "estado": estado}
                 backend.usuarios_db["drv"] = user
-                token = backend.issue_session(user)
-                self.assertIs(backend.require_request_actor(token, expected_user=user), user)
+                token = await backend.abrir_sesion(user)
+                self.assertIs(await backend.require_request_actor(token, expected_user=user), user)
 
     async def test_account_lifecycle_states_block_operations(self):
         backend.AUTH_ENFORCED = True
@@ -1931,9 +2165,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             with self.subTest(estado=estado):
                 user = {"identifier": "u", "rol": "Conductor", "estado": estado}
                 backend.usuarios_db["u"] = user
-                token = backend.issue_session(user)
+                token = await backend.abrir_sesion(user)
                 with self.assertRaises(HTTPException) as caught:
-                    backend.require_request_actor(token, expected_user=user)
+                    await backend.require_request_actor(token, expected_user=user)
                 self.assertEqual(caught.exception.status_code, 403)
 
     async def test_auth_me_returns_server_side_identity(self):
@@ -1943,7 +2177,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "perfil_conductor": {},
         }
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
         with patch.object(backend, "reload_db", new=AsyncMock()):
             payload = await backend.get_authenticated_user(token)
         self.assertEqual(payload["identifier"], "drv-1")
@@ -1963,16 +2197,16 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_logout_revokes_session_server_side(self):
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        token = backend.issue_session(user)
+        token = await backend.abrir_sesion(user)
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()) as persist_users,
         ):
             result = await backend.logout_user(Response(), token)
-        persist_users.assert_awaited_once()
+        persist_users.assert_not_awaited()
         self.assertTrue(result["revoked"])
         # La sesión revocada ya no resuelve, aunque el token siga sin caducar.
-        self.assertIsNone(backend.get_user_by_session(token))
+        self.assertIsNone(await backend.get_user_by_session(token))
 
     async def test_logout_is_idempotent_without_a_valid_session(self):
         with (
@@ -1986,15 +2220,15 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_logout_only_revokes_the_presented_session(self):
         user = {"identifier": "drv-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["drv-1"] = user
-        phone = backend.issue_session(user)
-        laptop = backend.issue_session(user)
+        phone = await backend.abrir_sesion(user)
+        laptop = await backend.abrir_sesion(user)
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()),
         ):
             await backend.logout_user(Response(), phone)
-        self.assertIsNone(backend.get_user_by_session(phone))
-        self.assertIs(backend.get_user_by_session(laptop), user)
+        self.assertIsNone(await backend.get_user_by_session(phone))
+        self.assertIs(await backend.get_user_by_session(laptop), user)
 
     async def test_fleet_delete_requires_admin_session_when_enforced(self):
         backend.AUTH_ENFORCED = True
@@ -2002,7 +2236,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.conductores_db["K-001"] = copy.deepcopy(unit)
         driver = {"identifier": "driver-1", "rol": "Conductor", "estado": "Activo"}
         backend.usuarios_db["driver-1"] = driver
-        token = backend.issue_session(driver)
+        token = await backend.abrir_sesion(driver)
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
             patch.object(backend, "_persist_app_state", new=AsyncMock()) as persist_state,
@@ -2101,7 +2335,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "estado": "Activo",
         }
         backend.usuarios_db["admin@example.com"] = admin
-        token = backend.issue_session(admin)
+        token = await backend.abrir_sesion(admin)
         backend.conductores_db.clear()
 
         reload_db = AsyncMock()
@@ -2228,7 +2462,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001",
         }
         backend.usuarios_db.update({"admin@example.com": admin, "driver-001": conductor})
-        return admin, conductor, backend.issue_session(admin), backend.issue_session(conductor)
+        return admin, conductor, await backend.abrir_sesion(admin), await backend.abrir_sesion(conductor)
 
     async def test_renaming_a_unit_keeps_its_driver_able_to_see_their_routes(self):
         """El padrón es la clave con la que se autoriza al conductor.
@@ -2261,13 +2495,13 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # no lo están —el arranque en frío de Vercel—, así que se mira la
         # entrada directamente.
         token_hash = hashlib.sha256(driver_token.encode("utf-8")).hexdigest()
-        entrada = backend.session_index[token_hash]
+        entrada = backend.sesiones_en_cache[token_hash]
         self.assertEqual(entrada.get("unidad_id"), "K-999",
                          "sin refrescar el índice, el conductor pierde su unidad en frío")
 
         # Y con los usuarios descargados, la autorización sigue resolviendo bien.
         backend.usuarios_db.clear()
-        actor = backend.session_actor_from_index(driver_token)
+        actor = await actor_de(driver_token)
         self.assertEqual(actor.get("unidad_id"), "K-999")
 
     async def test_only_administration_may_rename_a_unit(self):
@@ -2281,7 +2515,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                     "nombre": rol, "rol": rol, "estado": "Activo",
                 }
                 backend.usuarios_db[otro["identifier"]] = otro
-                token = backend.issue_session(otro)
+                token = await backend.abrir_sesion(otro)
 
                 reload_db = AsyncMock()
                 with patch.object(backend, "reload_db", new=reload_db):
@@ -2743,16 +2977,15 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         """
         conductor = {"rol": "Conductor", "email": "de.los@kapital.com", "perfil_conductor": {}}
         usuarios = {"de.los@kapital.com": conductor}
-        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True),                 mock.patch.object(backend, "refresh_session_index_for") as refresco:
+        with mock.patch.dict(backend.usuarios_db, usuarios, clear=True):
             cambio = backend.asignar_correo(conductor, "  Richard.DeLosSantos@Gmail.com ")
             claves = list(backend.usuarios_db)
 
         self.assertTrue(cambio)
         self.assertEqual(conductor["email"], "richard.delossantos@gmail.com")
         self.assertEqual(conductor["perfil_conductor"]["correo"], "richard.delossantos@gmail.com")
-        # La instantánea de autorización guarda el correo: sin refrescarla, la
-        # sesión abierta seguiría respondiendo por el correo anterior.
-        refresco.assert_called_once_with(conductor)
+        # La instantánea de la sesión la refrescan los endpoints que llaman a
+        # esta función, porque refrescarla es escribir en la tabla de sesiones.
         # Y la clave de la cuenta sigue siendo la de siempre.
         self.assertEqual(claves, ["de.los@kapital.com"])
 
@@ -2878,6 +3111,9 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._storage_config = backend.STORAGE_CONFIG
+        self._almacen_sesiones = backend.almacen_sesiones
+        backend.almacen_sesiones = backend.sesiones.SesionesEnMemoria()
+        backend.sesiones_en_cache.clear()
         self._db_loaded = backend.db_loaded
         self._state = {
             "usuarios_db": copy.deepcopy(backend.usuarios_db),
@@ -2919,6 +3155,8 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
         backend.historial_rutas = self._state["historial_rutas"]
         backend.board_lock = self._state["board_lock"]
         backend._activate_storage_config(self._storage_config)
+        backend.almacen_sesiones = self._almacen_sesiones
+        backend.sesiones_en_cache.clear()
 
     def _row_response(self, rows):
         return httpx.Response(200, json=rows)

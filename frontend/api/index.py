@@ -5,10 +5,11 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import historico_intranet, novedades_intranet
+    from api import historico_intranet, novedades_intranet, sesiones
 except ImportError:  # ejecucion desde dentro de `api/`
     import historico_intranet
     import novedades_intranet
+    import sesiones
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Body, Response, Cookie, WebSocket, WebSocketDisconnect
 from fastapi import Request
 import math
@@ -833,20 +834,27 @@ def contrasena_provisional() -> str:
                    for _ in range(LARGO_CONTRASENA_PROVISIONAL))
 
 
-def revocar_sesiones_de(user: Dict[str, Any]) -> int:
+async def revocar_sesiones_de(user: Dict[str, Any]) -> int:
     """Cierra todas las sesiones abiertas de una cuenta.
 
     Reiniciar una contraseña sin esto no echaría a nadie: quien tuviera la
     sesión abierta seguiría dentro doce horas más, que es justo lo que no se
     quiere cuando se reinicia porque una cuenta pudo quedar comprometida.
+
+    Si la tabla no responde, falla con 503 en vez de seguir: dar por reiniciada
+    una contraseña con las sesiones abiertas es peor que no reiniciarla.
     """
+    identifier = _clave_de_cuenta(user)
+    if not identifier:
+        return 0
+    try:
+        cerradas = await almacen_sesiones.revocar_de(identifier)
+    except sesiones.SesionesNoDisponibles as fallo:
+        _raise_database_unavailable(fallo.operacion, status_code=fallo.estado)
     ahora = int(datetime.now(timezone.utc).timestamp())
-    cerradas = 0
-    for sesion in user.get("_auth_sessions") or []:
-        if isinstance(sesion, dict) and not sesion.get("revoked_at"):
-            sesion["revoked_at"] = ahora
-            revoke_session_in_index(str(sesion.get("token_hash") or ""), ahora)
-            cerradas += 1
+    for entrada in sesiones_en_cache.values():
+        if entrada.get("identifier") == identifier:
+            entrada["revoked_at"] = ahora
     return cerradas
 
 
@@ -865,117 +873,202 @@ def _session_auth_snapshot(user: Dict[str, Any]) -> Dict[str, Any]:
     return {field: user.get(field) for field in _SESSION_SNAPSHOT_FIELDS}
 
 
-def _prune_session_index(now: int) -> None:
-    for token_hash in [
-        key for key, entry in session_index.items()
-        if not isinstance(entry, dict) or int(entry.get("expires_at", 0)) <= now
-    ]:
-        session_index.pop(token_hash, None)
+def _clave_de_cuenta(user: Dict[str, Any]) -> Optional[str]:
+    """La clave de la cuenta en `usuarios_db`, que es a quien pertenece la sesión.
 
-
-def refresh_session_index_for(user: Dict[str, Any]) -> None:
-    """Re-sincroniza la instantánea tras cambiar rol o estado de un usuario.
-
-    Sin esto, desactivar una cuenta no surtiría efecto en los endpoints que
-    autorizan solo con el índice hasta que caduque la sesión.
+    No vale `user["identifier"]`: 124 de las 128 cuentas —casi todos los
+    conductores— no llevan ese campo escrito. El código viejo lo usaba igual,
+    dejaba sus sesiones sin dueño en el índice y, en cada petición, acababa
+    descargando a todos los usuarios para encontrarlos. Los cargadores meten
+    siempre al usuario en memoria bajo su clave, así que se busca ahí primero.
     """
+    for clave, candidato in usuarios_db.items():
+        if candidato is user:
+            return str(clave)
     identifier = user.get("identifier")
-    if not identifier:
-        return
-    snapshot = _session_auth_snapshot(user)
-    for entry in session_index.values():
-        if isinstance(entry, dict) and entry.get("identifier") == identifier:
-            entry.update(snapshot)
+    return str(identifier) if identifier else None
 
 
-def revoke_session_in_index(token_hash: str, now: int) -> None:
-    entry = session_index.get(token_hash)
-    if isinstance(entry, dict):
-        entry["revoked_at"] = now
+def _instantanea_de(user: Dict[str, Any]) -> Dict[str, Any]:
+    """Lo que se guarda con la sesión: la autorización y el nombre.
+
+    El nombre no autoriza nada; está para que el historial de actividad pueda
+    contar quién entró sin tener que leer al usuario.
+    """
+    return {**_session_auth_snapshot(user), "nombre": user.get("nombre")}
 
 
-def session_actor_from_index(raw_token: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Actor de autorización resuelto solo con el índice.
+def _entrada_de_fila(fila: Dict[str, Any], leida: float) -> Dict[str, Any]:
+    """Una fila de `sesiones` con la forma que usa la caché."""
+    instantanea = fila.get("instantanea") if isinstance(fila.get("instantanea"), dict) else {}
+    revocada = sesiones.epoch_de_iso(fila.get("revocada_en")) if fila.get("revocada_en") else None
+    return {
+        "identifier": fila.get("usuario"),
+        **{campo: instantanea.get(campo) for campo in _SESSION_SNAPSHOT_FIELDS},
+        "nombre": instantanea.get("nombre"),
+        "expires_at": sesiones.epoch_de_iso(fila.get("expira_en")),
+        "revoked_at": revocada,
+        "_leida": leida,
+    }
 
-    Devuelve el usuario real si ya está cargado; si no, la instantánea, que
-    basta para comprobar estado, rol y propiedad del recurso.
+
+def _guardar_en_cache(token_hash: str, entrada: Dict[str, Any]) -> None:
+    sesiones_en_cache[token_hash] = entrada
+    if len(sesiones_en_cache) > MAX_SESIONES_EN_CACHE:
+        # Fuera las más antiguas: una instancia no debe crecer sin límite por
+        # mucha gente que pase por ella.
+        sobrantes = sorted(sesiones_en_cache, key=lambda h: sesiones_en_cache[h].get("_leida", 0))
+        for antigua in sobrantes[: len(sesiones_en_cache) - MAX_SESIONES_EN_CACHE]:
+            sesiones_en_cache.pop(antigua, None)
+
+
+async def sesion_de(raw_token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """La sesión de un token si sigue valiendo, o `None`.
+
+    Primero mira la caché de esta instancia y, si no está o tiene más de
+    `DB_CACHE_TTL_SECONDS`, lee **una fila** por clave primaria. Antes esto
+    bajaba el índice entero de sesiones o, en el peor caso, todos los usuarios.
+
+    Si la base no responde, lanza 503 y no 401: una caída no debe echar a todo
+    el mundo de la aplicación ni dejar entrar a nadie.
     """
     if not raw_token:
         return None
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    entry = session_index.get(token_hash)
-    if not isinstance(entry, dict) or entry.get("revoked_at"):
+    token_hash = sesiones.hash_de_token(raw_token)
+    entrada = sesiones_en_cache.get(token_hash)
+    if entrada is None or not _cache_is_fresh(entrada.get("_leida")):
+        try:
+            fila = await almacen_sesiones.buscar(token_hash)
+        except sesiones.SesionesNoDisponibles as fallo:
+            _raise_database_unavailable(fallo.operacion, status_code=fallo.estado)
+        if fila is None:
+            sesiones_en_cache.pop(token_hash, None)
+            return None
+        entrada = _entrada_de_fila(fila, time.monotonic())
+        _guardar_en_cache(token_hash, entrada)
+    if entrada.get("revoked_at"):
         return None
-    if int(entry.get("expires_at", 0)) <= int(datetime.now(timezone.utc).timestamp()):
+    if int(entrada.get("expires_at") or 0) <= int(datetime.now(timezone.utc).timestamp()):
         return None
-    identifier = entry.get("identifier")
+    if not entrada.get("identifier"):
+        return None
+    return entrada
+
+
+def _actor_de_entrada(entrada: Dict[str, Any]) -> Dict[str, Any]:
+    """El usuario real si ya está cargado; si no, la instantánea.
+
+    La instantánea basta para comprobar estado, rol y propiedad del recurso.
+    """
+    identifier = entrada.get("identifier")
+    cargado = usuarios_db.get(identifier)
+    if isinstance(cargado, dict):
+        return cargado
+    return {"identifier": identifier, **{f: entrada.get(f) for f in _SESSION_SNAPSHOT_FIELDS}}
+
+
+async def refrescar_sesiones_de(user: Dict[str, Any]) -> None:
+    """Re-sincroniza la instantánea tras cambiar rol, estado, correo o unidad.
+
+    Sin esto, desactivar una cuenta no surtiría efecto en los endpoints que
+    autorizan con la instantánea hasta que caducara la sesión. Las demás
+    instancias lo ven en cuanto caduca su caché, como mucho
+    `DB_CACHE_TTL_SECONDS`.
+    """
+    identifier = _clave_de_cuenta(user)
     if not identifier:
-        return None
-    loaded = usuarios_db.get(identifier)
-    if isinstance(loaded, dict):
-        return loaded
-    return {"identifier": identifier, **{f: entry.get(f) for f in _SESSION_SNAPSHOT_FIELDS}}
+        return
+    instantanea = _instantanea_de(user)
+    try:
+        await almacen_sesiones.refrescar(identifier, instantanea)
+    except sesiones.SesionesNoDisponibles as fallo:
+        _raise_database_unavailable(fallo.operacion, status_code=fallo.estado)
+    for entrada in sesiones_en_cache.values():
+        if entrada.get("identifier") == identifier:
+            entrada.update({campo: instantanea.get(campo) for campo in _SESSION_SNAPSHOT_FIELDS})
+            entrada["nombre"] = instantanea.get("nombre")
 
 
-def issue_session(user: Dict[str, Any]) -> str:
-    """Create an opaque session while storing only its SHA-256 digest."""
-    now = int(datetime.now(timezone.utc).timestamp())
-    expires_at = now + (SESSION_TTL_HOURS * 60 * 60)
+async def revocar_sesion(raw_token: str) -> bool:
+    """Cierra una sesión. Devuelve si había algo abierto que cerrar."""
+    token_hash = sesiones.hash_de_token(raw_token)
+    try:
+        cerrada = await almacen_sesiones.revocar(token_hash)
+    except sesiones.SesionesNoDisponibles as fallo:
+        _raise_database_unavailable(fallo.operacion, status_code=fallo.estado)
+    entrada = sesiones_en_cache.get(token_hash)
+    if entrada is not None:
+        entrada["revoked_at"] = int(datetime.now(timezone.utc).timestamp())
+    return cerrada
+
+
+async def _purgar_accesos_si_toca() -> None:
+    """Borra los accesos de hace más de `RETENCION_ACCESOS_DIAS`, de vez en cuando.
+
+    Una vez por hora y por instancia basta: la tabla crece una fila por
+    inicio de sesión. Si falla no pasa nada; se intentará en la siguiente.
+    """
+    global _ultima_purga_accesos
+    if _ultima_purga_accesos and time.monotonic() - _ultima_purga_accesos < 3600:
+        return
+    _ultima_purga_accesos = time.monotonic()
+    limite = datetime.now(timezone.utc) - timedelta(days=sesiones.RETENCION_ACCESOS_DIAS)
+    try:
+        await almacen_sesiones.purgar(limite.isoformat())
+    except (sesiones.SesionesNoDisponibles, HTTPException):
+        pass
+
+
+async def abrir_sesion(user: Dict[str, Any]) -> str:
+    """Abre una sesión opaca y guarda solo el SHA-256 del token.
+
+    Es una fila nueva en `sesiones` y nada más: iniciar sesión ya no reescribe
+    la fila de `app_state`, que era lo que hacía que dos inicios cercanos desde
+    instancias distintas se pisaran. Si la tabla no responde, el login falla
+    con 503: una sesión que no se guarda no se podría validar.
+    """
+    clave = _clave_de_cuenta(user)
+    if not clave:
+        # Una sesión sin dueño no se podría validar después. No debería pasar
+        # —el usuario viene de `usuarios_db`—, pero si pasa, mejor un error
+        # claro que una sesión que falla en la siguiente petición.
+        print("[Kapital] abrir_sesion: el usuario no tiene clave de cuenta")
+        raise HTTPException(status_code=503, detail=DATABASE_UNAVAILABLE_DETAIL)
+    ahora = int(datetime.now(timezone.utc).timestamp())
+    expira = ahora + SESSION_TTL_HOURS * 60 * 60
     raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    current_sessions = user.get("_auth_sessions", [])
-    valid_sessions = [
-        session for session in current_sessions
-        if isinstance(session, dict) and int(session.get("expires_at", 0)) > now
-    ]
-    valid_sessions = valid_sessions[-4:]
-    valid_sessions.append({
-        "token_hash": token_hash,
-        "created_at": now,
-        "expires_at": expires_at,
-    })
-    user["_auth_sessions"] = valid_sessions
-    # Escritura doble: `_auth_sessions` se conserva para que un rollback a una
-    # versión anterior siga reconociendo la sesión.
-    _prune_session_index(now)
-    session_index[token_hash] = {
-        "identifier": user.get("identifier"),
-        "created_at": now,
-        "expires_at": expires_at,
-        **_session_auth_snapshot(user),
-    }
+    token_hash = sesiones.hash_de_token(raw_token)
+    instantanea = _instantanea_de(user)
+    try:
+        await almacen_sesiones.abrir({
+            "token_hash": token_hash,
+            "usuario": clave,
+            "instantanea": instantanea,
+            "expira_en": sesiones.iso_de_epoch(expira),
+        })
+    except sesiones.SesionesNoDisponibles as fallo:
+        _raise_database_unavailable(fallo.operacion, status_code=fallo.estado)
+    _guardar_en_cache(token_hash, _entrada_de_fila({
+        "usuario": clave,
+        "instantanea": instantanea,
+        "expira_en": sesiones.iso_de_epoch(expira),
+    }, time.monotonic()))
+    await _purgar_accesos_si_toca()
     return raw_token
 
 
-def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
-    """Resolve a valid opaque session without exposing tokens in app_state."""
-    if not raw_token:
+async def get_user_by_session(raw_token: str | None) -> Optional[Dict[str, Any]]:
+    """El usuario completo de una sesión válida, si está cargado en memoria.
+
+    Quien llama tiene que haber cargado los usuarios antes: esto resuelve la
+    sesión contra la tabla, pero devuelve el objeto de `usuarios_db` porque
+    varios endpoints comparan identidad (`actor is expected_user`).
+    """
+    entrada = await sesion_de(raw_token)
+    if entrada is None:
         return None
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    now = int(datetime.now(timezone.utc).timestamp())
-    entry = session_index.get(token_hash)
-    if (
-        isinstance(entry, dict)
-        and not entry.get("revoked_at")
-        and int(entry.get("expires_at", 0)) > now
-    ):
-        indexed = usuarios_db.get(entry.get("identifier"))
-        if isinstance(indexed, dict):
-            return indexed
-    # Respaldo legado: sesiones emitidas antes de que existiera el índice.
-    for user in usuarios_db.values():
-        if not isinstance(user, dict):
-            continue
-        for session in user.get("_auth_sessions", []):
-            if (
-                not isinstance(session, dict)
-                or int(session.get("expires_at", 0)) <= now
-                or session.get("revoked_at")
-            ):
-                continue
-            if hmac.compare_digest(session.get("token_hash", ""), token_hash):
-                return user
-    return None
+    usuario = usuarios_db.get(entrada.get("identifier"))
+    return usuario if isinstance(usuario, dict) else None
 
 
 # El campo ``estado`` almacena dos ejes distintos. Solo estos valores describen
@@ -1019,7 +1112,7 @@ def _public_user_payload(
 async def get_current_user(session_token: SessionCookie = None) -> Dict[str, Any]:
     """FastAPI dependency prepared for the authorization rollout."""
     await reload_db()
-    user = get_user_by_session(session_token)
+    user = await get_user_by_session(session_token)
     if not user:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
     blocked = account_block_reason(user)
@@ -1028,7 +1121,7 @@ async def get_current_user(session_token: SessionCookie = None) -> Dict[str, Any
     return user
 
 
-def require_request_actor(
+async def require_request_actor(
     session_token: str | None,
     *,
     expected_user: Optional[Dict[str, Any]] = None,
@@ -1041,7 +1134,7 @@ def require_request_actor(
     """
     if not AUTH_ENFORCED:
         return None
-    actor = get_user_by_session(session_token)
+    actor = await get_user_by_session(session_token)
     if not actor:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
     blocked = account_block_reason(actor)
@@ -1067,10 +1160,22 @@ notifications_db: List[Dict[str, Any]] = [] # Real-time events
 # Se recorta a los últimos `MAX_ACTIVIDAD` para que la fila no vuelva a crecer
 # sin control, que es lo que ya tumbó una vez el envío de perfiles.
 actividad_db: List[Dict[str, Any]] = []
-# Índice de sesiones: sha256(token) -> instantánea de autorización. Vive como
-# pseudo-clave `usuarios.__sessions__`, igual que `__flota__`. Existe para que
-# validar una sesión no cueste los ~3,42 MB del objeto usuarios completo.
-session_index: Dict[str, Dict[str, Any]] = {}
+# Las sesiones viven en su propia tabla, `public.sesiones` (ver `sesiones.py`).
+# Esto es solo la caché de cada instancia: sha256(token) -> instantánea. Dura
+# `DB_CACHE_TTL_SECONDS`, así que una revocación hecha en otra instancia tarda
+# como mucho eso en surtir efecto aquí; en la instancia que revoca es inmediata.
+sesiones_en_cache: Dict[str, Dict[str, Any]] = {}
+MAX_SESIONES_EN_CACHE = 5000
+_ultima_purga_accesos: Optional[float] = None
+
+# El almacén se construye con funciones que se resuelven al llamar, no ahora:
+# `_db_http_request` y la configuración se definen más abajo, y las pruebas
+# las sustituyen en caliente.
+almacen_sesiones: Any = sesiones.SesionesEnTabla(
+    pedir=lambda *args, **kwargs: _db_http_request(*args, **kwargs),
+    url_base=lambda: str(STORAGE_CONFIG.url),
+    cabeceras=lambda prefer=None: _build_supabase_headers(STORAGE_CONFIG.key, prefer=prefer),
+)
 
 # --- WebSocket Manager ---
 class WebSocketManager:
@@ -1839,7 +1944,6 @@ async def _load_normalized_state_locked() -> None:
     """Load V2 resources once and atomically rebuild the legacy globals."""
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
     global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db, login_index
-    global session_index
     global _normalized_snapshot_ids, _normalized_snapshot_ready
     rows_by_resource = await _fetch_normalized_snapshot()
     decoded = _v2_decode_snapshot(rows_by_resource)
@@ -1850,7 +1954,6 @@ async def _load_normalized_state_locked() -> None:
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
     actividad_db = decoded.get("actividad", [])
-    session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     login_index = decoded.get("login_index") if isinstance(decoded.get("login_index"), dict) else {}
     conductores_db = decoded["flota"]
     _normalized_snapshot_ids = _normalized_snapshot_keys(rows_by_resource)
@@ -2279,6 +2382,8 @@ def _decode_full_state(data: Dict[str, Any], *, include_defaults: bool) -> Dict[
         "notifications": usuarios.pop("__notifications__", data.get("notifications", [])),
         "actividad": usuarios.pop("__actividad__", []),
         "flota": usuarios.pop("__flota__", data.get("flota", _MISSING)),
+        # Las sesiones ya no viven aquí (ver `sesiones.py`). Se sigue sacando
+        # la clave para que el índice que quedó en la fila no pase por usuario.
         "sessions": usuarios.pop("__sessions__", {}) or {},
         "login_index": usuarios.pop("__login__", {}) or {},
         "has_canonical_flota": has_canonical_flota,
@@ -2305,7 +2410,6 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
         return
     global db_loaded, rutas_estado_actual, usuarios_db, conductores_db
     global historial_rutas, board_lock, routes_summary, notifications_db, actividad_db, login_index
-    global session_index
     response = await _db_http_request(
         "GET",
         _app_state_url(),
@@ -2324,7 +2428,6 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     board_lock = decoded["board_lock"]
     notifications_db = decoded["notifications"]
     actividad_db = decoded.get("actividad", [])
-    session_index = decoded.get("sessions") if isinstance(decoded.get("sessions"), dict) else {}
     login_index = decoded.get("login_index") if isinstance(decoded.get("login_index"), dict) else {}
     if decoded["flota"] is not _MISSING:
         conductores_db = decoded["flota"]
@@ -2716,28 +2819,6 @@ async def _load_compat_user(identifier: str) -> Optional[Dict[str, Any]]:
         _raise_database_unavailable("load_user_projection", error=exc)
 
 
-_sessions_projection_loaded_at: Optional[float] = None
-
-
-def _sessions_projection_is_fresh() -> bool:
-    return _cache_is_fresh(_sessions_projection_loaded_at)
-
-
-async def _load_compat_sessions() -> None:
-    """Carga solo `usuarios.__sessions__`: decenas de KB en vez de ~3,42 MB."""
-    global session_index, _sessions_projection_loaded_at
-    if _full_cache_is_fresh() or _users_projection_is_fresh() or _sessions_projection_is_fresh():
-        return
-    async with _get_db_io_lock():
-        if _full_cache_is_fresh() or _users_projection_is_fresh() or _sessions_projection_is_fresh():
-            return
-        value = await _fetch_projection_value("__sessions__", "load_sessions_projection")
-        # Un índice ausente no justifica descargar el estado completo: significa
-        # que aún no hay sesiones indexadas, y la ruta cara lo resolverá.
-        session_index = value if isinstance(value, dict) else {}
-        _sessions_projection_loaded_at = time.monotonic()
-
-
 async def require_any_session(session_token: Optional[str]) -> Optional[Dict[str, Any]]:
     """Exige una sesión válida sin descargar el objeto de usuarios completo.
 
@@ -2750,19 +2831,11 @@ async def require_any_session(session_token: Optional[str]) -> Optional[Dict[str
         # Sin cookie no hay nada que resolver: se rechaza sin tocar la base.
         # Así una sonda anónima no cuesta ni una lectura.
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
-    # 1. Índice ya en memoria: una instancia caliente no hace ninguna lectura.
-    actor = session_actor_from_index(session_token)
-    if actor is None and _is_compat_storage():
-        # 2. Traer solo el índice (decenas de KB).
-        await _load_compat_sessions()
-        actor = session_actor_from_index(session_token)
-    if actor is None:
-        # 3. Sesión anterior al índice: se paga la vía cara una vez; el próximo
-        #    login la indexa.
-        await _load_compat_users()
-        actor = get_user_by_session(session_token)
-    if actor is None:
+    # Una instancia caliente no lee nada; si no, una fila por clave primaria.
+    entrada = await sesion_de(session_token)
+    if entrada is None:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    actor = _actor_de_entrada(entrada)
     blocked = account_block_reason(actor)
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
@@ -2816,8 +2889,8 @@ async def require_session_owner(
     # de modo que una denegación legítima no cuesta ninguna lectura extra.
     if usuarios_db.get(actor.get("identifier")) is not actor:
         await _load_compat_users()
-        full_actor = get_user_by_session(session_token)
-        if full_actor is not None and _owner_matches(full_actor, actor_fields, requested):
+        full_actor = usuarios_db.get(actor.get("identifier"))
+        if isinstance(full_actor, dict) and _owner_matches(full_actor, actor_fields, requested):
             return full_actor
     raise HTTPException(status_code=403, detail=f"No tienes acceso a {resource}.")
 
@@ -3110,7 +3183,6 @@ async def persist():
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
             "__actividad__": actividad_db,
-            "__sessions__": session_index,
             "__login__": _refrescar_indice_login(),
         },
         "rutas": rutas_estado_actual,
@@ -3170,7 +3242,6 @@ async def persist_users_only():
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
             "__actividad__": actividad_db,
-            "__sessions__": session_index,
             "__login__": _refrescar_indice_login(),
         },
     }
@@ -3191,7 +3262,6 @@ async def persist_routes_summary(summary: list):
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
             "__actividad__": actividad_db,
-            "__sessions__": session_index,
             "__login__": _refrescar_indice_login(),
         },
     }
@@ -3482,7 +3552,7 @@ async def add_notification(notif: dict, session_token: SessionCookie = None):
     await reload_db()
     # Lo usa el SOS del conductor, así que basta con una sesión válida: sin esto
     # cualquiera podía inyectar entradas en el panel de Administración.
-    require_request_actor(session_token)
+    await require_request_actor(session_token)
     new_id = _next_notification_id()
     new_notif = {
         "id": new_id,
@@ -3607,8 +3677,11 @@ def _cuenta_con_correo(correo: str, excepto: Dict[str, Any]) -> Optional[str]:
 def asignar_correo(user: Dict[str, Any], correo: Any) -> bool:
     """Guarda el correo real del usuario. Devuelve si cambió algo.
 
-    El correo entra también en la instantánea de sesión, así que hay que
-    refrescar el índice o la autorización seguiría viendo el anterior.
+    El correo entra también en la instantánea de sesión, pero refrescarla es
+    una escritura en la tabla de sesiones y esta función es síncrona porque la
+    usan también un script y las pruebas. Lo hacen los endpoints con
+    `refrescar_sesiones_de`. Si alguna vez no se hace, no es peligroso:
+    `require_session_owner` relee al usuario antes de denegar por propiedad.
     """
     limpio = correo_normalizado(correo)
     if not limpio:
@@ -3624,7 +3697,6 @@ def asignar_correo(user: Dict[str, Any], correo: Any) -> bool:
     if isinstance(perfil, dict):
         cambio = cambio or str(perfil.get("correo") or "").strip().lower() != limpio
         perfil["correo"] = limpio
-    refresh_session_index_for(user)
     return cambio
 
 
@@ -3651,30 +3723,41 @@ async def actualizar_correo_conductor(payload: CorreoConductorPayload, session_t
             raise HTTPException(status_code=403, detail="No puedes cambiar el correo de otra cuenta.")
 
     asignar_correo(user, payload.correo)
+    await refrescar_sesiones_de(user)
     await persist_users_only()
     return {"email": user.get("email")}
 
 
+async def _usuario_para_sesion(identifier: str) -> Optional[Dict[str, Any]]:
+    """Un usuario con lo mínimo que haga falta leer.
+
+    A login needs one user plus its password fields, not routes, fleet,
+    notifications, or the complete app_state JSONB row. `/api/auth/me`, igual.
+    """
+    if _is_normalized_storage() and not _full_cache_is_fresh():
+        return await _load_normalized_login_user(identifier)
+    if _is_compat_storage() and not _full_cache_is_fresh():
+        return await _load_compat_user(identifier)
+    await reload_db()
+    return get_user_by_identifier(identifier)
+
+
 @app.post("/api/auth/login")
 async def login_user(usuario: UsuarioLogin, response: Response):
-    if _is_normalized_storage() and not _full_cache_is_fresh():
-        user_in_db = await _load_normalized_login_user(usuario.identifier)
-    elif _is_compat_storage() and not _full_cache_is_fresh():
-        # A login needs one user plus its password/session fields, not routes,
-        # fleet, notifications, or the complete app_state JSONB row.
-        user_in_db = await _load_compat_user(usuario.identifier)
-    else:
-        await reload_db()
-        user_in_db = get_user_by_identifier(usuario.identifier)
-                
+    user_in_db = await _usuario_para_sesion(usuario.identifier)
+
     stored_password = user_in_db.get("password") if user_in_db else None
     if not user_in_db or not verify_password(usuario.password, stored_password):
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
     # Transparent migration: a successful login upgrades legacy plaintext (or
     # an older PBKDF2 cost) without forcing a password reset or changing UX.
+    # Es lo único que todavía obliga a escribir la fila de usuarios al entrar,
+    # y ya no le queda a casi nadie: todas las contraseñas se cifraron.
+    contrasena_actualizada = False
     if PASSWORD_HASH_WRITE_ENABLED and password_needs_upgrade(stored_password):
         user_in_db["password"] = hash_password(usuario.password)
+        contrasena_actualizada = True
     
     # Un estado de ciclo de vida bloqueado impide autenticarse. Los estados
     # documentales del conductor no bloquean: su portal es donde resuelve los
@@ -3683,16 +3766,15 @@ async def login_user(usuario: UsuarioLogin, response: Response):
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
 
-    # Registrar última conexión
-    user_in_db["last_login"] = datetime.now().isoformat()
-    session_token = issue_session(user_in_db)
-    registrar_actividad(
-        "Usuario inició sesión",
-        actor=user_in_db,
-        entity_type="sesion",
-        description=f"Acceso al sistema como {user_in_db.get('rol') or 'Usuario'}.",
-    )
-    await persist_users_only()
+    # Iniciar sesión es una fila en `sesiones` y nada más. Antes también se
+    # escribían aquí la última conexión y un evento de actividad, y las tres
+    # cosas obligaban a reescribir la fila compartida de `app_state`: con
+    # muchos inicios a la vez se pisaban entre sí y con cualquier otro guardado.
+    # La última conexión y el evento salen ahora de la propia tabla de sesiones
+    # (`/api/admin/users` y `/api/actividad`).
+    session_token = await abrir_sesion(user_in_db)
+    if contrasena_actualizada:
+        await persist_users_only()
 
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
@@ -3709,9 +3791,16 @@ async def login_user(usuario: UsuarioLogin, response: Response):
 
 @app.get("/api/auth/me")
 async def get_authenticated_user(session_token: SessionCookie = None):
-    """Identidad resuelta en servidor. El frontend debe preferirla a su propio estado."""
-    await reload_db()
-    user = get_user_by_session(session_token)
+    """Identidad resuelta en servidor. El frontend debe preferirla a su propio estado.
+
+    Se llama cada vez que alguien abre o recarga la aplicación. Antes costaba el
+    estado completo de `app_state`; ahora, una fila de sesión y el usuario
+    suelto por el índice de acceso.
+    """
+    entrada = await sesion_de(session_token)
+    if entrada is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    user = await _usuario_para_sesion(str(entrada.get("identifier")))
     if not user:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
     blocked = account_block_reason(user)
@@ -3729,22 +3818,9 @@ async def logout_user(response: Response, session_token: SessionCookie = None):
     """
     revoked = False
     if session_token:
-        await reload_db()
-        user = get_user_by_session(session_token)
-        if user:
-            token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
-            now = int(datetime.now(timezone.utc).timestamp())
-            for session in user.get("_auth_sessions", []):
-                if not isinstance(session, dict):
-                    continue
-                if hmac.compare_digest(session.get("token_hash", ""), token_hash):
-                    session["revoked_at"] = now
-                    revoked = True
-            if revoked:
-                revoke_session_in_index(token_hash, now)
-            if revoked:
-                # Solo se persiste si de verdad hubo algo que revocar.
-                await persist_users_only()
+        # Una fila marcada y nada más: cerrar sesión ya no descarga el estado
+        # completo ni reescribe la fila compartida.
+        revoked = await revocar_sesion(session_token)
     # Se sobreescribe con los mismos atributos del login para que el navegador
     # reemplace exactamente esa cookie.
     response.set_cookie(
@@ -3788,7 +3864,7 @@ async def get_profile(email: str, session_token: SessionCookie = None):
         user = get_user_by_identifier(email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-    require_request_actor(session_token, expected_user=user)
+    await require_request_actor(session_token, expected_user=user)
     return {
         "email": user["email"],
         "nombre": user["nombre"],
@@ -3808,7 +3884,7 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
     user = get_user_by_identifier(update_data.identifier)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-    require_request_actor(session_token, expected_user=user)
+    await require_request_actor(session_token, expected_user=user)
 
     # Roles are managed only through administrative workflows. Keeping the
     # field in the request model gives old clients an explicit error instead of
@@ -3971,6 +4047,61 @@ def _dentro_del_rango(evento: Dict[str, Any], desde: str, hasta: str) -> bool:
     return True
 
 
+# Cuántos inicios de sesión recientes entran en el historial. Es el mismo tope
+# que tenía el historial entero cuando los accesos se apuntaban en él.
+ACCESOS_EN_HISTORIAL = MAX_ACTIVIDAD
+
+
+def _evento_de_acceso(fila: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Un inicio de sesión con la misma forma que el resto de eventos.
+
+    Es exactamente lo que el login apuntaba antes en `__actividad__`, pero
+    sacado de la tabla de sesiones: así el historial sigue enseñando quién
+    entró, sin que cada acceso reescriba la fila compartida ni expulse del
+    historial —limitado a `MAX_ACTIVIDAD`— las acciones de administración.
+    """
+    usuario, creada = fila.get("usuario"), fila.get("creada_en")
+    if not usuario or not creada:
+        return None
+    return {
+        "id": f"acceso_{fila.get('id')}",
+        "action_type": "Usuario inició sesión",
+        **_actor_visible({
+            "identifier": usuario,
+            "nombre": fila.get("nombre"),
+            "email": fila.get("email"),
+            "dni": fila.get("dni"),
+        }),
+        "entity_type": "sesion",
+        "entity_id": "",
+        "entity_label": "",
+        "description": f"Acceso al sistema como {fila.get('rol') or 'Usuario'}.",
+        "status": "info",
+        "created_at": str(creada),
+    }
+
+
+async def _eventos_de_acceso() -> List[Dict[str, Any]]:
+    """Los accesos recientes como eventos. Si la tabla falla, ninguno.
+
+    Es informativo: un historial sin los inicios de sesión es mejor que un
+    historial que no carga.
+    """
+    try:
+        filas = await almacen_sesiones.inicios_recientes(ACCESOS_EN_HISTORIAL)
+    except (sesiones.SesionesNoDisponibles, HTTPException):
+        return []
+    return [e for e in (_evento_de_acceso(f) for f in filas) if e]
+
+
+async def _ultimos_accesos() -> Dict[str, str]:
+    """La última vez que entró cada cuenta. Si la tabla falla, vacío."""
+    try:
+        return await almacen_sesiones.ultimos_accesos()
+    except (sesiones.SesionesNoDisponibles, HTTPException):
+        return {}
+
+
 @app.get("/api/actividad")
 async def listar_actividad(
     session_token: SessionCookie = None,
@@ -3989,8 +4120,9 @@ async def listar_actividad(
     """
     await require_admin_session(session_token)
     await reload_actividad()
+    accesos = await _eventos_de_acceso()
 
-    eventos = [e for e in actividad_db if isinstance(e, dict)]
+    eventos = [e for e in actividad_db if isinstance(e, dict)] + accesos
     buscado = q.strip().lower()
     if buscado:
         eventos = [e for e in eventos if _coincide_texto(e, buscado)]
@@ -4018,7 +4150,7 @@ async def listar_actividad(
 
     # Los tipos y responsables que ofrecen los desplegables salen de lo que hay
     # de verdad en el historial, no de una lista escrita a mano que se desviaría.
-    todos = [e for e in actividad_db if isinstance(e, dict)]
+    todos = [e for e in actividad_db if isinstance(e, dict)] + accesos
     return {
         "eventos": eventos[inicio:inicio + limite],
         "pagina": pagina,
@@ -4043,8 +4175,13 @@ async def get_all_users(email: str, session_token: SessionCookie = None):
     req_user = get_user_by_identifier(email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
+    # La última conexión sale de la tabla de sesiones. La que queda escrita en
+    # el usuario es la de antes de que existiera, y solo se usa si la cuenta no
+    # ha vuelto a entrar desde entonces: cualquier acceso nuevo es posterior.
+    accesos = await _ultimos_accesos()
+
     # Devolver lista de usuarios sin contraseñas
     lista_usuarios = []
     for k, v in usuarios_db.items():
@@ -4054,7 +4191,7 @@ async def get_all_users(email: str, session_token: SessionCookie = None):
             "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
             "perfil_conductor": v.get("perfil_conductor", None),
-            "last_login": v.get("last_login", None),
+            "last_login": accesos.get(v.get("identifier", k)) or v.get("last_login", None),
             "avatar": v.get("avatar", None)
         })
     return {"usuarios": lista_usuarios}
@@ -4065,17 +4202,17 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
     req_user = usuarios_db.get(payload.admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
     for target in payload.target_emails:
         if target in usuarios_db:
             if payload.action == "approve":
                 usuarios_db[target]["estado"] = "Activo"
-                refresh_session_index_for(usuarios_db[target])
+                await refrescar_sesiones_de(usuarios_db[target])
                 _sembrar_unidad(str(usuarios_db[target].get("unidad_id") or "").strip(), usuarios_db[target])
             elif payload.action in ["reject", "deactivate"]:
                 usuarios_db[target]["estado"] = "Rechazado"
-                refresh_session_index_for(usuarios_db[target])
+                await refrescar_sesiones_de(usuarios_db[target])
             elif payload.action == "delete":
                 del usuarios_db[target]
                 
@@ -4109,7 +4246,7 @@ async def reset_user_password(payload: ReinicioDeContrasena, session_token: Sess
     actor = usuarios_db.get(payload.admin_email)
     if not actor or actor.get("rol") not in _ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
-    require_request_actor(session_token, expected_user=actor, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=actor, allowed_roles=_ADMIN_ROLES)
 
     destino = usuarios_db.get(payload.target)
     if not isinstance(destino, dict):
@@ -4130,7 +4267,7 @@ async def reset_user_password(payload: ReinicioDeContrasena, session_token: Sess
     destino["password"] = password_for_storage(provisional)
     destino["needs_password_change"] = True
     # Si no se cierran, quien ya estuviera dentro seguiría doce horas más.
-    cerradas = revocar_sesiones_de(destino)
+    cerradas = await revocar_sesiones_de(destino)
 
     registrar_actividad(
         "Contraseña reiniciada",
@@ -4165,13 +4302,13 @@ async def approve_user(
     req_user = usuarios_db.get(admin_email)
     if not req_user or req_user.get("rol") not in ["Admin", "Administración", "Administrador", "Gerente de Operaciones", "Programador de rutas"]:
         raise HTTPException(status_code=403, detail="Acceso denegado.")
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     usuarios_db[target_email]["estado"] = "Activo"
-    refresh_session_index_for(usuarios_db[target_email])
+    await refrescar_sesiones_de(usuarios_db[target_email])
 
     # Si es conductor y el admin proporcionó un Padrón (unidad_id)
     if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
@@ -4254,7 +4391,7 @@ async def reject_user(target_email: str, admin_email: str, session_token: Sessio
     (la cuenta aún no fue aprobada, no hay historial que preservar)."""
     await reload_db()
     req_user = _require_admin(admin_email)
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
@@ -4272,7 +4409,7 @@ async def deactivate_user(target_email: str, admin_email: str, session_token: Se
     pestaña Inactivos y puede ser reactivado o eliminado permanentemente."""
     await reload_db()
     req_user = _require_admin(admin_email)
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
@@ -4281,9 +4418,9 @@ async def deactivate_user(target_email: str, admin_email: str, session_token: Se
         raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta.")
 
     user["estado"] = "Inactivo"
-    # Sin esto, la instantánea del índice seguiría diciendo "Activo" hasta que
-    # la sesión caducara: una desactivación que no desactiva.
-    refresh_session_index_for(user)
+    # Sin esto, la instantánea de la sesión seguiría diciendo "Activo" hasta que
+    # caducara: una desactivación que no desactiva.
+    await refrescar_sesiones_de(user)
     registrar_actividad(
         "Usuario desactivado",
         actor=req_user,
@@ -4304,7 +4441,7 @@ async def reactivate_user(target_email: str, admin_email: str, session_token: Se
     datos preservados). Restaura estado='Activo'."""
     await reload_db()
     req_user = _require_admin(admin_email)
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
@@ -4321,7 +4458,7 @@ async def reactivate_user(target_email: str, admin_email: str, session_token: Se
         status="success",
     )
     user["estado"] = "Activo"
-    refresh_session_index_for(user)
+    await refrescar_sesiones_de(user)
     await persist_users_only()
     return {"message": f"Usuario {target_email} reactivado.", "estado": "Activo"}
 
@@ -4333,7 +4470,7 @@ async def permanent_delete_user(target_email: str, admin_email: str, session_tok
     la pestaña Inactivos como acción irreversible de seguridad."""
     await reload_db()
     req_user = _require_admin(admin_email)
-    require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
+    await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
 
     user = usuarios_db.get(target_email)
     if not user:
@@ -4416,7 +4553,7 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
         conductor["estado"] = "Documentos Observados"
     elif len(revisiones) > 0 and all(v["estado"] == "aprobado" for v in revisiones.values()):
         conductor["estado"] = "Activo"
-        refresh_session_index_for(conductor)
+        await refrescar_sesiones_de(conductor)
         # Aprobar el último documento es lo que da de alta al conductor, así
         # que es aquí donde su unidad tiene que recoger lo que él declaró. Sin
         # esto quedaba en la flota sin nombre de chofer ni capacidad.
@@ -4708,6 +4845,7 @@ async def driver_onboarding(payload: DriverProfilePayload):
     # `apellido@kapital.com` que traía la importación del Excel.
     if str(payload.perfilData.get("correo") or "").strip():
         asignar_correo(user, payload.perfilData["correo"])
+        await refrescar_sesiones_de(user)
     
     await persist_users_only()
     return {"message": "Perfil enviado para revisión exitosamente", "estado": "Pendiente Revisión"}
@@ -5771,7 +5909,6 @@ async def publish_routes_summary(rutas: list = Body(...), session_token: Session
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
             "__actividad__": actividad_db,
-            "__sessions__": session_index,
             "__login__": _refrescar_indice_login(),
         },
     }
@@ -6190,7 +6327,6 @@ async def _persist_and_verify_fleet(
             "__flota__": conductores_db,
             "__notifications__": notifications_db,
             "__actividad__": actividad_db,
-            "__sessions__": session_index,
             "__login__": _refrescar_indice_login(),
         },
     }, "persist_fleet")
@@ -6396,7 +6532,7 @@ async def rename_flota(placa: str, datos: FlotaRenombrar, session_token: Session
             usuarios_migrados.append(user)
             # Sin esto la sesión abierta del conductor mantiene el padrón viejo
             # y deja de autorizarle sobre su propia unidad.
-            refresh_session_index_for(user)
+            await refrescar_sesiones_de(user)
 
     rutas_estado_actual = [
         {**ruta, "conductor": destino} if ruta.get("conductor") == origen else ruta
@@ -6410,7 +6546,7 @@ async def rename_flota(placa: str, datos: FlotaRenombrar, session_token: Session
         rutas_estado_actual = previo_rutas
         for user in usuarios_migrados:
             user["unidad_id"] = origen
-            refresh_session_index_for(user)
+            await refrescar_sesiones_de(user)
         raise
 
     return {

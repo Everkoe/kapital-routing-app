@@ -16,7 +16,8 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   histórico; no asumir que es el activo. El backend accede vía REST directo con `httpx` (sin SDK `supabase-py`).
   Todo el estado vive en **una sola fila**: `public.app_state` con `id = 1`, donde `usuarios` contiene los
   usuarios reales más las pseudo-claves `__flota__`, `__notifications__`, `__routes_summary__`,
-  `__historial_rutas__`, `__lock__`, `__sessions__`, `__actividad__` y `__login__`. El egress es una
+  `__historial_rutas__`, `__lock__`, `__actividad__` y `__login__` (`__sessions__` quedó como resto: las
+  sesiones viven en su propia tabla desde el 2026-09-27, ver «Sesiones»). El egress es una
   restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas. La fila llegó a pesar
   3,95 MB; hoy son **228 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
   entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
@@ -259,10 +260,52 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **36 de 47 endpoints**; los 11 restantes —todos de lectura— están inventariados en
   `docs/handoff/2026-09-15-relevo.md` §7. Las escrituras destructivas y las integraciones de pago
   (Gemini, API de verificación) ya están cerradas.
-  **Validar una sesión NO debe costar el blob de usuarios**: existe `usuarios.__sessions__`, una pseudo-clave
-  con una instantánea de autorización por token. Al añadir un gate nuevo, usar `require_session_owner`, y si
-  se muta `rol` o `estado` de un usuario **llamar a `refresh_session_index_for()`** o la instantánea quedará
-  obsoleta y una desactivación no desactivará nada.
+  **Desde el 2026-09-27 las sesiones viven en `public.sesiones`**, una fila por sesión
+  ([supabase/007_sesiones.sql](supabase/007_sesiones.sql), almacén en
+  [frontend/api/sesiones.py](frontend/api/sesiones.py)). Antes vivían dos veces dentro de la fila única
+  —`_auth_sessions` en cada usuario y el índice `__sessions__`— y **abrir una reescribía la columna
+  `usuarios` entera**: como cada instancia de Vercel escribe su copia en memoria, dos inicios cercanos se
+  pisaban y ganaba el último, sin error. Ahora iniciar sesión es un `insert`, validar es leer una fila por
+  clave primaria (o nada, con la caché de la instancia de `DB_CACHE_TTL_SECONDS`) y cerrarla es marcar la
+  fila. **Comprobado con la huella `md5` de la fila compartida: idéntica antes y después de entrar y salir.**
+  `/api/auth/me` —se llama al abrir la aplicación— dejó de descargar el estado completo. La «última
+  conexión» de Accesos y los «Usuario inició sesión» del historial salen de la tabla (las filas se
+  conservan 90 días como registro de accesos); antes se escribían en la fila y además los accesos de los
+  conductores expulsaban del historial, limitado a 500, las acciones de administración.
+  **La sesión pertenece a la clave de la cuenta, no al campo `identifier`**: 124 de las 128 cuentas —casi
+  todos los conductores— no lo llevan escrito. Usar siempre `_clave_de_cuenta(user)`. El código viejo usaba
+  `identifier`, dejaba esas sesiones sin dueño y en cada petición de un conductor acababa descargando a
+  todos los usuarios para encontrarlo. Hay prueba con una cuenta sin `identifier`, que es lo que las pruebas
+  de siempre no cubrían porque sus usuarios de ejemplo sí lo llevan.
+  Al añadir un gate nuevo, usar `require_session_owner`, y si se muta `rol`, `estado`, correo o unidad de un
+  usuario **`await refrescar_sesiones_de(user)`**, o la instantánea quedará obsoleta y una desactivación no
+  desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
+  `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
+  nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
+  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. Al desplegar este cambio,
+  **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
+  sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
+  Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+
+## 2 bis. Escalabilidad: lo medido y lo que queda (2026-09-27)
+
+Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muchos usuarios a la vez:
+
+- **Planes: Vercel está en Hobby y Supabase en el gratuito** (comprobado en sus paneles). Vercel Hobby es para
+  uso personal y no comercial según sus condiciones. El gratuito de Supabase tiene tope de tamaño y de
+  transferencia, no trae copias de seguridad diarias y pausa los proyectos inactivos: el proyecto viejo
+  `kapital-routing` está pausado. **El usuario lo presentará a los dueños** junto con qué planes pagar.
+- **Datos**: la base ocupa 28 MB y el histórico crece ~356 KB por día (~130 MB al año). No es lo primero
+  que se queda corto.
+- **Hecho — sesiones fuera de la fila única** (ver «Sesiones» en §2).
+- **Pendiente — usuarios, flota, notificaciones y actividad siguen en la fila única**, con el mismo problema
+  de fondo: cada guardado reescribe la columna entera desde la copia en memoria de una instancia, con un
+  candado que solo vale dentro del proceso y sin comprobar versión. El código ya tiene a medio hacer un modo
+  «normalizado» (`app_users`, `fleet_units`, `notifications`), pero esas tablas no existen en la base y nunca
+  se activó.
+- **Pendiente — el tiempo real no funciona en producción**: el portal del conductor abre un WebSocket en
+  `/ws/…`, pero en Vercel esa ruta devuelve la página (comprobado) y una función serverless no mantiene
+  conexiones abiertas. Además el WebSocket no valida quién se conecta.
 
 ## 3. Stack Tecnológico
 
