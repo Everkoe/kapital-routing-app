@@ -5,8 +5,9 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import historico_intranet, novedades_intranet, sesiones
+    from api import escritura_estado, historico_intranet, novedades_intranet, sesiones
 except ImportError:  # ejecucion desde dentro de `api/`
+    import escritura_estado
     import historico_intranet
     import novedades_intranet
     import sesiones
@@ -1281,6 +1282,30 @@ _db_circuit_state_lock = threading.Lock()
 _normalized_snapshot_ids: Dict[str, set[str]] = {}
 _normalized_snapshot_ready = False
 
+# Lo último que esta instancia leyó de la fila única, como huella JSON por clave
+# de primer nivel de `usuarios` (y aparte la columna `rutas`). Es contra lo que
+# se calcula qué cambió al guardar: ver `escritura_estado.py`. Cada carga
+# registra lo que mete en memoria, y solo eso.
+_base_remota: Dict[str, str] = {}
+_base_rutas: Optional[str] = None
+
+
+def _recordar_base(valores: Mapping[str, Any]) -> None:
+    for clave, valor in valores.items():
+        _base_remota[str(clave)] = escritura_estado.huella(valor)
+
+
+def _recordar_base_de_cuentas(cuentas: Mapping[str, Any]) -> None:
+    """Las cuentas en memoria se acaban de reemplazar: su base, también.
+
+    Una cuenta que quedara en la base sin estar en memoria se tomaría por
+    borrada en el siguiente guardado. Por eso se sustituyen todas a la vez, sea
+    la lectura completa o no.
+    """
+    for clave in [c for c in _base_remota if escritura_estado.es_cuenta(c)]:
+        del _base_remota[clave]
+    _recordar_base({c: v for c, v in cuentas.items() if escritura_estado.es_cuenta(c)})
+
 
 def _cache_is_fresh(loaded_at: float) -> bool:
     return bool(loaded_at and (time.monotonic() - loaded_at) < DB_CACHE_TTL_SECONDS)
@@ -1336,6 +1361,9 @@ def _reset_db_runtime_state() -> None:
         _db_circuit_open_until = 0.0
     _normalized_snapshot_ids = {}
     _normalized_snapshot_ready = False
+    global _base_rutas
+    _base_remota.clear()
+    _base_rutas = None
 
 
 def _get_db_io_lock() -> asyncio.Lock:
@@ -1975,6 +2003,9 @@ async def _persist_app_state(payload: Dict[str, Any], operation: str) -> None:
     if _is_normalized_storage():
         await _persist_normalized_state(operation)
         return
+    if _is_compat_storage():
+        await _guardar_cambios(payload, operation)
+        return
     headers = _build_supabase_headers(
         STORAGE_CONFIG.key,
         prefer="return=minimal",
@@ -1997,6 +2028,60 @@ async def _persist_app_state(payload: Dict[str, Any], operation: str) -> None:
         )
     # Force the next read to confirm the remote snapshot. This is important
     # when another warm Vercel instance may have written between requests.
+    _invalidate_db_cache()
+
+
+async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
+    """Escribe solo lo que cambió respecto a lo leído, con `guardar_estado()`.
+
+    El PATCH de la fila entera, que es lo que sigue haciendo el modo OLD, pisaba
+    lo que otra instancia hubiera escrito desde la última lectura de esta. Ver
+    `escritura_estado.py`.
+    """
+    global _base_rutas, _login_index_loaded_at
+    # El índice de acceso se mantiene en la base alias a alias. El que esta
+    # instancia acaba de reconstruir con las cuentas que tenía cargadas puede
+    # estar a medias, así que se vuelve a leer cuando haga falta.
+    _login_index_loaded_at = None
+    try:
+        cambios, base_nueva = escritura_estado.calcular(
+            _base_remota, payload.get("usuarios") or {}, alias_de=_alias_de_login
+        )
+    except escritura_estado.BorradoSospechoso as exc:
+        _raise_database_unavailable(operation, error=exc, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    rutas = payload.get("rutas")
+    huella_rutas = escritura_estado.huella(rutas) if "rutas" in payload else None
+    # La columna de rutas va entera, y solo si se leyó: sin lectura, lo que hay
+    # en memoria es la lista vacía del arranque.
+    if huella_rutas is not None and _base_rutas is not None and huella_rutas != _base_rutas:
+        cambios["rutas"] = rutas
+    if escritura_estado.vacio(cambios):
+        return
+    async with _get_db_io_lock():
+        response = await _db_http_request(
+            "POST",
+            f"{str(STORAGE_CONFIG.url).rstrip('/')}/rpc/guardar_estado",
+            operation=operation,
+            headers=_build_supabase_headers(STORAGE_CONFIG.key),
+            timeout=30.0,
+            json_payload={"p_cambios": cambios},
+            failure_detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+        )
+        if response.status_code not in (200, 204):
+            _raise_database_unavailable(
+                operation,
+                status_code=response.status_code,
+                detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
+            )
+        # Dentro del candado: una lectura que entrara entre la escritura y esto
+        # dejaría la base con una versión y la memoria con otra.
+        for clave, huella_clave in base_nueva.items():
+            if huella_clave is None:
+                _base_remota.pop(clave, None)
+            else:
+                _base_remota[clave] = huella_clave
+        if "rutas" in cambios:
+            _base_rutas = huella_rutas
     _invalidate_db_cache()
 
 
@@ -2421,6 +2506,10 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     decoded = _decode_full_state(data, include_defaults=include_defaults)
     # Apply the snapshot only after every shape has been validated. A failed
     # provider response therefore leaves the last known in-memory state intact.
+    global _base_rutas
+    _base_remota.clear()
+    _recordar_base(data["usuarios"])
+    _base_rutas = escritura_estado.huella(data["rutas"]) if "rutas" in data else None
     usuarios_db = decoded["usuarios"]
     rutas_estado_actual = decoded["rutas"]
     routes_summary = decoded["routes_summary"]
@@ -2643,6 +2732,7 @@ async def _load_compat_users_locked() -> None:
         await _load_full_state_locked(include_defaults=False)
         return
     usuarios_db = _compat_users_from_projection(value, "load_users_projection")
+    _recordar_base_de_cuentas(usuarios_db)
     # A single-user compatibility fixture/JSON-path response is useful for a
     # targeted lookup but must not be treated as a complete users cache.
     complete_projection = not any(
@@ -2782,6 +2872,7 @@ async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
         # El usuario entra en memoria bajo su clave real para que el resto del
         # endpoint —sesión, último acceso, persistencia— funcione igual.
         usuarios_db[clave] = usuario
+        _recordar_base({clave: usuario})
         return usuario
     except HTTPException:
         raise
@@ -2906,6 +2997,8 @@ async def _load_compat_routes_locked() -> None:
         await _load_full_state_locked(include_defaults=False)
         return
     rutas_estado_actual = value
+    global _base_rutas
+    _base_rutas = escritura_estado.huella(value)
     _routes_projection_loaded_at = time.monotonic()
 
 
@@ -2937,6 +3030,7 @@ async def _load_compat_fleet_locked() -> None:
         await _load_full_state_locked(include_defaults=False)
         return
     conductores_db = value
+    _recordar_base({"__flota__": value})
     _fleet_projection_loaded_at = time.monotonic()
 
 
@@ -3011,6 +3105,7 @@ async def reload_notifications():
             if not isinstance(value, list):
                 _raise_database_unavailable("load_notifications", error=ValueError("invalid notifications shape"))
             notifications_db = value
+            _recordar_base({"__notifications__": value})
             _notifications_cache_loaded_at = time.monotonic()
     except HTTPException:
         raise
@@ -3050,6 +3145,7 @@ async def reload_routes_summary():
             if not isinstance(value, list):
                 _raise_database_unavailable("load_routes_summary", error=ValueError("invalid routes summary shape"))
             routes_summary = value
+            _recordar_base({"__routes_summary__": value})
             _routes_summary_cache_loaded_at = time.monotonic()
     except HTTPException:
         raise
@@ -3202,36 +3298,13 @@ def _refrescar_indice_login() -> Dict[str, str]:
     return login_index
 
 
-async def _ensure_compat_users_for_write() -> None:
-    """Merge a single-user projection into a complete users snapshot.
-
-    Login/profile reads may intentionally load only the users JSONB column.
-    Before a legacy ``usuarios`` PATCH, hydrate the complete app_state row so
-    a partial read can never overwrite the route board or reserved metadata
-    (``__flota__``, ``__notifications__``, locks, history, and summaries).
-    """
-    if not _is_compat_storage() or _full_cache_is_fresh():
-        return
-    pending_users = {
-        key: value
-        for key, value in usuarios_db.items()
-        if not str(key).startswith("__") and isinstance(value, dict)
-    }
-    # This is deliberately a full, shape-validated read.  The write payload
-    # carries the reserved compatibility keys, so a users-only projection
-    # would otherwise replace them with empty in-memory defaults.
-    await _load_full_state(include_defaults=False, force=True)
-    for key, value in pending_users.items():
-        existing = usuarios_db.get(key)
-        if isinstance(existing, dict):
-            existing.update(value)
-        else:
-            usuarios_db[key] = value
-
-
 async def persist_users_only():
-    """Lightweight persist — only saves the usuarios dict. Use for user management actions."""
-    await _ensure_compat_users_for_write()
+    """Lightweight persist — only saves the usuarios dict. Use for user management actions.
+
+    En V2_COMPAT ya no hidrata el estado completo antes de escribir: solo viaja
+    lo que cambió (`_guardar_cambios`), así que una copia parcial en memoria no
+    puede llevarse por delante lo que no cargó.
+    """
     payload = {
         "id": 1,
         "usuarios": {
@@ -4024,6 +4097,7 @@ async def reload_actividad() -> None:
                 return
             value = await _fetch_projection_value("__actividad__", "load_actividad")
             actividad_db = value if isinstance(value, list) else []
+            _recordar_base({"__actividad__": actividad_db})
             _actividad_cache_loaded_at = time.monotonic()
     except HTTPException:
         raise

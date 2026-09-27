@@ -54,10 +54,12 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             "routes_summary": copy.deepcopy(backend.routes_summary),
             "historial_rutas": copy.deepcopy(backend.historial_rutas),
             "board_lock": copy.deepcopy(backend.board_lock),
+            "actividad_db": copy.deepcopy(backend.actividad_db),
         }
         backend.usuarios_db.clear()
         backend.conductores_db.clear()
         backend.notifications_db.clear()
+        backend.actividad_db = []
         backend.rutas_estado_actual = []
         backend.routes_summary = []
         backend.historial_rutas = []
@@ -79,6 +81,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.routes_summary = self._state["routes_summary"]
         backend.historial_rutas = self._state["historial_rutas"]
         backend.board_lock = self._state["board_lock"]
+        backend.actividad_db = self._state.get("actividad_db", backend.actividad_db)
         backend._activate_storage_config(self._storage_config)
         backend.almacen_sesiones = self._almacen_sesiones
         backend.sesiones_en_cache.clear()
@@ -1116,7 +1119,13 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("select=usuarios%2Crutas", requested_url)
         self.assertFalse(backend.db_loaded)
 
-    async def test_compat_cold_login_hydrates_full_state_before_users_persist(self):
+    async def test_compat_cold_login_writes_only_the_upgraded_password(self):
+        """Un login que cifra la contraseña escribe ese campo y nada más.
+
+        Antes descargaba el estado completo para poder reescribir la fila
+        entera sin perder las claves reservadas. Ahora la escritura lleva solo
+        lo que cambió, así que ni hace falta la descarga ni puede pisar nada.
+        """
         user = {
             "identifier": "admin@example.com",
             "email": "admin@example.com",
@@ -1150,14 +1159,12 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         client.__aexit__.return_value = None
         # Primero se tantea el índice de acceso, que en una fila sin él
         # devuelve nulo y se abandona en diecinueve bytes. Después la lectura
-        # de usuarios, y la del estado completo que hidrata las claves
-        # reservadas antes del PATCH.
+        # de usuarios, y ya: nada de estado completo.
         client.get.side_effect = [
             httpx.Response(200, json=[{"usuarios": None}]),
             httpx.Response(200, json=[{"usuarios": {"admin@example.com": user}}]),
-            httpx.Response(200, json=[canonical_state]),
         ]
-        client.patch.return_value = httpx.Response(204)
+        client.post.return_value = httpx.Response(200, json={"aplicados": 1, "omitidos": 0})
 
         with patch.object(backend.httpx, "AsyncClient", return_value=client):
             response = await backend.login_user(
@@ -1166,26 +1173,27 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(response["identifier"], "admin@example.com")
-        self.assertEqual(client.get.await_count, 3)  # índice + usuarios + estado completo
-        patch_payload = client.patch.call_args.kwargs["json"]["usuarios"]
-        for reserved_key in (
-            "__routes_summary__",
-            "__historial_rutas__",
-            "__lock__",
-            "__flota__",
-            "__notifications__",
-        ):
-            self.assertEqual(patch_payload[reserved_key], canonical_state["usuarios"][reserved_key])
-        self.assertIn("admin@example.com", patch_payload)
+        self.assertEqual(client.get.await_count, 2)  # índice + usuarios
+        client.patch.assert_not_awaited()
+        self.assertTrue(client.post.call_args.args[0].endswith("/rpc/guardar_estado"))
+        cambios = client.post.call_args.kwargs["json"]["p_cambios"]
+        tocado = {tuple(op["ruta"][:2]) for op in cambios["poner"] if op["ruta"][0] != "__login__"}
+        self.assertEqual(tocado, {("admin@example.com", "password")})
+        self.assertTrue(cambios["poner"][0]["valor"].startswith(f"{backend.PASSWORD_SCHEME}$"))
+        self.assertNotIn("quitar", cambios)
+        self.assertNotIn("listas", cambios)
+        for reserved_key in canonical_state["usuarios"]:
+            if reserved_key.startswith("__"):
+                self.assertNotIn(reserved_key, json.dumps(cambios))
 
     async def test_a_login_through_the_index_never_drops_the_other_users(self):
-        """El atajo trae un solo usuario; la escritura debe seguir llevándolos todos.
+        """El atajo trae un solo usuario, y la escritura no puede borrar al resto.
 
         Es el riesgo real de resolver un login sin leer el bloque entero: si la
         persistencia usara lo que hay en memoria —una única cuenta—, un acceso
-        cualquiera borraría a los ciento y pico restantes. Lo que lo impide es
-        que `_ensure_compat_users_for_write` hidrata el estado completo antes
-        del PATCH, y esto lo deja clavado.
+        cualquiera borraría a los ciento y pico restantes. Antes lo impedía
+        descargar el estado completo antes del PATCH; ahora, que solo viaja lo
+        que cambió y nada de lo que no se leyó cuenta como borrado.
         """
         entrando = {
             "identifier": "09704190", "email": "chofer@kapital.com",
@@ -1221,16 +1229,15 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         client = AsyncMock()
         client.__aenter__.return_value = client
         client.__aexit__.return_value = None
-        # Índice, el usuario suelto, y el estado completo que exige la escritura.
-        # PostgREST nombra la columna con el ultimo tramo del camino, asi que
-        # una proyeccion vuelve como {"__login__": ...}, no anidada bajo
-        # "usuarios". Comprobado contra la base real.
+        # Índice y el usuario suelto. PostgREST nombra la columna con el último
+        # tramo del camino, así que una proyección vuelve como
+        # {"__login__": ...}, no anidada bajo "usuarios". Comprobado contra la
+        # base real.
         client.get.side_effect = [
             httpx.Response(200, json=[{"__login__": {"09704190": "chofer@kapital.com"}}]),
             httpx.Response(200, json=[{"chofer@kapital.com": dict(entrando)}]),
-            httpx.Response(200, json=[estado_completo]),
         ]
-        client.patch.return_value = httpx.Response(204)
+        client.post.return_value = httpx.Response(200, json={"aplicados": 1, "omitidos": 0})
 
         with patch.object(backend.httpx, "AsyncClient", return_value=client):
             respuesta = await backend.login_user(
@@ -1239,15 +1246,18 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(respuesta["identifier"], "09704190")
-        escrito = client.patch.call_args.kwargs["json"]["usuarios"]
-        cuentas = [k for k in escrito if not str(k).startswith("__")]
-        # Ninguno de los que no participan en este login puede desaparecer.
+        self.assertEqual(client.get.await_count, 2, "ni una lectura del estado completo")
+        cambios = client.post.call_args.kwargs["json"]["p_cambios"]
+        escrito = json.dumps(cambios)
+        # Ninguno de los que no participan en este login viaja, ni para borrarlo.
+        self.assertNotIn("quitar", cambios)
         for clave in otros:
-            self.assertIn(clave, escrito, f"{clave} se perdio al escribir")
-        self.assertIn("chofer@kapital.com", escrito)
-        self.assertGreaterEqual(len(cuentas), 41, "los 40 de la fila mas quien entra")
+            self.assertNotIn(clave, escrito)
+        self.assertEqual(
+            {op["ruta"][0] for op in cambios["poner"]}, {"chofer@kapital.com", "__login__"})
         # Y las claves reservadas tampoco: son el tablero, la flota y el resto.
-        self.assertEqual(escrito["__flota__"], estado_completo["usuarios"]["__flota__"])
+        self.assertNotIn("__flota__", escrito)
+        self.assertNotIn(estado_completo["usuarios"]["__flota__"]["K-001"], cambios["poner"])
 
     def test_passwords_are_hashed_on_write_by_default(self):
         """Guardar en claro tiene que ser una decisión explícita, no el defecto.
@@ -3106,6 +3116,325 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.status_code, 400)
 
 
+def _aplicar_como_postgres(fila, cambios):
+    """Lo que hace `guardar_estado()` (008), para simular la base en las pruebas.
+
+    La función de verdad se prueba contra Postgres con
+    `scripts/probar_guardar_estado.py`; esto solo necesita comportarse igual.
+    """
+    estado = copy.deepcopy(fila)
+
+    def leer(ruta):
+        nodo = estado
+        for tramo in ruta:
+            if not isinstance(nodo, dict) or tramo not in nodo:
+                return None
+            nodo = nodo[tramo]
+        return nodo
+
+    for op in cambios.get("quitar", []):
+        if "si_vale" in op and leer(op["ruta"]) != op["si_vale"]:
+            continue
+        padre = leer(op["ruta"][:-1]) if len(op["ruta"]) > 1 else estado
+        if isinstance(padre, dict):
+            padre.pop(op["ruta"][-1], None)
+    for op in cambios.get("poner", []):
+        if "si_existe" in op and not isinstance(leer(op["si_existe"]), dict):
+            continue
+        actual = leer(op["ruta"])
+        if op.get("si_libre") and actual is not None and actual != op["valor"]:
+            continue
+        nodo = estado
+        for tramo in op["ruta"][:-1]:
+            nodo = nodo.setdefault(tramo, {})
+        nodo[op["ruta"][-1]] = copy.deepcopy(op["valor"])
+    for lista in cambios.get("listas", []):
+        nuevos = {json.dumps(e["id"]): e for e in lista["poner"]}
+        quitar = {json.dumps(i) for i in lista["quitar"]}
+        actual = estado.get(lista["clave"]) or []
+        vistos = {json.dumps(e["id"]) for e in actual}
+        fusion = [nuevos.get(json.dumps(e["id"]), e) for e in actual
+                  if json.dumps(e["id"]) not in quitar]
+        fusion += [e for e in lista["poner"] if json.dumps(e["id"]) not in vistos]
+        estado[lista["clave"]] = fusion
+    return estado
+
+
+class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
+    """Guardar escribe lo que cambió, no la fila entera (ver `escritura_estado.py`).
+
+    Antes cada guardado reescribía `app_state.usuarios` desde la copia en
+    memoria de la instancia, y dos instancias se pisaban en silencio.
+    """
+
+    CUENTA = {"identifier": "ana@kapital.com", "email": "ana@kapital.com", "dni": "11111111",
+              "nombre": "Ana", "rol": "Conductor", "estado": "Pendiente Revisión",
+              "perfil_conductor": {"direccion": "Calle 1", "documentos": {"dni": "a.pdf"}}}
+
+    def setUp(self):
+        self._storage_config = backend.STORAGE_CONFIG
+        self._globales = {nombre: copy.deepcopy(getattr(backend, nombre)) for nombre in (
+            "usuarios_db", "conductores_db", "notifications_db", "actividad_db",
+            "rutas_estado_actual", "routes_summary", "historial_rutas", "board_lock", "db_loaded")}
+        backend._reset_db_runtime_state()
+        backend._activate_storage_config(backend._build_storage_config({
+            "KAPITAL_STORAGE_BACKEND": "V2_COMPAT",
+            "KAPITAL_V2_SUPABASE_URL": "https://v2-compat.invalid/rest/v1",
+            "KAPITAL_V2_SUPABASE_KEY": "compat-key",
+            "KAPITAL_V2_ENABLED": "true",
+            "KAPITAL_V2_REMOTE_ENABLED": "true",
+            "KAPITAL_V2_READ_ONLY": "false",
+        }))
+        self.fila = {
+            "ana@kapital.com": copy.deepcopy(self.CUENTA),
+            "beto@kapital.com": {"identifier": "beto@kapital.com", "email": "beto@kapital.com",
+                                 "nombre": "Beto", "rol": "Conductor", "estado": "Activo"},
+            "__flota__": {"K-001": {"capacidad": 4, "chofer": "Ana"},
+                          "K-002": {"capacidad": 6, "chofer": "Beto"}},
+            "__notifications__": [{"id": 1, "message": "uno"}, {"id": 2, "message": "dos"}],
+            "__actividad__": [{"id": "act_1", "action_type": "Alta"}],
+            "__login__": {"ana@kapital.com": "ana@kapital.com", "11111111": "ana@kapital.com",
+                          "beto@kapital.com": "beto@kapital.com"},
+            "__routes_summary__": [], "__historial_rutas__": [], "__lock__": {},
+        }
+        self.rutas = []
+        self.escrituras = []
+
+    def tearDown(self):
+        backend._reset_db_runtime_state()
+        for nombre, valor in self._globales.items():
+            setattr(backend, nombre, valor)
+        backend._activate_storage_config(self._storage_config)
+
+    async def _pedir(self, metodo, url, *, operation, headers, timeout,
+                     json_payload=None, failure_detail=None):
+        """PostgREST de mentira sobre `self.fila`, con `guardar_estado` como en Postgres."""
+        if metodo == "GET":
+            return httpx.Response(200, json=[{"usuarios": copy.deepcopy(self.fila),
+                                              "rutas": copy.deepcopy(self.rutas)}])
+        self.assertEqual(metodo, "POST")
+        self.assertTrue(url.endswith("/rpc/guardar_estado"), url)
+        self.escrituras.append(json_payload["p_cambios"])
+        self.fila = _aplicar_como_postgres(self.fila, json_payload["p_cambios"])
+        if "rutas" in json_payload["p_cambios"]:
+            self.rutas = json_payload["p_cambios"]["rutas"]
+        return httpx.Response(200, json={"aplicados": 1, "omitidos": 0})
+
+    async def _cargar(self):
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await backend.reload_db(force=True)
+
+    async def _guardar(self, persistir=None):
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await (persistir or backend.persist_users_only)()
+
+    async def test_two_instances_editing_different_accounts_keep_both_changes(self):
+        """El caso que se perdía: dos guardados cercanos desde copias distintas."""
+        await self._cargar()
+        # Otra instancia aprueba a Beto después de que esta leyera.
+        self.fila["beto@kapital.com"]["estado"] = "Rechazado"
+        # Esta, con su copia de hace un rato, cambia a Ana.
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+        await self._guardar()
+
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Activo")
+        self.assertEqual(self.fila["beto@kapital.com"]["estado"], "Rechazado",
+                         "el cambio de la otra instancia no puede deshacerse")
+
+    async def test_two_instances_editing_the_same_account_keep_both_fields(self):
+        await self._cargar()
+        self.fila["ana@kapital.com"]["perfil_conductor"]["documentos"]["licencia"] = "b.pdf"
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+        await self._guardar()
+
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Activo")
+        self.assertEqual(self.fila["ana@kapital.com"]["perfil_conductor"]["documentos"],
+                         {"dni": "a.pdf", "licencia": "b.pdf"})
+
+    async def test_only_the_changed_field_travels(self):
+        await self._cargar()
+        backend.usuarios_db["ana@kapital.com"]["perfil_conductor"]["direccion"] = "Calle 2"
+        await self._guardar()
+
+        (cambios,) = self.escrituras
+        self.assertEqual(cambios["poner"], [{
+            "ruta": ["ana@kapital.com", "perfil_conductor", "direccion"],
+            "valor": "Calle 2",
+            "si_existe": ["ana@kapital.com", "perfil_conductor"],
+        }] + [op for op in cambios["poner"] if op["ruta"][0] == "__login__"])
+        self.assertNotIn("quitar", cambios)
+
+    async def test_an_account_deleted_elsewhere_is_not_resurrected_by_a_stale_edit(self):
+        await self._cargar()
+        del self.fila["beto@kapital.com"]  # otra instancia la borró
+        backend.usuarios_db["beto@kapital.com"]["estado"] = "Inactivo"
+        await self._guardar()
+
+        self.assertNotIn("beto@kapital.com", self.fila, "ni entera ni a medias")
+
+    async def test_a_new_account_goes_whole_and_gets_its_login_aliases(self):
+        await self._cargar()
+        backend.usuarios_db["caro@kapital.com"] = {
+            "identifier": "caro@kapital.com", "email": "caro@kapital.com", "dni": "22222222",
+            "rol": "Cliente", "estado": "Activo"}
+        await self._guardar()
+
+        self.assertEqual(self.fila["caro@kapital.com"]["dni"], "22222222")
+        self.assertEqual(self.fila["__login__"]["22222222"], "caro@kapital.com")
+        self.assertEqual(self.fila["__login__"]["11111111"], "ana@kapital.com", "el resto intacto")
+
+    async def test_an_alias_already_taken_is_not_stolen(self):
+        await self._cargar()
+        backend.usuarios_db["ana2@kapital.com"] = {
+            "identifier": "ana2@kapital.com", "dni": "11111111", "rol": "Cliente"}
+        await self._guardar()
+        self.assertEqual(self.fila["__login__"]["11111111"], "ana@kapital.com")
+
+    async def test_deleting_an_account_removes_it_and_only_its_aliases(self):
+        await self._cargar()
+        del backend.usuarios_db["ana@kapital.com"]
+        await self._guardar()
+
+        self.assertNotIn("ana@kapital.com", self.fila)
+        self.assertNotIn("11111111", self.fila["__login__"])
+        self.assertEqual(self.fila["__login__"]["beto@kapital.com"], "beto@kapital.com")
+
+    async def test_a_changed_email_moves_its_alias(self):
+        await self._cargar()
+        backend.usuarios_db["ana@kapital.com"]["email"] = "ana.nueva@kapital.com"
+        backend.usuarios_db["ana@kapital.com"]["identifier"] = "ana.nueva@kapital.com"
+        await self._guardar()
+
+        self.assertEqual(self.fila["__login__"]["ana.nueva@kapital.com"], "ana@kapital.com")
+        # La clave de la cuenta sigue siendo un alias suyo, así que se queda.
+        self.assertEqual(self.fila["__login__"]["ana@kapital.com"], "ana@kapital.com")
+
+    async def test_fleet_is_written_unit_by_unit(self):
+        await self._cargar()
+        self.fila["__flota__"]["K-002"]["capacidad"] = 8  # otra instancia
+        backend.conductores_db["K-001"]["capacidad"] = 5
+        backend.conductores_db["K-003"] = {"capacidad": 2, "tipo": "Moto"}
+        await self._guardar(backend.persist)
+
+        self.assertEqual(self.fila["__flota__"]["K-001"]["capacidad"], 5)
+        self.assertEqual(self.fila["__flota__"]["K-002"]["capacidad"], 8)
+        self.assertEqual(self.fila["__flota__"]["K-003"]["tipo"], "Moto")
+
+    async def test_notifications_added_on_two_instances_both_survive(self):
+        await self._cargar()
+        self.fila["__notifications__"].append({"id": 3, "message": "de la otra instancia"})
+        backend.notifications_db.append({"id": 4, "message": "de esta"})
+        backend.notifications_db[0]["leido"] = True
+        await self._guardar()
+
+        self.assertEqual([n["id"] for n in self.fila["__notifications__"]], [1, 2, 3, 4])
+        self.assertTrue(self.fila["__notifications__"][0]["leido"])
+
+    async def test_trimming_a_list_removes_only_what_this_instance_trimmed(self):
+        await self._cargar()
+        self.fila["__notifications__"].append({"id": 3, "message": "de la otra instancia"})
+        backend.notifications_db.pop(0)
+        await self._guardar()
+        self.assertEqual([n["id"] for n in self.fila["__notifications__"]], [2, 3])
+
+    async def test_activity_logged_without_reading_the_history_is_appended_not_replaced(self):
+        """Registrar una acción sin haber cargado el historial no lo vacía."""
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await backend._load_compat_users(force=True)
+        backend.actividad_db = []  # esta instancia nunca leyó el historial
+        backend.registrar_actividad("Usuario aprobado", actor_respaldo="prueba")
+        await self._guardar()
+
+        self.assertEqual(len(self.fila["__actividad__"]), 2)
+        self.assertEqual(self.fila["__actividad__"][0]["id"], "act_1")
+
+    async def test_reserved_keys_never_read_are_never_written(self):
+        """Una instancia que solo cargó las cuentas no puede vaciar la flota."""
+        with patch.object(backend, "_db_http_request", new=self._pedir):
+            await backend._load_compat_users(force=True)
+        backend.conductores_db = {}
+        backend.notifications_db = []
+        backend.routes_summary = []
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+        await self._guardar(backend.persist)
+
+        self.assertEqual(len(self.fila["__flota__"]), 2)
+        self.assertEqual(len(self.fila["__notifications__"]), 2)
+        (cambios,) = self.escrituras
+        self.assertNotIn("rutas", cambios, "la columna de rutas no se leyó")
+
+    async def test_a_partial_users_read_cannot_become_a_mass_deletion(self):
+        """Si la memoria se queda con menos cuentas, la base se queda igual de corta."""
+        await self._cargar()
+        backend.usuarios_db = {"ana@kapital.com": backend.usuarios_db["ana@kapital.com"]}
+        backend._recordar_base_de_cuentas(backend.usuarios_db)
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+        await self._guardar()
+        self.assertIn("beto@kapital.com", self.fila)
+
+    async def test_an_implausible_mass_deletion_is_refused(self):
+        await self._cargar()
+        for n in range(30):
+            backend._recordar_base({f"fantasma{n}@kapital.com": {"rol": "Conductor"}})
+        with self.assertRaises(HTTPException) as caught:
+            await self._guardar()
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(self.escrituras, [], "nada llega a la base")
+
+    async def test_nothing_changed_means_no_write(self):
+        await self._cargar()
+        await self._guardar()
+        self.assertEqual(self.escrituras, [])
+
+    async def test_a_second_save_does_not_resend_the_first(self):
+        await self._cargar()
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+        await self._guardar()
+        # Otra instancia la vuelve a cambiar; esta guarda otra cosa.
+        self.fila["ana@kapital.com"]["estado"] = "Inactivo"
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()
+
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Inactivo")
+        self.assertEqual(self.fila["beto@kapital.com"]["nombre"], "Roberto")
+
+    async def test_a_failed_write_is_a_503_and_is_retried_next_time(self):
+        await self._cargar()
+        backend.usuarios_db["ana@kapital.com"]["estado"] = "Activo"
+
+        async def caida(*args, **kwargs):
+            return httpx.Response(500, json={"message": "secreto del proveedor"})
+
+        with patch.object(backend, "_db_http_request", new=caida):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.persist_users_only()
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail, backend.DATABASE_WRITE_UNAVAILABLE_DETAIL)
+
+        await self._guardar()
+        self.assertEqual(self.fila["ana@kapital.com"]["estado"], "Activo",
+                         "lo que no se escribió sigue pendiente")
+
+    async def test_routes_column_is_written_whole_only_after_reading_it(self):
+        await self._cargar()
+        backend.rutas_estado_actual = [{"conductor": "K-001", "agentes": []}]
+        await self._guardar(backend.persist)
+        self.assertEqual(self.rutas, [{"conductor": "K-001", "agentes": []}])
+
+    def test_the_diff_is_pure_and_symmetric(self):
+        """Sin cambios, sin nada que hacer; y lo que calcula es exactamente la diferencia."""
+        base = {"a@k.com": backend.escritura_estado.huella({"x": 1, "y": {"z": 2}})}
+        cambios, base_nueva = backend.escritura_estado.calcular(
+            base, {"a@k.com": {"x": 1, "y": {"z": 3}}}, alias_de=lambda clave, cuenta: [])
+        self.assertEqual(cambios, {"poner": [
+            {"ruta": ["a@k.com", "y", "z"], "valor": 3, "si_existe": ["a@k.com", "y"]}]})
+        self.assertEqual(base_nueva["a@k.com"], backend.escritura_estado.huella({"x": 1, "y": {"z": 3}}))
+
+        cambios, _ = backend.escritura_estado.calcular(
+            base, {"a@k.com": {"x": 1, "y": {"z": 2}}}, alias_de=lambda clave, cuenta: [])
+        self.assertTrue(backend.escritura_estado.vacio(cambios))
+
+
 class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
     """Exercise the opt-in relational adapter without contacting Supabase."""
 
@@ -3154,6 +3483,7 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
         backend.routes_summary = self._state["routes_summary"]
         backend.historial_rutas = self._state["historial_rutas"]
         backend.board_lock = self._state["board_lock"]
+        backend.actividad_db = self._state.get("actividad_db", backend.actividad_db)
         backend._activate_storage_config(self._storage_config)
         backend.almacen_sesiones = self._almacen_sesiones
         backend.sesiones_en_cache.clear()

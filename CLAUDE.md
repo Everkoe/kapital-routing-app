@@ -19,10 +19,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `__historial_rutas__`, `__lock__`, `__actividad__` y `__login__` (`__sessions__` quedó como resto: las
   sesiones viven en su propia tabla desde el 2026-09-27, ver «Sesiones»). El egress es una
   restricción de diseño de primer orden, ver `docs/handoff/` antes de añadir lecturas. La fila llegó a pesar
-  3,95 MB; hoy son **228 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
+  3,95 MB; hoy son **~255 KB** tras sacar los documentos y las fotos a Storage. Un login ya no la descarga
   entera: `__login__` mapea identificador → clave de la cuenta y lleva directo al usuario suelto
-  (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 238 KB, y lo que queda es la escritura de la sesión,
-  que obliga a bajar la columna antes de reescribirla porque PostgREST no sabe hacer escrituras parciales).
+  (credencial incorrecta ≈ 18 KB; entrada correcta ≈ 21 KB —el índice y la cuenta—, y no escribe nada salvo que cifre una
+  contraseña vieja). **Escribir tampoco reescribe la fila** (desde el 2026-09-27, ver «Escritura por
+  diferencias» más abajo).
   **PostgREST no devuelve más de mil filas por petición**, pida uno el límite que pida: hay que recorrerlas
   con `offset` y parar en la tanda corta. Pedir 5.000 y dar la lectura por terminada al recibir 1.000 dejaba
   fuera veinte mil servicios en silencio, y un historial recortado convierte un cambio real en «sin novedad».
@@ -286,6 +287,26 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
   sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
   Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+- **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
+  `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
+  memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que
+  otra instancia hubiera escrito entretanto. Ahora `_guardar_cambios` compara la memoria con la **base**
+  (`_base_remota`: la huella JSON de cada clave tal como esta instancia la leyó), calcula solo lo que cambió
+  ([frontend/api/escritura_estado.py](frontend/api/escritura_estado.py)) y lo manda a
+  `guardar_estado()` ([supabase/008_guardar_estado.sql](supabase/008_guardar_estado.sql)), que lo aplica
+  sobre la fila actual con `for update`. Cuentas y flota van **por campo** (tres niveles: cuenta → campo →
+  subcampo; flota → unidad → campo), avisos y actividad se **fusionan por `id`**, y `__login__` se mantiene
+  alias a alias sin robarle uno a otra cuenta. Medido contra la fila real: cambiar un campo son **410 bytes
+  en vez de 255 KB**, y un cambio simultáneo desde otra instancia sobrevive. Dos cosas a respetar:
+  **toda carga nueva que meta algo de la fila en memoria debe llamar a `_recordar_base`** (o
+  `_recordar_base_de_cuentas` si reemplaza las cuentas), porque una clave reservada que no está en la base
+  no se escribe nunca —en memoria sería el valor vacío del arranque— y una cuenta que está en la base pero
+  no en memoria se toma por borrada. Y hay un tope: un guardado que borraría más de 25 cuentas o unidades
+  se rechaza con 503, por ser casi seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
+  Los scripts de `scripts/` que escriben la fila entera (importar bases, cifrar contraseñas) siguen
+  pudiendo pisar lo que pase a la vez: correrlos con la aplicación tranquila. Para comprobar contra la base
+  real: `scripts/probar_guardar_estado.py` (la función, dentro de una transacción que se deshace) y
+  `scripts/probar_escritura.py` (el camino entero del backend, con una cuenta de prueba que se borra).
 
 ## 2 bis. Escalabilidad: lo medido y lo que queda (2026-09-27)
 
@@ -298,11 +319,11 @@ Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muc
 - **Datos**: la base ocupa 28 MB y el histórico crece ~356 KB por día (~130 MB al año). No es lo primero
   que se queda corto.
 - **Hecho — sesiones fuera de la fila única** (ver «Sesiones» en §2).
-- **Pendiente — usuarios, flota, notificaciones y actividad siguen en la fila única**, con el mismo problema
-  de fondo: cada guardado reescribe la columna entera desde la copia en memoria de una instancia, con un
-  candado que solo vale dentro del proceso y sin comprobar versión. El código ya tiene a medio hacer un modo
-  «normalizado» (`app_users`, `fleet_units`, `notifications`), pero esas tablas no existen en la base y nunca
-  se activó.
+- **Hecho — los guardados ya no se pisan** (ver «Escritura por diferencias» en §2). Usuarios, flota, avisos
+  y actividad **siguen viviendo en la fila única**, pero cada guardado escribe solo lo suyo. Lo que queda es
+  de tamaño, no de corrección: leer la fila entera cuesta ~255 KB y crece con cada cuenta. Con cientos de
+  cuentas más conviene pasarlas a tablas; el código tiene a medio hacer un modo «normalizado»
+  (`app_users`, `fleet_units`, `notifications`), pero esas tablas no existen en la base y nunca se activó.
 - **Pendiente — el tiempo real no funciona en producción**: el portal del conductor abre un WebSocket en
   `/ws/…`, pero en Vercel esa ruta devuelve la página (comprobado) y una función serverless no mantiene
   conexiones abiertas. Además el WebSocket no valida quién se conecta.
