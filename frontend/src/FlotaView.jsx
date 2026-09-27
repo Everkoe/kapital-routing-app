@@ -16,6 +16,12 @@ import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
 const ADMIN_WS_ROLES = new Set(['Administración', 'Administrador', 'Gerente de Operaciones']);
+// En Vercel el WebSocket no llega a abrirse nunca: una función serverless no
+// mantiene conexiones y `/ws/…` devuelve la página. Reintentarlo cada 30 s
+// solo gastaba peticiones, así que tras unos intentos sin abrir ni una vez se
+// deja de probar y los avisos llegan por el sondeo. Donde sí abre (en local),
+// una vez abierto se reintenta siempre, como antes.
+const WS_MAX_INTENTOS_SIN_ABRIR = 3;
 
 const announceAdminWebSocketState = (connected) => {
   if (typeof window === 'undefined') return;
@@ -139,6 +145,8 @@ const FlotaView = ({ usuario, initialBase }) => {
   const wsAdminRef = useRef(null);
   const wsAdminReconnectRef = useRef(null);
   const wsAdminAttemptsRef = useRef(0);
+  const wsAdminAbiertoAlgunaVezRef = useRef(false);
+  const wsAdminDescartadoRef = useRef(false);
   const wsAdminHeartbeatRef = useRef(null);
   const wsAdminIntentionalCloseRef = useRef(false);
   const connectAdminWSRef = useRef(null);
@@ -170,6 +178,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   const connectAdminWS = useCallback(() => {
     const userKey = usuarioRef.current?.identifier || usuarioRef.current?.email;
     if (!userKey || document.hidden || !ADMIN_WS_ROLES.has(usuarioRef.current?.rol) || typeof WebSocket === 'undefined') return;
+    if (wsAdminDescartadoRef.current) return;
     if (wsAdminRef.current?.readyState === WebSocket.OPEN || wsAdminRef.current?.readyState === WebSocket.CONNECTING) return;
 
     wsAdminIntentionalCloseRef.current = false;
@@ -179,6 +188,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     wsAdminRef.current = ws;
 
     ws.onopen = () => {
+      wsAdminAbiertoAlgunaVezRef.current = true;
       wsAdminAttemptsRef.current = 0;
       if (wsAdminHeartbeatRef.current) clearInterval(wsAdminHeartbeatRef.current);
       wsAdminHeartbeatRef.current = setInterval(() => {
@@ -207,6 +217,10 @@ const FlotaView = ({ usuario, initialBase }) => {
       }
       announceAdminWebSocketState(false);
       if (wsAdminIntentionalCloseRef.current || document.hidden) return;
+      if (!wsAdminAbiertoAlgunaVezRef.current && wsAdminAttemptsRef.current + 1 >= WS_MAX_INTENTOS_SIN_ABRIR) {
+        wsAdminDescartadoRef.current = true;
+        return;
+      }
       const delay = Math.min(1000 * 2 ** wsAdminAttemptsRef.current, 30000);
       wsAdminAttemptsRef.current += 1;
       wsAdminReconnectRef.current = setTimeout(() => {

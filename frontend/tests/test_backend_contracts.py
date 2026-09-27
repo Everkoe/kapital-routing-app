@@ -265,6 +265,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
             patch.object(backend.ws_manager, "broadcast_to_role", new=AsyncMock()) as broadcast,
         ):
             response = await backend.resubmit_driver_docs(
@@ -293,8 +295,15 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             },
         }
 
+        avisos_al_guardar = []
+
+        async def guardar():
+            avisos_al_guardar.append(len(backend.notifications_db))
+
         with (
-            patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock(side_effect=guardar)),
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
             patch.object(backend.ws_manager, "broadcast_to_role", new=AsyncMock()) as broadcast,
         ):
             await backend.resubmit_driver_docs(
@@ -308,6 +317,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(backend.notifications_db), 1)
         self.assertEqual(backend.notifications_db[0]["para"], "admin")
         self.assertEqual(broadcast.await_count, 3)
+        # El aviso tiene que ir en el mismo guardado; antes se añadía después y
+        # solo llegaba a la base si otra acción guardaba más tarde.
+        self.assertEqual(avisos_al_guardar, [1])
 
     async def test_client_routes_only_include_matching_company_passengers(self):
         backend.rutas_estado_actual = [{
@@ -3116,6 +3128,162 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.status_code, 400)
 
 
+    # --- Endpoints que no pedían sesión --------------------------------------------
+
+    async def _llamar(self, metodo, ruta, token=None, **kwargs):
+        cookies = {backend.SESSION_COOKIE_NAME: token} if token else None
+        transport = httpx.ASGITransport(app=backend.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as client:
+            return await client.request(metodo, ruta, **kwargs)
+
+    async def _sesion(self, clave, **campos):
+        usuario = {"identifier": clave, "email": clave, "nombre": clave, "estado": "Activo", **campos}
+        backend.usuarios_db[clave] = usuario
+        return usuario, await backend.abrir_sesion(usuario)
+
+    async def test_endpoints_that_never_asked_for_a_session_now_do(self):
+        """Con la exigencia activa, ninguno responde a quien no ha entrado.
+
+        Estos once se quedaron fuera cuando se activó la sesión, y no eran
+        todos de lectura: tres escribían y uno subía fotos a un bucket público.
+        """
+        backend.AUTH_ENFORCED = True
+        abiertos = [
+            ("GET", "/api/notifications", {}),
+            ("POST", "/api/conductor/notifications/mark-read", {"json": {"notif_id": 1}}),
+            ("POST", "/api/conductor/resubmit-docs", {"json": {"email": "x@k.com", "docs": {}}}),
+            ("POST", "/api/conductor/request-update",
+             {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
+            ("GET", "/api/flota/export", {}),
+            ("GET", "/api/routes", {}),
+            ("GET", "/api/routes/summary", {}),
+            ("GET", "/api/reportes", {}),
+            ("POST", "/api/actualizar-pasajero",
+             {"json": {"conductor_id": "K-001", "horario": "08:00", "agente_id": "A", "estado": "Recogido"}}),
+            ("GET", "/api/conductor/info/K-001", {}),
+        ]
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as recarga,
+            patch.object(backend, "persist", new=AsyncMock()) as guardar,
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar_usuarios,
+        ):
+            for metodo, ruta, extra in abiertos:
+                respuesta = await self._llamar(metodo, ruta, **extra)
+                self.assertEqual(respuesta.status_code, 401, f"{metodo} {ruta}")
+        recarga.assert_not_awaited()
+        guardar.assert_not_awaited()
+        guardar_usuarios.assert_not_awaited()
+
+    async def test_the_admin_notifications_are_for_administration_only(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("chofer@k.com", rol="Conductor")
+        respuesta = await self._llamar("GET", "/api/notifications", token)
+        self.assertEqual(respuesta.status_code, 403)
+
+    async def test_a_driver_cannot_touch_another_drivers_documents(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("chofer@k.com", rol="Conductor")
+        await self._sesion("otro@k.com", rol="Conductor",
+                           perfil_conductor={"revision_docs": {}})
+        with patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar:
+            respuesta = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token,
+                json={"email": "otro@k.com", "docs": {"dniScaneado": "mio.pdf"}})
+        self.assertEqual(respuesta.status_code, 403)
+        guardar.assert_not_awaited()
+
+    async def test_a_driver_cannot_approve_their_own_review_through_resubmit(self):
+        """`revision_docs` no es un documento: mandarlo como tal era aprobarse solo."""
+        backend.AUTH_ENFORCED = True
+        chofer, token = await self._sesion(
+            "chofer@k.com", rol="Conductor",
+            perfil_conductor={"revision_docs": {"dniScaneado": {"estado": "rechazado"}}})
+        with patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar:
+            respuesta = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token,
+                json={"email": "chofer@k.com",
+                      "docs": {"revision_docs": {"dniScaneado": {"estado": "aprobado"}}}})
+        self.assertEqual(respuesta.status_code, 400)
+        guardar.assert_not_awaited()
+        self.assertEqual(chofer["perfil_conductor"]["revision_docs"]["dniScaneado"]["estado"], "rechazado")
+
+    async def test_document_fields_accept_both_faces(self):
+        self.assertTrue(backend._es_campo_documento("dniScaneado"))
+        self.assertTrue(backend._es_campo_documento("dniScaneadoReverso"))
+        self.assertTrue(backend._es_campo_documento("licenciaConducirCompleto"))
+        for ajeno in ("revision_docs", "estado", "solicitudes_cambio", "Reverso", ""):
+            self.assertFalse(backend._es_campo_documento(ajeno), ajeno)
+
+    def test_the_backend_document_list_matches_the_frontend_one(self):
+        """Si se añade un documento en la interfaz y no aquí, no se podría resubir."""
+        fuente = (Path(__file__).resolve().parents[1] / "src" / "constants" / "documentosConductor.js")
+        texto = fuente.read_text(encoding="utf-8")
+        bloque = texto.split("export const DOCUMENTOS_CONDUCTOR = [", 1)[1].split("];", 1)[0]
+        import re
+        claves = set(re.findall(r"key:\s*'([^']+)'", bloque))
+        self.assertTrue(claves)
+        self.assertEqual(claves, set(backend._CAMPOS_DOCUMENTO))
+
+    async def test_a_driver_marks_only_their_own_notifications(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("chofer@k.com", rol="Conductor")
+        backend.notifications_db.extend([
+            {"id": 10, "para": "chofer@k.com", "leido": False},
+            {"id": 11, "para": "otro@k.com", "leido": False},
+        ])
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            ajeno = await self._llamar("POST", "/api/conductor/notifications/mark-read", token,
+                                       json={"notif_id": 11})
+            propio = await self._llamar("POST", "/api/conductor/notifications/mark-read", token,
+                                        json={"notif_id": 10})
+        self.assertEqual(ajeno.status_code, 404, "igual que si no existiera")
+        self.assertEqual(propio.status_code, 200)
+        self.assertEqual([n["leido"] for n in backend.notifications_db], [True, False])
+
+    async def test_the_driver_card_is_for_administration_the_client_and_its_own_driver(self):
+        backend.AUTH_ENFORCED = True
+        backend.conductores_db["K-001"] = {"capacidad": 4}
+        _, propio = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        _, ajeno = await self._sesion("otro@k.com", rol="Conductor", unidad_id="K-002")
+        _, cliente = await self._sesion("cliente@k.com", rol="Cliente")
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", propio)).status_code, 200)
+            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", ajeno)).status_code, 403)
+            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", cliente)).status_code, 200)
+
+    async def test_a_driver_updates_passengers_only_on_their_own_route(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-002")
+        with patch.object(backend, "reload_db", new=AsyncMock()) as recarga:
+            respuesta = await self._llamar(
+                "POST", "/api/actualizar-pasajero", token,
+                json={"conductor_id": "K-001", "horario": "08:00", "agente_id": "A", "estado": "Recogido"})
+        self.assertEqual(respuesta.status_code, 403)
+        recarga.assert_not_awaited()
+
+    def test_a_notification_id_never_restarts_from_one(self):
+        """Sin avisos cargados, «el mayor más uno» daba 1 y pisaba al aviso 1 al fusionar."""
+        backend.notifications_db.clear()
+        antes = int(time.time() * 1000)
+        self.assertGreaterEqual(backend._next_notification_id(), antes)
+        backend.notifications_db.append({"id": 10 ** 13})
+        self.assertEqual(backend._next_notification_id(), 10 ** 13 + 1)
+
+    def test_the_websocket_refuses_a_handshake_without_a_session(self):
+        from fastapi.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect as Desconexion
+
+        backend.AUTH_ENFORCED = True
+        with TestClient(backend.app) as cliente:
+            with self.assertRaises(Desconexion) as caught:
+                with cliente.websocket_connect("/ws/chofer@k.com") as ws:
+                    ws.receive_text()
+        self.assertEqual(caught.exception.code, 1008)
+        self.assertNotIn("chofer@k.com", backend.ws_manager.active)
+
 def _aplicar_como_postgres(fila, cambios):
     """Lo que hace `guardar_estado()` (008), para simular la base en las pruebas.
 
@@ -3684,7 +3852,11 @@ class NormalizedStorageTestCase(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Range": content_range},
             )
 
-        with patch.object(backend, "_db_http_request", new=AsyncMock(side_effect=request)):
+        # Lo que se prueba es el paginado; la sesión tiene sus propias pruebas.
+        with (
+            patch.object(backend, "_db_http_request", new=AsyncMock(side_effect=request)),
+            patch.object(backend, "AUTH_ENFORCED", False),
+        ):
             transport = httpx.ASGITransport(app=backend.app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get("/api/routes")

@@ -3409,7 +3409,28 @@ def read_root():
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    """Punto de conexión WebSocket. El user_id es el identifier del usuario."""
+    """Punto de conexión WebSocket. El user_id es el identifier del usuario.
+
+    En Vercel no llega a abrirse —una función serverless no mantiene
+    conexiones— y los portales se quedan con el sondeo. Pero donde sí se abre
+    (en local, o en otro alojamiento) no puede dejar escuchar los avisos de
+    cualquiera: exige la cookie de sesión y que `user_id` sea uno mismo.
+    """
+    if AUTH_ENFORCED:
+        try:
+            entrada = await sesion_de(websocket.cookies.get(SESSION_COOKIE_NAME))
+        except HTTPException:
+            entrada = None
+        actor = _actor_de_entrada(entrada) if entrada else None
+        if (
+            actor is None
+            or account_block_reason(actor)
+            or not _owner_matches(actor, _IDENTITY_FIELDS, user_id)
+        ):
+            # 1008: la conexión incumple la política. Sin aceptar antes, el
+            # navegador ve un fallo del apretón de manos y el portal sondea.
+            await websocket.close(code=1008)
+            return
     await ws_manager.connect(user_id, websocket)
     try:
         while True:
@@ -3605,7 +3626,10 @@ class DriverNotifyPayload(BaseModel):
 # --- Endpoints de Autenticación y Verificación ---
 
 @app.get("/api/notifications")
-async def get_notifications(last_id: int = 0):
+async def get_notifications(last_id: int = 0, session_token: SessionCookie = None):
+    # Son los avisos del panel de Administración: nombres de conductores, SOS,
+    # documentos resubidos. Se servían a cualquiera que preguntara.
+    await require_admin_session(session_token)
     await reload_notifications()  # Lightweight: only loads notifications from Supabase
     def safe_id(n):
         try:
@@ -4439,6 +4463,12 @@ def _next_notification_id() -> int:
 
     ``_next_notification_id()`` se repetía indefinidamente: la lista se recorta
     a 50, así que a partir de ahí toda notificación nueva recibía el id 51.
+
+    Y no puede depender solo de lo que haya en memoria: si esta instancia no
+    cargó los avisos, «el mayor más uno» daría 1, y como los avisos se
+    guardan fusionándolos por id, ese 1 sustituiría al aviso 1 que ya existe.
+    Con el reloj en milisegundos —el mismo formato que ya usan otros avisos—
+    dos instancias solo chocan si crean uno en el mismo milisegundo.
     """
     highest = 0
     for notification in notifications_db:
@@ -4448,7 +4478,7 @@ def _next_notification_id() -> int:
             highest = max(highest, int(float(str(notification.get("id", 0)))))
         except (TypeError, ValueError):
             continue
-    return highest + 1
+    return max(highest + 1, int(time.time() * 1000))
 
 
 def _require_admin(admin_email: str) -> Dict[str, Any]:
@@ -4939,10 +4969,23 @@ async def get_conductor_notifications(email: str, session_token: SessionCookie =
     return user_notifs
 
 @app.post("/api/conductor/notifications/mark-read")
-async def mark_notification_read(payload: MarkReadPayload):
-    await reload_db()
+async def mark_notification_read(payload: MarkReadPayload, session_token: SessionCookie = None):
+    actor = await require_any_session(session_token)
+    # Solo hacen falta los avisos: el estado entero eran 255 KB por clic.
+    if _is_compat_storage():
+        await reload_notifications()
+    else:
+        await reload_db()
     for n in notifications_db:
         if n.get("id") == payload.notif_id:
+            # Uno marca los suyos; Administración, cualquiera. Un aviso ajeno
+            # responde igual que uno inexistente, para no confirmar que existe.
+            if (
+                actor is not None
+                and actor.get("rol") not in _ADMIN_ROLES
+                and not _owner_matches(actor, _IDENTITY_FIELDS, n.get("para"))
+            ):
+                break
             n["leido"] = True
             await persist_users_only()
             return {"message": "Marcado como leído."}
@@ -4964,18 +5007,50 @@ class ResolveDataRequestPayload(BaseModel):
     field: str
     action: str
 
+# Los campos de `perfil_conductor` que son documentos. Es la lista de
+# `src/constants/documentosConductor.js`; una prueba comprueba que no se desvíen.
+# Los de dos caras guardan además el reverso y el archivo con ambas caras en
+# campos hermanos con sufijo.
+_CAMPOS_DOCUMENTO = frozenset({
+    "dniScaneado", "licenciaConducir", "lunasPolarizadas", "comprobanteDomicilio",
+    "recordConductor", "antecedentesPoliciales", "cv", "certificadosTrabajo",
+    "referenciasLaborales", "cuestionarioManejoDefensivo", "tarjetaPropiedad",
+    "soat", "revisionTecnica",
+})
+_SUFIJOS_DOCUMENTO = ("", "Reverso", "Completo")
+
+
+def _es_campo_documento(campo: str) -> bool:
+    return any(
+        campo.endswith(sufijo) and campo[: len(campo) - len(sufijo)] in _CAMPOS_DOCUMENTO
+        for sufijo in _SUFIJOS_DOCUMENTO
+    )
+
+
 @app.post("/api/conductor/resubmit-docs")
-async def resubmit_driver_docs(payload: ResubmitDocsPayload):
-    user = get_user_by_identifier(payload.email)
+async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: SessionCookie = None):
+    # El propio conductor o Administración. Antes no pedía sesión: cualquiera
+    # podía cambiar los documentos de cualquier conductor sabiendo su correo.
+    await require_session_owner(
+        session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
+        resource="los documentos de ese conductor",
+    )
+    ajenos = sorted(campo for campo in payload.docs if not _es_campo_documento(str(campo)))
+    if ajenos:
+        # Sin esto se podía mandar `revision_docs` o `estado` como si fueran un
+        # documento y aprobarse la revisión uno mismo.
+        raise HTTPException(status_code=400, detail=f"No son documentos: {', '.join(ajenos)}.")
+    user = await _load_compat_user(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Conductor no encontrado.")
-    
+    await reload_notifications()
+
     perfil = user.get("perfil_conductor")
     if not perfil:
         raise HTTPException(status_code=400, detail="El conductor no tiene perfil configurado.")
-        
+
     revision_docs = perfil.get("revision_docs", {})
-    
+
     # Update only the provided documents
     for k, v in payload.docs.items():
         perfil[k] = v
@@ -4988,10 +5063,9 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
     
     if not has_rejected:
         user["estado"] = "Pendiente Revisión"
-    
-    await persist_users_only()
 
     # Notify admins only if the driver uploaded the documents
+    notif_obj = None
     if getattr(payload, 'uploaded_by', 'conductor') != 'admin':
         conductor_nombre = user.get("nombre", payload.email)
         notif_obj = {
@@ -5007,6 +5081,11 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
         }
         notifications_db.append(notif_obj)
 
+    # El aviso va en el mismo guardado. Antes se añadía después de guardar y
+    # solo llegaba a la base si otra acción guardaba más tarde.
+    await persist_users_only()
+
+    if notif_obj is not None:
         # Broadcast to all connected admins
         for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
             await ws_manager.broadcast_to_role(role, notif_obj)
@@ -5014,8 +5093,13 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload):
     return {"message": "Documentos actualizados exitosamente", "estado": user["estado"], "user": user}
 
 @app.post("/api/conductor/request-update")
-async def request_data_update(payload: UpdateDataRequestPayload):
-    user = get_user_by_identifier(payload.email)
+async def request_data_update(payload: UpdateDataRequestPayload, session_token: SessionCookie = None):
+    await require_session_owner(
+        session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
+        resource="los datos de ese conductor",
+    )
+    user = await _load_compat_user(payload.email)
+    await reload_notifications()
     if not user or user.get("rol") != "Conductor":
         raise HTTPException(status_code=404, detail="Conductor no encontrado")
     
@@ -5031,8 +5115,9 @@ async def request_data_update(payload: UpdateDataRequestPayload):
         "timestamp": __import__('datetime').datetime.now().isoformat()
     }
     
-    # Notify admins
-    notif_id = f"notif_{int(__import__('datetime').datetime.now().timestamp())}_{__import__('random').randint(1000,9999)}"
+    # Notify admins. Con id numérico: el panel de Administración solo avisa de
+    # los que tienen un id mayor que el último visto, y uno de texto nunca lo es.
+    notif_id = _next_notification_id()
     conductor_nombre = user.get("nombre", payload.email)
     notif_obj = {
         "id": notif_id,
@@ -5207,13 +5292,15 @@ def _get_grupo_por_padron() -> Dict[str, str]:
 
 
 @app.get("/api/flota/export")
-async def export_flota(base: str = "MASIVO"):
+async def export_flota(base: str = "MASIVO", session_token: SessionCookie = None):
     """Genera un .xlsx idéntico al template BASE MASIVO 2026 / BASE REMISSE 2026,
     rellenando cada fila con los datos actuales de Supabase. Preserva encabezados,
     colores del GRUPO (TP/KONECTA/TP-KONECTA/REMISSE) y anchos de columna.
 
     base = MASIVO | REMISSE | TODAS
     """
+    # Es la flota entera con los datos de cada conductor: solo Administración.
+    await require_admin_session(session_token)
     base_key = (base or "MASIVO").upper().strip()
     if base_key not in ("MASIVO", "REMISSE", "TODAS"):
         raise HTTPException(status_code=400, detail="base debe ser MASIVO, REMISSE o TODAS")
@@ -5942,7 +6029,8 @@ async def analizar_novedades(
 
 
 @app.get("/api/routes")
-async def get_routes():
+async def get_routes(session_token: SessionCookie = None):
+    await require_any_session(session_token)
     if _is_compat_storage() and not _full_cache_is_fresh():
         await _load_compat_routes()
     else:
@@ -5950,8 +6038,9 @@ async def get_routes():
     return rutas_estado_actual
 
 @app.get("/api/routes/summary")
-async def get_routes_summary():
+async def get_routes_summary(session_token: SessionCookie = None):
     """Returns compact route summary for GerentePortal (no agent details, just counts)."""
+    await require_any_session(session_token)
     await reload_routes_summary()
     if routes_summary:
         return routes_summary
@@ -6270,7 +6359,16 @@ async def mis_rutas(conductor_id: str, session_token: SessionCookie = None):
     return mis_rutas_asignadas
 
 @app.post("/api/actualizar-pasajero")
-async def actualizar_pasajero(data: EstadoPasajeroUpdate):
+async def actualizar_pasajero(data: EstadoPasajeroUpdate, session_token: SessionCookie = None):
+    # Además de escribir en el tablero, sube una foto a un bucket público: sin
+    # sesión era un almacén abierto para cualquiera.
+    actor = await require_any_session(session_token)
+    if (
+        actor is not None
+        and actor.get("rol") not in _ADMIN_ROLES
+        and _owner_key(actor.get("unidad_id")) != _owner_key(data.conductor_id)
+    ):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esa ruta.")
     await reload_db()
     ruta = next((r for r in rutas_estado_actual if r["conductor"] == data.conductor_id and r["horario"] == data.horario), None)
     if ruta:
@@ -6315,8 +6413,20 @@ async def get_rutas_cliente(empresa_id: str, session_token: SessionCookie = None
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener rutas del cliente: {str(e)}")
 
+# Quién ve la ficha de un conductor: Administración, el cliente (su panel de
+# auditoría la enseña) y el propio conductor, solo la suya.
+_ROLES_FICHA_CONDUCTOR = (*_ADMIN_ROLES, "Cliente")
+
+
 @app.get("/api/conductor/info/{unidad_id}")
-async def get_conductor_info(unidad_id: str):
+async def get_conductor_info(unidad_id: str, session_token: SessionCookie = None):
+    # Devuelve el perfil entero —documento, dirección, teléfonos— y los
+    # padrones se adivinan (K-001, K-002…). Se servía sin sesión.
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ROLES_FICHA_CONDUCTOR and not (
+        actor.get("rol") == "Conductor" and _owner_key(actor.get("unidad_id")) == _owner_key(unidad_id)
+    ):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esa ficha.")
     await reload_db()
     
     conductor_user = None
@@ -6893,7 +7003,8 @@ async def save_history(session_token: SessionCookie = None):
 
 
 @app.get("/api/reportes")
-async def get_reportes():
+async def get_reportes(session_token: SessionCookie = None):
+    await require_any_session(session_token)
     await reload_db()
     global historial_rutas
     return {"historial": historial_rutas}

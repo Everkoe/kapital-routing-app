@@ -257,10 +257,19 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   conductor o un cliente, pero no la de otra cuenta de administración ni la suya propia: sería tomarla.
 - **Sesiones**: el login emite una cookie opaca `HttpOnly` (`SameSite=Lax`, TTL 12 h) y persiste solo su
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
-  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. Cobertura actual:
-  **36 de 47 endpoints**; los 11 restantes —todos de lectura— están inventariados en
-  `docs/handoff/2026-09-15-relevo.md` §7. Las escrituras destructivas y las integraciones de pago
-  (Gemini, API de verificación) ya están cerradas.
+  `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. **Desde el 2026-09-27 todos
+  los endpoints piden sesión** salvo `GET /api`, el login, el registro y el cambio de contraseña (que
+  exige la actual). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
+  dejaba a cualquiera cambiar los documentos de cualquier conductor —y, mandando `revision_docs` como si
+  fuera un documento, aprobárselos solo—, `request-update` y `mark-read` escribían, `actualizar-pasajero`
+  subía fotos a un bucket público, y `GET /api/conductor/info/{unidad}` y `/api/flota/export` entregaban
+  documento, dirección y teléfonos de los conductores a cualquiera (los padrones se adivinan). La ficha
+  del conductor la ven Administración, el Cliente (su panel de auditoría la enseña, con DNI, dirección y
+  teléfonos: **decisión de producto pendiente de confirmar**) y el propio conductor, solo la suya.
+  `resubmit-docs` solo acepta campos de documento (`_CAMPOS_DOCUMENTO`, con una prueba que la compara con
+  `src/constants/documentosConductor.js`). El WebSocket exige la cookie y que uno se conecte como sí
+  mismo. Para comprobar que no queda ninguno abierto, la prueba
+  `test_endpoints_that_never_asked_for_a_session_now_do` los llama sin cookie.
   **Desde el 2026-09-27 las sesiones viven en `public.sesiones`**, una fila por sesión
   ([supabase/007_sesiones.sql](supabase/007_sesiones.sql), almacén en
   [frontend/api/sesiones.py](frontend/api/sesiones.py)). Antes vivían dos veces dentro de la fila única
@@ -324,9 +333,15 @@ Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muc
   de tamaño, no de corrección: leer la fila entera cuesta ~255 KB y crece con cada cuenta. Con cientos de
   cuentas más conviene pasarlas a tablas; el código tiene a medio hacer un modo «normalizado»
   (`app_users`, `fleet_units`, `notifications`), pero esas tablas no existen en la base y nunca se activó.
-- **Pendiente — el tiempo real no funciona en producción**: el portal del conductor abre un WebSocket en
-  `/ws/…`, pero en Vercel esa ruta devuelve la página (comprobado) y una función serverless no mantiene
-  conexiones abiertas. Además el WebSocket no valida quién se conecta.
+- **El tiempo real no funciona en producción, y los avisos llegan por sondeo**: los portales abren un
+  WebSocket en `/ws/…`, pero en Vercel esa ruta devuelve la página (comprobado) y una función serverless
+  no mantiene conexiones abiertas. Lo que de verdad entrega los avisos es el sondeo de respaldo, cada 90 s
+  con la pestaña visible. Desde el 2026-09-27 los portales dejan de reintentar el WebSocket tras tres
+  intentos sin abrir (`WS_MAX_INTENTOS_SIN_ABRIR`), en vez de insistir cada 30 s para siempre, y el
+  apretón de manos exige sesión. **Pendiente de decidir**: si hace falta aviso inmediato (un SOS no
+  debería esperar 90 s), la vía es Supabase Realtime con canales que solo lleven «hay novedades» y el
+  dato por el API con sesión; exige publicar la clave pública del proyecto en el frontend, cosa que hoy
+  se evita a propósito.
 
 ## 3. Stack Tecnológico
 
@@ -438,7 +453,8 @@ Contexto que no cambia con cada lote:
      plantillas desde cero, que es un problema distinto y no urgente.
 3. Autenticación: **no se va a JWT**. El mecanismo es sesión opaca en cookie `HttpOnly` con hash persistido.
    El manejo de 401 ya está en el frontend (`src/utils/apiClient.js` — **usarlo, no `fetch` directo**).
-   Lo que falta es cerrar los 11 endpoints de lectura restantes y el handshake del WebSocket. El usuario
+   Los endpoints y el handshake del WebSocket están cerrados desde el 2026-09-27 (ver «Sesiones» en §2);
+   lo que queda es limitar los intentos de login y de cambio de contraseña, que hoy no tienen tope. El usuario
    sembrado con contraseña por defecto que inyectaba `_decode_full_state` ya está retirado, y hay una prueba
    que falla si vuelve a aparecer una contraseña escrita en el módulo.
 4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.
