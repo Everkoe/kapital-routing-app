@@ -30,11 +30,14 @@ grant select, insert, delete on table public.intentos_acceso to service_role;
 -- anotado y pasaba entera (40 a la vez, 40 respuestas 401 y ningún 429).
 drop function if exists public.intentos_fallidos(text, text, integer);
 drop function if exists public.anotar_intento_fallido(text, text);
+drop function if exists public.olvidar_intentos(text);
 
 -- Anota el intento y devuelve cuántos lleva, contándolo a él, en un solo paso.
--- El candado por clave hace que dos intentos a la misma cuenta se cuenten uno
--- detrás de otro. Se anota antes de comprobar la contraseña; si acierta, el
--- backend lo borra con `olvidar_intentos`, y si falla, se queda como fallo.
+-- Los candados —por clave y por origen, siempre en ese orden para que dos
+-- llamadas no se esperen mutuamente— hacen que los intentos a una misma cuenta,
+-- o desde un mismo origen, se cuenten uno detrás de otro. Se anota antes de
+-- comprobar la contraseña; si acierta, el backend lo borra con
+-- `olvidar_intentos`, y si falla, se queda como fallo.
 --   cuenta         intentos a esa cuenta, desde donde sea
 --   cuenta_origen  intentos a esa cuenta desde ese origen
 --   origen         intentos desde ese origen, a cualquier cuenta
@@ -50,6 +53,9 @@ declare
   v_origen integer;
 begin
   perform pg_advisory_xact_lock(hashtextextended('intentos:' || p_clave, 0));
+  if p_origen is not null then
+    perform pg_advisory_xact_lock(hashtextextended('intentos-origen:' || p_origen, 0));
+  end if;
   delete from intentos_acceso where creado_en < now() - interval '1 day';
   insert into intentos_acceso (clave, origen) values (p_clave, p_origen);
 
@@ -64,22 +70,22 @@ begin
 end
 $$;
 
--- Tras entrar bien, los intentos de esa cuenta dejan de contar: equivocarse
--- tres veces y acertar no debe dejar a nadie más cerca del bloqueo. Los de
--- otras cuentas desde el mismo origen se quedan: frenan probar muchas cuentas
--- desde un mismo sitio.
-create or replace function public.olvidar_intentos(p_clave text)
+-- Tras entrar bien, los intentos a esa cuenta **desde ese origen** dejan de
+-- contar: equivocarse tres veces y acertar no debe dejar a nadie más cerca del
+-- bloqueo. Los de otros orígenes se quedan: si no, cada vez que la persona
+-- entrara le devolvería a quien la ataca desde otro sitio todos sus intentos.
+create or replace function public.olvidar_intentos(p_clave text, p_origen text)
 returns void
 language sql
 set search_path = public
 as $$
-  delete from intentos_acceso where clave = p_clave;
+  delete from intentos_acceso where clave = p_clave and origen is not distinct from p_origen;
 $$;
 
 revoke all on function public.registrar_intento(text, text, integer) from public, anon, authenticated;
-revoke all on function public.olvidar_intentos(text) from public, anon, authenticated;
+revoke all on function public.olvidar_intentos(text, text) from public, anon, authenticated;
 grant execute on function public.registrar_intento(text, text, integer) to service_role;
-grant execute on function public.olvidar_intentos(text) to service_role;
+grant execute on function public.olvidar_intentos(text, text) to service_role;
 
 -- `app_state` tiene RLS sin políticas, así que la clave anónima no ve ninguna
 -- fila; pero conservaba el permiso de leerla. Es la fila con todas las cuentas

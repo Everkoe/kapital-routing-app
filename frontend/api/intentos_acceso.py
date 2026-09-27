@@ -11,9 +11,10 @@ tabla `intentos_acceso` (`supabase/009_intentos_acceso.sql`).
 Cómo cuenta
 -----------
 Cada intento se anota **antes** de comprobar la contraseña, y en el mismo paso
-se cuenta, con un candado por cuenta en Postgres: una ráfaga de intentos
-simultáneos no puede leer la cuenta antes de que ninguno quede anotado. Si la
-contraseña es buena, se borran los de esa cuenta; si no, el intento se queda.
+se cuenta, con candados por cuenta y por origen en Postgres: una ráfaga de
+intentos simultáneos no puede leer la cuenta antes de que ninguno quede
+anotado. Si la contraseña es buena, se borran los de esa cuenta desde ese
+origen; si no, el intento se queda.
 
 Los topes son tres, para que frenar a quien adivina no sirva para dejar fuera
 a quien no:
@@ -50,6 +51,18 @@ MAX_POR_ORIGEN = 50
 VENTANA_MINUTOS = 15
 TIEMPO_LIMITE_S = 2.0
 
+# El registro es público y cada alta deja una cuenta permanente en la fila
+# única: sin tope, cualquiera podía llenarla y gastar la transferencia del plan.
+# Una empresa da de alta a unos pocos conductores al día.
+CLAVE_REGISTRO = "__registro__"
+MAX_REGISTROS_POR_ORIGEN = 3
+MAX_REGISTROS = 5
+
+DEMASIADOS_REGISTROS = (
+    f"Se han recibido demasiadas solicitudes de acceso. Espera {VENTANA_MINUTOS} minutos "
+    "y vuelve a intentarlo."
+)
+
 DEMASIADOS_INTENTOS = (
     f"Demasiados intentos fallidos. Espera {VENTANA_MINUTOS} minutos antes de volver a probar."
 )
@@ -76,6 +89,15 @@ def superado(cuentas: Dict[str, int]) -> bool:
     return (
         cuentas.get("cuenta_origen", 0) > MAX_POR_CUENTA_Y_ORIGEN
         or cuentas.get("cuenta", 0) > MAX_POR_CUENTA
+        or cuentas.get("origen", 0) > MAX_POR_ORIGEN
+    )
+
+
+def superado_registro(cuentas: Dict[str, int]) -> bool:
+    """Como `superado`, con los topes del registro. Sin origen conocido, solo el total."""
+    return (
+        cuentas.get("cuenta_origen", 0) > MAX_REGISTROS_POR_ORIGEN
+        or cuentas.get("cuenta", 0) > MAX_REGISTROS
         or cuentas.get("origen", 0) > MAX_POR_ORIGEN
     )
 
@@ -111,8 +133,8 @@ class IntentosEnTabla:
         })
         return {k: int(cuentas.get(k, 0)) for k in ("cuenta", "cuenta_origen", "origen")}
 
-    async def olvidar(self, clave: str) -> None:
-        await self._rpc("olvidar_intentos", {"p_clave": clave})
+    async def olvidar(self, clave: str, origen: Optional[str]) -> None:
+        await self._rpc("olvidar_intentos", {"p_clave": clave, "p_origen": origen})
 
 
 class IntentosEnMemoria:
@@ -129,5 +151,5 @@ class IntentosEnMemoria:
             "origen": sum(1 for _, o in self.filas if origen is not None and o == origen),
         }
 
-    async def olvidar(self, clave: str) -> None:
-        self.filas = [(c, o) for c, o in self.filas if c != clave]
+    async def olvidar(self, clave: str, origen: Optional[str]) -> None:
+        self.filas = [(c, o) for c, o in self.filas if not (c == clave and o == origen)]

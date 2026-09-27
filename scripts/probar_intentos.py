@@ -1,9 +1,11 @@
 """Prueba el tope de intentos contra la base de verdad, y lo deja limpio.
 
 Usa `IntentosEnTabla` —la clase del backend, con su misma forma de pedir—
-sobre una clave y un origen inventados: registra intentos, comprueba que se
+sobre claves y orígenes inventados: registra intentos, comprueba que se
 cuentan por cuenta, por cuenta y origen y por origen, que una ráfaga
-simultánea no se salta la cuenta, y los olvida. No toca ningún intento real.
+simultánea no se salta ninguna cuenta —ni a una misma cuenta, ni desde un
+mismo origen a muchas— y que olvidar solo borra lo de su origen. No toca
+ningún intento real.
 
     python scripts/probar_intentos.py
 
@@ -31,6 +33,7 @@ async def main() -> int:
     clave = intentos_acceso.clave_de(f"__prueba_intentos__{secrets.token_hex(4)}")
     origen = intentos_acceso.origen_de({}, f"prueba-{secrets.token_hex(4)}")
     otro_origen = intentos_acceso.origen_de({}, f"prueba-{secrets.token_hex(4)}")
+    rociado = intentos_acceso.origen_de({}, f"prueba-{secrets.token_hex(4)}")
     fallos = 0
 
     def comprobar(nombre: str, bien: bool, detalle: object = "") -> None:
@@ -50,14 +53,21 @@ async def main() -> int:
         comprobar("ráfaga sin saltarse cuentas", vistos == list(range(3, 3 + RAFAGA)),
                   f"{vistos[0]}…{vistos[-1]}")
 
-        await almacen.olvidar(clave)
+        # Desde un origen, una ráfaga a muchas cuentas distintas: el candado por
+        # origen tiene que numerarlas igual.
+        claves = [intentos_acceso.clave_de(f"__prueba_intentos__{secrets.token_hex(4)}") for _ in range(RAFAGA)]
+        cuentas = await asyncio.gather(*(almacen.registrar(c, rociado) for c in claves))
+        vistos = sorted(c["origen"] for c in cuentas)
+        comprobar("ráfaga a muchas cuentas", vistos == list(range(1, 1 + RAFAGA)), f"{vistos[0]}…{vistos[-1]}")
+
+        await almacen.olvidar(clave, origen)
         cuenta = await almacen.registrar(clave, origen)
-        comprobar("olvidar deja a cero", cuenta["cuenta"] == 1, cuenta)
+        comprobar("olvidar borra solo su origen",
+                  cuenta["cuenta_origen"] == 1 and cuenta["cuenta"] == 2, cuenta)
     except Exception as fallo:  # noqa: BLE001 - se informa y se limpia igual
         comprobar("sin excepciones", False, f"{type(fallo).__name__}: {fallo}")
     finally:
-        await almacen.olvidar(clave)
-        for o in (origen, otro_origen):
+        for o in (origen, otro_origen, rociado):
             await backend._db_http_request(
                 "DELETE",
                 f"{str(backend.STORAGE_CONFIG.url).rstrip('/')}/intentos_acceso?origen=eq.{o}",

@@ -17,7 +17,7 @@ from fastapi import Request
 import math
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import Annotated, Dict, Any, List, Optional, Mapping, Union
+from typing import Annotated, Any, Callable, Dict, List, Mapping, Optional, Union
 
 import asyncio
 import httpx
@@ -3766,8 +3766,20 @@ async def add_notification(notif: dict, session_token: SessionCookie = None):
 
 
 @app.post("/api/auth/register")
-async def register_user(usuario: UsuarioRegistro):
-    await reload_db()
+async def register_user(usuario: UsuarioRegistro, request: Request = None):
+    # Es público y cada alta deja una cuenta para siempre en la fila única: sin
+    # tope, cualquiera podía llenarla de cuentas basura y, como cada alta
+    # descargaba el estado entero, gastar la transferencia del plan. El tope se
+    # mira antes de leer nada, y todas las altas cuentan: no se olvidan.
+    origen = _origen_de_peticion(request)
+    await _registrar_intento(
+        intentos_acceso.clave_de(intentos_acceso.CLAVE_REGISTRO),
+        origen,
+        superado=lambda c: intentos_acceso.superado_registro(
+            c if origen is not None else {**c, "cuenta_origen": 0}
+        ),
+        detalle=intentos_acceso.DEMASIADOS_REGISTROS,
+    )
 
     # Validaciones básicas para evitar 500
     if not usuario.identifier or not usuario.identifier.strip():
@@ -3778,14 +3790,24 @@ async def register_user(usuario: UsuarioRegistro):
         raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 4 caracteres.")
 
     identifier_clean = usuario.identifier.strip().lower()
-    if identifier_clean in [k.lower() for k in usuarios_db.keys()]:
+    # Por el índice de acceso, no descargando el estado entero; y por todos los
+    # alias, no solo por la clave: un conductor importado tiene de clave un
+    # correo inventado y podía volver a registrarse con su DNI.
+    if await _load_compat_user(identifier_clean):
         raise HTTPException(status_code=400, detail="El usuario ya está registrado.")
+    # La primera cuenta del sistema entra como Administración. Con una lectura
+    # parcial, una instancia fría podría creer que no hay nadie y regalar ese
+    # rol: solo se decide con el índice lleno o con la lectura completa.
+    hay_cuentas = bool(login_index) or any(escritura_estado.es_cuenta(k) for k in usuarios_db)
+    if not hay_cuentas:
+        await reload_db(force=True)
+        hay_cuentas = any(escritura_estado.es_cuenta(k) for k in usuarios_db)
     
     ROLES_VALIDOS = ["Programador de rutas", "Administración", "Conductor", "Gerente de Operaciones", "Cliente"]
     rol_solicitado = usuario.rol if usuario.rol in ROLES_VALIDOS else "Programador de rutas"
     
     # Si es el primer usuario, se aprueba automáticamente como Admin
-    estado = "Activo" if len(usuarios_db) == 0 else "Pendiente"
+    estado = "Activo" if not hay_cuentas else "Pendiente"
     
     nuevo_usuario = {
         "identifier": identifier_clean,
@@ -3793,7 +3815,7 @@ async def register_user(usuario: UsuarioRegistro):
         "dni": identifier_clean if usuario.rol == 'Conductor' else None,
         "password": password_for_storage(usuario.password),
         "nombre": usuario.nombre.strip() if usuario.nombre else ("Conductor Pendiente" if rol_solicitado == "Conductor" else "Usuario"),
-        "rol": "Administración" if len(usuarios_db) == 0 else rol_solicitado,
+        "rol": "Administración" if not hay_cuentas else rol_solicitado,
         "telefono": usuario.telefono,
         "unidad_id": usuario.unidad_id.strip() if usuario.unidad_id else None,
         "empresa_id": usuario.empresa_id,
@@ -3803,6 +3825,8 @@ async def register_user(usuario: UsuarioRegistro):
     usuarios_db[identifier_clean] = nuevo_usuario
     
     if rol_solicitado == "Conductor" and usuario.unidad_id:
+        # Sembrar toca la flota, y lo no leído no se guarda.
+        await _load_compat_fleet()
         _sembrar_unidad(usuario.unidad_id.strip(), nuevo_usuario)
             
     # Add notification for new registration
@@ -3810,7 +3834,7 @@ async def register_user(usuario: UsuarioRegistro):
         notifications_db.append({
             "id": _next_notification_id(),
             "title": "Nuevo Conductor",
-            "message": f"{usuario.nombre} se ha registrado y está en lista de espera.",
+            "message": f"{nuevo_usuario['nombre']} se ha registrado y está en lista de espera.",
             "type": "success",
             "timestamp": datetime.now().isoformat()
         })
@@ -3955,7 +3979,13 @@ def _clave_de_intentos(user: Optional[Dict[str, Any]], tecleado: str) -> str:
     return intentos_acceso.clave_de(clave_cuenta or tecleado)
 
 
-async def _registrar_intento(clave: str, origen: Optional[str]) -> bool:
+async def _registrar_intento(
+    clave: str,
+    origen: Optional[str],
+    *,
+    superado: Callable[[Dict[str, int]], bool] = intentos_acceso.superado,
+    detalle: str = intentos_acceso.DEMASIADOS_INTENTOS,
+) -> bool:
     """Anota el intento y responde 429 si agotó algún tope. Devuelve si quedó anotado.
 
     Se anota antes de comprobar la contraseña, y contando en el mismo paso: si
@@ -3970,17 +4000,17 @@ async def _registrar_intento(clave: str, origen: Optional[str]) -> bool:
     except Exception as exc:  # noqa: BLE001 - incluye tiempo agotado y 5xx
         print(f"[Kapital] intentos_acceso no disponible: {type(exc).__name__}")
         return False
-    if intentos_acceso.superado(cuentas):
-        raise HTTPException(status_code=429, detail=intentos_acceso.DEMASIADOS_INTENTOS)
+    if superado(cuentas):
+        raise HTTPException(status_code=429, detail=detalle)
     return True
 
 
-async def _olvidar_intentos(clave: str, anotado: bool) -> None:
-    """Tras acertar, los intentos de la cuenta —este incluido— dejan de contar."""
+async def _olvidar_intentos(clave: str, origen: Optional[str], anotado: bool) -> None:
+    """Tras acertar, los intentos a la cuenta desde este origen —este incluido— dejan de contar."""
     if not anotado:
         return
     try:
-        await almacen_intentos.olvidar(clave)
+        await almacen_intentos.olvidar(clave, origen)
     except Exception as exc:  # noqa: BLE001
         print(f"[Kapital] intentos_acceso no se pudo limpiar: {type(exc).__name__}")
 
@@ -3991,12 +4021,13 @@ async def login_user(usuario: UsuarioLogin, response: Response, request: Request
     # Se anota antes de comprobar la contraseña: agotado el tope, ni la
     # correcta entra, o seguir probando serviría para saber cuándo se acierta.
     clave_intento = _clave_de_intentos(user_in_db, usuario.identifier)
-    anotado = await _registrar_intento(clave_intento, _origen_de_peticion(request))
+    origen = _origen_de_peticion(request)
+    anotado = await _registrar_intento(clave_intento, origen)
 
     stored_password = user_in_db.get("password") if user_in_db else None
     if not user_in_db or not verify_password(usuario.password, stored_password):
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
-    await _olvidar_intentos(clave_intento, anotado)
+    await _olvidar_intentos(clave_intento, origen, anotado)
 
     # Transparent migration: a successful login upgrades legacy plaintext (or
     # an older PBKDF2 cost) without forcing a password reset or changing UX.
@@ -4090,14 +4121,15 @@ async def change_password(req: ChangePasswordRequest, request: Request = None):
     await reload_db()
     user_in_db = get_user_by_identifier(req.identifier)
     clave_intento = _clave_de_intentos(user_in_db, req.identifier)
-    anotado = await _registrar_intento(clave_intento, _origen_de_peticion(request))
+    origen = _origen_de_peticion(request)
+    anotado = await _registrar_intento(clave_intento, origen)
 
     if not user_in_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
     if not verify_password(req.old_password, user_in_db.get("password")):
         raise HTTPException(status_code=401, detail="La contraseña actual es incorrecta.")
-    await _olvidar_intentos(clave_intento, anotado)
+    await _olvidar_intentos(clave_intento, origen, anotado)
         
     if len(req.new_password) < 4:
         raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")

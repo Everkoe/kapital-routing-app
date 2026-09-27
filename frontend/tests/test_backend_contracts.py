@@ -3377,6 +3377,73 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(desde_ahi.status_code, 429)
         self.assertEqual(desde_otro.status_code, 401)
 
+    async def _registrar(self, identificador, ip="203.0.113.7", **campos):
+        transport = httpx.ASGITransport(app=backend.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/auth/register", headers={"x-forwarded-for": ip}, json={
+                "identifier": identificador, "password": "segura", "rol": "Conductor", **campos})
+
+    async def test_public_registration_has_its_own_limit_checked_before_reading_anything(self):
+        """Cada alta deja una cuenta para siempre: sin tope, cualquiera podía llenar la fila."""
+        backend.usuarios_db["ya@k.com"] = {"identifier": "ya@k.com", "rol": "Cliente"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            for n in range(backend.intentos_acceso.MAX_REGISTROS_POR_ORIGEN):
+                self.assertEqual((await self._registrar(f"4000000{n}")).status_code, 200)
+            with patch.object(backend, "_load_compat_user", new=AsyncMock()) as leer:
+                frenado = await self._registrar("40000099")
+        self.assertEqual(frenado.status_code, 429)
+        self.assertIn("solicitudes", frenado.json()["detail"])
+        leer.assert_not_awaited()  # ni se mira si existe
+
+    async def test_registration_has_a_total_limit_across_addresses(self):
+        backend.usuarios_db["ya@k.com"] = {"identifier": "ya@k.com", "rol": "Cliente"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            for n in range(backend.intentos_acceso.MAX_REGISTROS):
+                self.assertEqual((await self._registrar(f"5000000{n}", ip=f"198.51.100.{n}")).status_code, 200)
+            self.assertEqual((await self._registrar("50000099", ip="198.51.100.200")).status_code, 429)
+
+    async def test_registering_again_with_another_alias_of_an_account_is_refused(self):
+        """Un conductor importado tiene de clave un correo inventado; con su DNI no puede duplicarse."""
+        backend.usuarios_db["inventado@kapital.com"] = {
+            "email": "inventado@kapital.com", "dni": "74538840", "rol": "Conductor"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            respuesta = await self._registrar("74538840")
+        self.assertEqual(respuesta.status_code, 400)
+        guardar.assert_not_awaited()
+
+    async def test_a_cold_instance_never_makes_the_registrant_an_administrator(self):
+        """Con la memoria vacía no se sabe si es la primera cuenta: se lee entera antes de regalar el rol."""
+        async def lectura_completa(*args, **kwargs):
+            backend.usuarios_db["ya@k.com"] = {"identifier": "ya@k.com", "rol": "Administración"}
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock(side_effect=lectura_completa)),
+            patch.object(backend, "_load_compat_user", new=AsyncMock(return_value=None)),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._registrar("60000001")
+        self.assertEqual(respuesta.json()["estado"], "Pendiente")
+        self.assertEqual(backend.usuarios_db["60000001"]["rol"], "Conductor")
+
+    async def test_the_owner_logging_in_does_not_give_an_attacker_their_attempts_back(self):
+        """Acertar borra lo de su origen, no lo de quien la ataca desde otro."""
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN - 1):
+                await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")
+            self.assertEqual((await self._entrar("chofer@k.com", "la-buena", ip="203.0.113.7")).status_code, 200)
+            self.assertEqual((await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")).status_code, 401)
+            self.assertEqual((await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")).status_code, 429)
+
     async def test_nothing_readable_is_stored_about_a_failed_attempt(self):
         with patch.object(backend, "reload_db", new=AsyncMock()):
             await self._entrar("74538840", "x", ip="198.51.100.9")
@@ -3449,7 +3516,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             pedir=pedir, url_base=lambda: "https://x.invalid/rest/v1/", cabeceras=lambda: {})
         self.assertEqual(await almacen.registrar("a" * 64, "b" * 64),
                          {"cuenta": 3, "cuenta_origen": 2, "origen": 5})
-        await almacen.olvidar("a" * 64)
+        await almacen.olvidar("a" * 64, "b" * 64)
+        self.assertEqual(llamadas[1][2], {"p_clave": "a" * 64, "p_origen": "b" * 64})
         self.assertEqual([(m, f) for m, f, _, _ in llamadas],
                          [("POST", "registrar_intento"), ("POST", "olvidar_intentos")])
         self.assertEqual(llamadas[0][2]["p_minutos"], backend.intentos_acceso.VENTANA_MINUTOS)

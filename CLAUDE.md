@@ -259,7 +259,7 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
   `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. **Desde el 2026-09-27 todos
   los endpoints piden sesión** salvo `GET /api`, el login, el registro y el cambio de contraseña (que
-  exige la actual). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
+  exige la actual); los tres llevan tope de intentos (ver «Tope de intentos»). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
   dejaba a cualquiera cambiar los documentos de cualquier conductor —y, mandando `revision_docs` como si
   fuera un documento, aprobárselos solo—, `request-update` y `mark-read` escribían, `actualizar-pasajero`
   subía fotos a un bucket público, y `GET /api/conductor/info/{unidad}` y `/api/flota/export` entregaban
@@ -303,9 +303,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   probando diría cuándo se acierta). El más bajo es por cuenta *y* origen a propósito: así quien adivina
   no puede dejar fuera a la persona, que sigue entrando desde su red. Se cuenta por **la clave de la
   cuenta**, no por lo tecleado (DNI, correo y clave son el mismo tope). Cada intento se **anota y se
-  cuenta en un solo paso** (`registrar_intento()`, con un candado por cuenta) antes de comprobar la
-  contraseña, y acertar borra los de esa cuenta: la primera versión contaba y anotaba por separado y
-  una ráfaga simultánea pasaba entera; contra la base, 20 a la vez reciben 20 números distintos. Un
+  cuenta en un solo paso** (`registrar_intento()`, con un candado por cuenta y otro por origen) antes de
+  comprobar la contraseña, y acertar borra los de esa cuenta **desde ese origen** (no los de quien la
+  ataca desde otro): la primera versión contaba y anotaba por separado y una ráfaga simultánea pasaba
+  entera; contra la base, 20 a la vez reciben 20 números distintos. **El registro, que es público, tiene
+  su propio tope** —3 altas por origen y 5 en total cada 15 minutos—, mirado antes de leer nada, y ya no
+  descarga el estado entero: comprueba si la cuenta existe por el índice de acceso y por todos sus
+  alias (un conductor importado podía volver a darse de alta con su DNI). Sin tope, cualquiera podía
+  llenar la fila única de cuentas y gastar la transferencia del plan. La promoción de «la primera
+  cuenta» a Administración solo se decide con el índice lleno o una lectura completa: una instancia fría
+  con la memoria vacía habría regalado el rol. Un
   contador en memoria no serviría en Vercel, así que van a `public.intentos_acceso`
   ([supabase/009_intentos_acceso.sql](supabase/009_intentos_acceso.sql), almacén en
   [frontend/api/intentos_acceso.py](frontend/api/intentos_acceso.py)), que solo guarda el SHA-256 de la
