@@ -325,12 +325,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   no en memoria se toma por borrada. **Y ningún endpoint puede modificar algo sin haberlo cargado**: lo que
   no se leyó no se escribe (queda un `[Kapital] … sin escribir` en el log), y una cuenta que no estaba en
   la base se trata como nueva y va con `si_ausente`, de modo que si ya existe el guardado entero se
-  rechaza con **409** en vez de sustituirla. Pasaba de verdad: revisar un documento en una instancia fría
-  no cargaba nada, inventaba una cuenta vacía con la clave del conductor y la guardaba encima de la real,
-  contraseña incluida (lo encontró una revisión independiente antes de desplegar; hay prueba). Una
-  lectura que se cuele entre el cálculo y la escritura sube `_generacion_base`, y entonces la escritura
-  no toca la base. La flota se verifica solo en los campos cambiados, y si la relectura no confirma,
-  `EscrituraSinConfirmar` avisa a quien llama de que **no** deshaga en memoria lo que ya se escribió. Y
+  rechaza con **409** en vez de sustituirla (con el mismo valor pasa: es un reintento de esa misma
+  escritura), y la instancia recarga la memoria en el acto para que la cuenta fantasma y lo que la
+  petición fallida añadió no se cuelen en el guardado siguiente. Pasaba de verdad: revisar un documento en
+  una instancia fría no cargaba nada, inventaba una cuenta vacía con la clave del conductor y la guardaba
+  encima de la real, contraseña incluida (lo encontró una revisión independiente antes de desplegar; hay
+  prueba). Una lectura que se cuele entre el cálculo y la escritura sube la generación de las claves que
+  reemplaza (`_generacion_de`; una lectura completa, `_epoca_base`), y la escritura no apunta en la base
+  esas claves, pero sí las demás. La flota se verifica solo en los campos cambiados, y si la relectura no
+  confirma o falla, `EscrituraSinConfirmar` avisa a quien llama de que **no** deshaga en memoria lo que ya
+  se escribió. Y
   hay un tope: un guardado que borraría más de 50 cuentas o unidades se rechaza con 503, por ser casi
   seguro una copia a medias. El modo `OLD` sigue con el PATCH de siempre.
   Los scripts de `scripts/` que escriben la fila entera (importar bases, cifrar contraseñas) siguen

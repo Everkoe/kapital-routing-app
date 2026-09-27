@@ -133,6 +133,16 @@ begin
     'nueva_sobre_existente_no_toca', despues -> cuenta ->> 'estado' = 'Activo'
                                      and despues -> cuenta ->> 'rol' = 'Conductor');
 
+  -- Repetir la misma alta (un reintento tras perder la respuesta) no es conflicto.
+  begin
+    r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(jsonb_build_object(
+      'ruta', jsonb_build_array(cuenta), 'valor', despues -> cuenta, 'si_ausente', true))));
+    fallo := 'no';
+  exception when others then
+    fallo := sqlstate;
+  end;
+  res := res || jsonb_build_object('reintento_de_alta_pasa', fallo = 'no');
+
   -- Un alias que vale `null` cuenta como libre.
   r := guardar_estado(jsonb_build_object('poner', jsonb_build_array(jsonb_build_object(
     'ruta', jsonb_build_array('__login__', alias), 'valor', 'null'::jsonb))));

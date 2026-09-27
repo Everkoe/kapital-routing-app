@@ -3436,7 +3436,7 @@ def _aplicar_como_postgres(fila, cambios):
         if "si_existe" in op and not isinstance(leer(op["si_existe"]), dict):
             continue
         actual = leer(op["ruta"])
-        if op.get("si_ausente") and actual is not None:
+        if op.get("si_ausente") and actual is not None and actual != op["valor"]:
             raise _YaExiste(op["ruta"])
         if op.get("si_libre") and actual is not None and actual != op["valor"]:
             continue
@@ -3837,6 +3837,93 @@ class EscrituraPorDiferenciasTestCase(unittest.IsolatedAsyncioTestCase):
         await self._guardar()
         self.assertEqual(self.fila["__notifications__"][0], {"message": "antiguo, sin id"})
         self.assertEqual(self.fila["__notifications__"][-1]["id"], 3)
+
+    # --- Segunda ronda de la revisión ------------------------------------------------------
+
+    def _nueva_cuenta(self):
+        backend.usuarios_db["caro@kapital.com"] = {
+            "identifier": "caro@kapital.com", "email": "caro@kapital.com", "rol": "Cliente"}
+
+    async def test_an_unrelated_read_during_a_creation_does_not_make_it_new_again(self):
+        """Una lectura de avisos que se cuela no puede hacer que la cuenta recién creada choque luego."""
+        await self._cargar()
+        self._nueva_cuenta()
+        self.antes_de_escribir = lambda: backend._recordar_base(
+            {"__notifications__": copy.deepcopy(self.fila["__notifications__"])})
+        await self._guardar()
+        self.antes_de_escribir = None
+        # Otra instancia la completa; si esta la creyera nueva otra vez, la
+        # reenviaría entera y chocaría con esa versión.
+        self.fila["caro@kapital.com"]["nombre"] = "Carolina"
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()  # antes: 409
+        self.assertEqual(self.fila["caro@kapital.com"]["nombre"], "Carolina")
+        self.assertEqual(self.fila["beto@kapital.com"]["nombre"], "Roberto")
+
+    async def test_a_full_read_during_a_creation_does_not_delete_it_later(self):
+        await self._cargar()
+        self._nueva_cuenta()
+
+        def lectura_completa_colada():
+            # Empezó antes de la escritura: la cuenta nueva no está en lo que leyó.
+            backend._olvidar_base_entera()
+            backend._recordar_base(copy.deepcopy(self.fila))
+            backend.usuarios_db = {k: copy.deepcopy(v) for k, v in self.fila.items()
+                                   if not k.startswith("__")}
+
+        self.antes_de_escribir = lectura_completa_colada
+        await self._guardar()
+        self.antes_de_escribir = None
+        self.assertIn("caro@kapital.com", self.fila)
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()
+        self.assertIn("caro@kapital.com", self.fila, "ni se borra ni choca")
+
+    async def test_a_409_does_not_stick_nor_leak_the_failed_request(self):
+        await self._cargar()
+        self.fila["zeta@kapital.com"] = {"identifier": "zeta@kapital.com", "password": "real"}
+        backend.usuarios_db["zeta@kapital.com"] = {"identifier": "zeta@kapital.com", "rol": "Cliente"}
+        backend.notifications_db.append({"id": 99, "message": "de la petición que falla"})
+        with self.assertRaises(HTTPException) as caught:
+            await self._guardar()
+        self.assertEqual(caught.exception.status_code, 409)
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar()  # antes: 409 otra vez, y otra…
+        self.assertEqual(self.fila["beto@kapital.com"]["nombre"], "Roberto")
+        self.assertEqual(self.fila["zeta@kapital.com"], {"identifier": "zeta@kapital.com", "password": "real"})
+        self.assertNotIn(99, [n["id"] for n in self.fila["__notifications__"]],
+                         "lo de la petición fallida no se cuela en el guardado siguiente")
+
+    def test_repeating_a_creation_is_not_a_conflict(self):
+        """El cliente reintenta si se pierde la respuesta: la misma alta dos veces no es un 409."""
+        cambios = {"poner": [{"ruta": ["caro@kapital.com"], "valor": {"rol": "Cliente"}, "si_ausente": True}]}
+        una_vez = _aplicar_como_postgres(self.fila, cambios)
+        dos_veces = _aplicar_como_postgres(una_vez, cambios)
+        self.assertEqual(una_vez, dos_veces)
+        with self.assertRaises(_YaExiste):
+            _aplicar_como_postgres(una_vez, {"poner": [
+                {"ruta": ["caro@kapital.com"], "valor": {"rol": "Otra"}, "si_ausente": True}]})
+
+    async def test_a_failed_reread_after_deleting_a_unit_does_not_bring_it_back(self):
+        await self._cargar()
+        with (
+            patch.object(backend, "_db_http_request", new=self._pedir),
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_load_compat_fleet",
+                         new=AsyncMock(side_effect=HTTPException(status_code=503, detail="caída"))),
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.delete_flota("K-002")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertNotIn("K-002", self.fila["__flota__"])
+        self.assertNotIn("K-002", backend.conductores_db, "no se deshace lo que sí se escribió")
+
+        backend.usuarios_db["beto@kapital.com"]["nombre"] = "Roberto"
+        await self._guardar(backend.persist)
+        self.assertNotIn("K-002", self.fila["__flota__"], "y el siguiente guardado no la resucita")
 
     def test_the_diff_is_pure_and_symmetric(self):
         """Sin cambios, sin nada que hacer; y lo que calcula es exactamente la diferencia."""

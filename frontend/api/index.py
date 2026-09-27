@@ -1296,18 +1296,33 @@ _normalized_snapshot_ready = False
 # registra lo que mete en memoria, y solo eso.
 _base_remota: Dict[str, str] = {}
 _base_rutas: Optional[str] = None
-# Sube cada vez que una carga reemplaza algo de la memoria. Un guardado la
-# anota antes de calcular sus cambios: si al terminar ha cambiado, una lectura
-# se le coló entre medias —con datos de antes de su escritura— y la base que
-# dejó esa lectura es la que manda. Ver `_guardar_cambios`.
-_generacion_base = 0
+# Cuántas veces una carga ha reemplazado cada clave en memoria, y la época, que
+# sube cuando una lectura completa las reemplaza todas. Un guardado las anota
+# antes de calcular: al terminar, solo apunta en la base las claves que ninguna
+# lectura tocó entre medias. Las que sí, las dejó esa lectura —con datos de
+# antes de la escritura— en memoria y en base a la vez, y apuntar encima lo
+# escrito las descuadraría. Ver `_guardar_cambios`.
+_generacion_de: Dict[str, int] = {}
+_epoca_base = 0
+_generacion_rutas = 0
+
+
+def _tocar_base(clave: str) -> None:
+    _generacion_de[clave] = _generacion_de.get(clave, 0) + 1
 
 
 def _recordar_base(valores: Mapping[str, Any]) -> None:
-    global _generacion_base
-    _generacion_base += 1
     for clave, valor in valores.items():
-        _base_remota[str(clave)] = escritura_estado.huella(valor)
+        clave = str(clave)
+        _base_remota[clave] = escritura_estado.huella(valor)
+        _tocar_base(clave)
+
+
+def _olvidar_base_entera() -> None:
+    """Una lectura completa va a reemplazarlo todo."""
+    global _epoca_base
+    _base_remota.clear()
+    _epoca_base += 1
 
 
 def _recordar_base_de_cuentas(cuentas: Mapping[str, Any]) -> None:
@@ -1319,6 +1334,7 @@ def _recordar_base_de_cuentas(cuentas: Mapping[str, Any]) -> None:
     """
     for clave in [c for c in _base_remota if escritura_estado.es_cuenta(c)]:
         del _base_remota[clave]
+        _tocar_base(clave)
     _recordar_base({c: v for c, v in cuentas.items() if escritura_estado.es_cuenta(c)})
 
 
@@ -1377,7 +1393,7 @@ def _reset_db_runtime_state() -> None:
     _normalized_snapshot_ids = {}
     _normalized_snapshot_ready = False
     global _base_rutas
-    _base_remota.clear()
+    _olvidar_base_entera()
     _base_rutas = None
 
 
@@ -2058,13 +2074,16 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
     # instancia acaba de reconstruir con las cuentas que tenía cargadas puede
     # estar a medias, así que se vuelve a leer cuando haga falta.
     _login_index_loaded_at = None
-    generacion = _generacion_base
     try:
         cambios, base_nueva, sin_leer = escritura_estado.calcular(
             _base_remota, payload.get("usuarios") or {}, alias_de=_alias_de_login
         )
     except escritura_estado.BorradoSospechoso as exc:
         _raise_database_unavailable(operation, error=exc, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+    # Anotadas en el mismo paso síncrono que el cálculo: nada puede colarse.
+    epoca = _epoca_base
+    generaciones = {clave: _generacion_de.get(clave, 0) for clave in base_nueva}
+    generacion_rutas = _generacion_rutas
     if sin_leer:
         # Un endpoint cambió algo que no había cargado: ese cambio no se guarda.
         # No debería pasar; si pasa, que quede rastro de cuál.
@@ -2089,9 +2108,16 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
         )
         if response.status_code == 409:
             # Una cuenta que esta instancia creía nueva ya existe en la base.
-            # La función lo rechazó entero: nada se escribió.
-            _invalidate_db_cache()
+            # La función lo rechazó entero: nada se escribió. La memoria se
+            # recarga aquí mismo: si no, la cuenta fantasma y lo que la petición
+            # añadió a avisos y actividad seguirían ahí, y cada guardado
+            # siguiente volvería a chocar o escribiría lo de una petición fallida.
             print(f"[Kapital] {operation}: rechazado, una cuenta nueva ya existía")
+            try:
+                await _load_full_state_locked(include_defaults=False)
+            except Exception as exc:  # noqa: BLE001 - el 409 se devuelve igual
+                print(f"[Kapital] {operation}: no se pudo recargar tras el 409: {type(exc).__name__}")
+            _invalidate_db_cache()
             raise HTTPException(
                 status_code=409,
                 detail="Esa cuenta ya existe. Vuelve a cargar la página e inténtalo de nuevo.",
@@ -2102,17 +2128,20 @@ async def _guardar_cambios(payload: Dict[str, Any], operation: str) -> None:
                 status_code=response.status_code,
                 detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
             )
-        # Si una lectura se coló entre el cálculo y aquí, memoria y base son las
-        # de esa lectura —anteriores a esta escritura—, y apuntar encima lo que
-        # esta escribió las descuadraría: el siguiente guardado desharía el
-        # cambio. Mejor que la próxima carga las ponga al día.
-        if _generacion_base == generacion:
+        # Si una lectura se coló entre el cálculo y aquí, las claves que tocó
+        # quedaron en memoria y en base con datos de antes de esta escritura, y
+        # apuntar encima lo escrito las descuadraría: el siguiente guardado
+        # desharía el cambio. Esas se dejan para la próxima carga; el resto sí
+        # se apunta, o una cuenta recién creada parecería nueva otra vez.
+        if _epoca_base == epoca:
             for clave, huella_clave in base_nueva.items():
+                if _generacion_de.get(clave, 0) != generaciones[clave]:
+                    continue
                 if huella_clave is None:
                     _base_remota.pop(clave, None)
                 else:
                     _base_remota[clave] = huella_clave
-            if "rutas" in cambios:
+            if "rutas" in cambios and _generacion_rutas == generacion_rutas:
                 _base_rutas = huella_rutas
     _invalidate_db_cache()
 
@@ -2539,7 +2568,7 @@ async def _load_full_state_locked(*, include_defaults: bool) -> None:
     # Apply the snapshot only after every shape has been validated. A failed
     # provider response therefore leaves the last known in-memory state intact.
     global _base_rutas
-    _base_remota.clear()
+    _olvidar_base_entera()
     _recordar_base(data["usuarios"])
     _base_rutas = escritura_estado.huella(data["rutas"]) if "rutas" in data else None
     usuarios_db = decoded["usuarios"]
@@ -3029,9 +3058,9 @@ async def _load_compat_routes_locked() -> None:
         await _load_full_state_locked(include_defaults=False)
         return
     rutas_estado_actual = value
-    global _base_rutas, _generacion_base
+    global _base_rutas, _generacion_rutas
     _base_rutas = escritura_estado.huella(value)
-    _generacion_base += 1
+    _generacion_rutas += 1
     _routes_projection_loaded_at = time.monotonic()
 
 
@@ -5227,6 +5256,10 @@ async def request_data_update(payload: UpdateDataRequestPayload, session_token: 
 @app.post("/api/admin/resolve-update")
 async def resolve_data_update(payload: ResolveDataRequestPayload, session_token: SessionCookie = None):
     await require_admin_session(session_token)
+    # Sin esto decidía sobre una copia que podía tener minutos y guardaba
+    # `solicitudes_cambio` entera desde ella: una solicitud hecha entretanto en
+    # otra instancia se perdía.
+    await reload_db()
     admin = usuarios_db.get(payload.admin_email)
     if not admin or admin.get("rol") not in ["Administración", "Administrador", "Gerente de Operaciones"]:
         raise HTTPException(status_code=403, detail="No autorizado")
@@ -6621,7 +6654,14 @@ async def _persist_and_verify_fleet(
             "__login__": _refrescar_indice_login(),
         },
     }, "persist_fleet")
-    await _load_compat_fleet(force=True)
+    try:
+        await _load_compat_fleet(force=True)
+    except Exception as exc:
+        # La escritura ya llegó: deshacer ahora en memoria haría que el
+        # siguiente guardado la revirtiera.
+        print(f"[Supabase] verify_fleet_write reread failed error={type(exc).__name__}")
+        _invalidate_db_cache()
+        raise EscrituraSinConfirmar() from exc
     stored = conductores_db.get(unit_id)
     if expected is None:
         verified = stored is None

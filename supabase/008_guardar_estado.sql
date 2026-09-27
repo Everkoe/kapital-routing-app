@@ -21,8 +21,9 @@
 --           `si_existe`: solo si esa ruta sigue siendo un objeto (un campo de una
 --           cuenta que otra instancia borró no la resucita a medias).
 --           `si_libre`: solo si la ruta está vacía o ya vale eso (alias de acceso).
---           `si_ausente`: la ruta no puede existir ya (una cuenta nueva). Si existe,
---           se rechaza el guardado entero con HTTP 409: escribirla encima
+--           `si_ausente`: la ruta no puede existir ya (una cuenta nueva). Si existe
+--           con otro valor, se rechaza el guardado entero con HTTP 409 (con el
+--           mismo valor es un reintento de esta escritura y pasa): escribirla encima
 --           sustituiría una cuenta real —con su contraseña— por lo que esta
 --           instancia creyó que era nueva.
 --   listas: [{clave, poner: [elementos], quitar: [ids]}]  -- avisos y actividad, por `id`
@@ -114,8 +115,10 @@ begin
       end if;
     end if;
     v_actual := v_estado #> v_ruta;
+    -- Si ya vale exactamente eso, es esta misma escritura repetida (el cliente
+    -- reintenta cuando se pierde la respuesta): no es un conflicto.
     if coalesce((v_op ->> 'si_ausente')::boolean, false)
-       and v_actual is not null and v_actual <> 'null'::jsonb then
+       and v_actual is not null and v_actual <> 'null'::jsonb and v_actual <> (v_op -> 'valor') then
       -- PT409: PostgREST lo devuelve como HTTP 409, y la excepción deshace
       -- todo lo aplicado antes en esta misma llamada.
       raise exception 'guardar_estado: % ya existe', v_ruta[1] using errcode = 'PT409';
