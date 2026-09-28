@@ -3571,6 +3571,15 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         base.assert_awaited_once_with("borrar_programacion", {"dia": "2026-09-29"}, write=True)
         self.assertEqual(backend.actividad_db[0]["action_type"], "Programación borrada")
 
+    async def test_deleting_a_plan_needs_the_day_to_be_named(self):
+        """Sin fecha borraba el plan de hoy: con un borrado, nada se da por supuesto."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            respuesta = await self._llamar("POST", "/api/programador/plan/borrar", token, json={})
+        self.assertEqual(respuesta.status_code, 400)
+        base.assert_not_awaited()
+
     async def test_redoing_a_plan_is_logged_as_redone_not_created(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")

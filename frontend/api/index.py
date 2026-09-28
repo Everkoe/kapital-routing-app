@@ -6250,6 +6250,9 @@ async def borrar_plan(cuerpo: Dict[str, Any] = Body(...),
     se borra.
     """
     actor = await require_admin_session(session_token)
+    # Con un borrado no se da nada por supuesto: sin fecha borraba el de hoy.
+    if not cuerpo.get("fecha"):
+        raise HTTPException(status_code=400, detail="Indica el día cuya programación se borra.")
     dia = _dia_o_hoy(cuerpo.get("fecha"))
     resultado = await _rpc_programador("borrar_programacion", {"dia": dia}, write=True)
     registrar_actividad(

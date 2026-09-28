@@ -32,11 +32,12 @@ const ConfirmarPlan = ({ abierto, dia, ocupado, onConfirmar, onCancelar }) => {
           No se puede deshacer.
         </p>
         <div className="pw-confirmar-botones">
-          <button type="button" className="pw-btn" onClick={onCancelar} disabled={ocupado}>
+          {/* El foco en «Cancelar»: un Enter sin querer no debe borrar el día. */}
+          <button type="button" className="pw-btn" onClick={onCancelar} disabled={ocupado} autoFocus>
             Cancelar
           </button>
           <button type="button" className="pw-btn pw-btn-peligro" onClick={onConfirmar}
-            disabled={ocupado} autoFocus>
+            disabled={ocupado}>
             <Trash2 size={16} aria-hidden="true" />
             Borrar
           </button>

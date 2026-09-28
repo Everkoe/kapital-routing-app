@@ -39,8 +39,9 @@ const ServiceMap = ({ agentes = [], titulo, plan = false }) => {
   return (
     <div className="pw-map">
       {/* `key`: el visor no recarga si solo cambia la dirección del iframe. */}
+      {/* Sin `referrerPolicy`: el visor sin clave no la necesita, y la del
+          navegador solo envía el dominio, no la dirección de la página. */}
       <iframe key={url} src={url} className="pw-map-google" loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
         title={`Domicilios del servicio ${titulo || ''} en Google Maps`} />
 
       <p className="pw-map-nota">

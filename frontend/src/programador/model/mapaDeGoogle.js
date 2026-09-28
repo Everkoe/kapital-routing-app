@@ -32,9 +32,20 @@ export const ZOOM_DE_UN_PUNTO = 16;
 
 const coordenada = (agente) => `${Number(agente.lat).toFixed(6)},${Number(agente.lng).toFixed(6)}`;
 
-/** Los agentes que tienen punto, en el orden del servicio. */
+// Lima y Callao con margen, los mismos límites que usa la base al deducir
+// domicilios. Un punto fuera —un 0,0 guardado es el golfo de Guinea— no tiene
+// camino por carretera, y Google entonces no dibuja la ruta entera.
+const EN_LIMA = { latMin: -13.2, latMax: -11.0, lngMin: -77.6, lngMax: -76.3 };
+
+const enLima = (a) => {
+  const lat = Number(a.lat);
+  const lng = Number(a.lng);
+  return lat >= EN_LIMA.latMin && lat <= EN_LIMA.latMax && lng >= EN_LIMA.lngMin && lng <= EN_LIMA.lngMax;
+};
+
+/** Los agentes que tienen punto en Lima, en el orden del servicio. */
 export const paradasConPunto = (agentes) =>
-  (agentes || []).filter((a) => hasCoordinate(a?.lat) && hasCoordinate(a?.lng));
+  (agentes || []).filter((a) => hasCoordinate(a?.lat) && hasCoordinate(a?.lng) && enLima(a));
 
 /** La URL del visor para esos agentes, o `null` si ninguno tiene punto. */
 export const urlDelMapa = (agentes) => {

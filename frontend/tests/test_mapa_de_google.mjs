@@ -42,3 +42,9 @@ test('la misma ruta se puede abrir en Google Maps', () => {
   assert.equal(urlParaAbrir([agente('A', -12.1, -77.0)]),
     'https://www.google.com/maps/search/?api=1&query=-12.100000,-77.000000');
 });
+
+test('un punto fuera de Lima no entra en la ruta', () => {
+  // Un 0,0 guardado es el golfo de Guinea: Google no encuentra camino y la ruta entera desaparece.
+  const agentes = [agente('A', -12.1, -77.0), agente('B', 0, 0), agente('C', '0', '0'), agente('D', -12.2, -77.1)];
+  assert.deepEqual(paradasConPunto(agentes).map((a) => a.id), ['A', 'D']);
+});
