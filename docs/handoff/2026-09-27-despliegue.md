@@ -1,5 +1,9 @@
 # Despliegue de `develop` a `main` — 2026-09-27
 
+**Hecho el 2026-09-27** (merge `bee7f21`): Vercel lo publicó, el CI de GitHub (Python 3.12) pasó,
+`migrar_sesiones.py` no encontró sesiones abiertas que pasar, y en producción todo lo cerrado responde 401
+sin sesión. Lo que sigue queda como referencia para el próximo despliegue parecido.
+
 Los commits de `develop` que aún no están en producción (`git log origin/main..develop`):
 
 | Commit | Qué cambia |

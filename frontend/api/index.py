@@ -3248,38 +3248,6 @@ async def reload_routes_summary():
     except Exception as exc:
         _raise_database_unavailable("load_routes_summary", error=exc)
 
-async def upload_evidence_to_supabase(base64_str: str, filename: str) -> str:
-    """Sube una imagen Base64 al bucket 'evidencias' de Supabase Storage."""
-    _ensure_storage_ready(
-        "storage_upload",
-        write=True,
-        detail=DATABASE_WRITE_UNAVAILABLE_DETAIL,
-    )
-    try:
-        if "," in base64_str:
-            _, base64_str = base64_str.split(",", 1)
-        file_data = base64.b64decode(base64_str)
-        
-        # SUPABASE_URL es "https://[...].supabase.co/rest/v1"
-        storage_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/evidencias/{filename}"
-        
-        hdrs = _build_supabase_headers(
-            STORAGE_CONFIG.key,
-            content_type="image/jpeg",
-        )
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.post(storage_url, headers=hdrs, content=file_data)
-            if res.status_code in [200, 201]:
-                public_url = SUPABASE_URL.replace("/rest/v1", "") + f"/storage/v1/object/public/evidencias/{filename}"
-                return public_url
-            else:
-                print(f"[Supabase] storage upload failed status={res.status_code}")
-                return None
-    except Exception as e:
-        print(f"[Supabase] storage upload failed error={type(e).__name__}")
-        return ""
-
 # --- Documentos del conductor en Supabase Storage -------------------------
 #
 # Guardarlos como base64 dentro de `app_state` hacía que cada envío de perfil
@@ -3817,17 +3785,18 @@ async def register_user(usuario: UsuarioRegistro, request: Request = None):
         "nombre": usuario.nombre.strip() if usuario.nombre else ("Conductor Pendiente" if rol_solicitado == "Conductor" else "Usuario"),
         "rol": "Administración" if not hay_cuentas else rol_solicitado,
         "telefono": usuario.telefono,
-        "unidad_id": usuario.unidad_id.strip() if usuario.unidad_id else None,
-        "empresa_id": usuario.empresa_id,
+        # La unidad y la empresa no se aceptan de quien se registra: deciden qué
+        # pasajeros ve un conductor y qué personal ve un cliente, así que las
+        # asigna Administración (la unidad, al aprobar con su padrón). Tomadas
+        # del registro, bastaba declararse de la K-027 y que alguien pulsara
+        # «Aprobar» para ver nombres y domicilios de sus pasajeros.
+        "unidad_id": None,
+        "empresa_id": None,
         "avatar": usuario.avatar,
         "estado": estado
     }
     usuarios_db[identifier_clean] = nuevo_usuario
     
-    if rol_solicitado == "Conductor" and usuario.unidad_id:
-        # Sembrar toca la flota, y lo no leído no se guarda.
-        await _load_compat_fleet()
-        _sembrar_unidad(usuario.unidad_id.strip(), nuevo_usuario)
             
     # Add notification for new registration
     if rol_solicitado == "Conductor":
@@ -4176,6 +4145,13 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
     # silently accepting a privilege escalation attempt.
     if update_data.rol is not None:
         raise HTTPException(status_code=400, detail="El rol no puede modificarse desde el perfil.")
+    # La unidad decide qué servicios y qué pasajeros ve cada conductor, así que
+    # la asigna Administración. Desde aquí cualquiera podía ponerse la de otro.
+    # Se rechaza antes de tocar nada: después, el 403 dejaba en memoria la
+    # contraseña o el nombre nuevos, y el siguiente guardado los escribía.
+    if update_data.unidad_id and _clave_de_vehiculo(update_data.unidad_id) != _clave_de_vehiculo(
+            user.get("unidad_id")):
+        raise HTTPException(status_code=403, detail="La unidad la asigna Administración.")
     
     # Validar password actual si se intenta cambiar la password
     if update_data.new_password:
@@ -4191,7 +4167,6 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
         if "perfil_conductor" not in user:
             user["perfil_conductor"] = {}
         user["perfil_conductor"]["fotoVehiculo"] = _foto_guardable(update_data.fotoVehiculo)
-    if update_data.unidad_id: user["unidad_id"] = update_data.unidad_id
 
     await persist_users_only()
     return {
@@ -4380,6 +4355,23 @@ async def _eventos_de_acceso() -> List[Dict[str, Any]]:
     return [e for e in (_evento_de_acceso(f) for f in filas) if e]
 
 
+def _correo_propio(clave: str, usuario: Dict[str, Any]) -> Optional[str]:
+    """El correo de la persona, que no siempre es la clave de su cuenta.
+
+    Las cuentas importadas de las bases de conductores tienen por clave un
+    `apellido.apellido@kapital.com` inventado en la importación. Su correo real
+    está en `email` (y en `perfil_conductor.correo`, que `asignar_correo`
+    mantiene igual). Si la base no traía ninguno, la importación dejó la clave
+    en `email`, y eso no es un correo de la persona: se devuelve nada.
+    """
+    correo = str(usuario.get("email") or "").strip()
+    perfil = usuario.get("perfil_conductor")
+    sin_correo_declarado = isinstance(perfil, dict) and "correo" in perfil and not perfil.get("correo")
+    if sin_correo_declarado and correo.lower() == str(clave).strip().lower():
+        return None
+    return correo or str(clave)
+
+
 async def _ultimos_accesos() -> Dict[str, str]:
     """La última vez que entró cada cuenta. Si la tabla falla, vacío."""
     try:
@@ -4463,21 +4455,26 @@ async def get_all_users(email: str, session_token: SessionCookie = None):
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
     await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
-    # La última conexión sale de la tabla de sesiones. La que queda escrita en
-    # el usuario es la de antes de que existiera, y solo se usa si la cuenta no
-    # ha vuelto a entrar desde entonces: cualquier acceso nuevo es posterior.
+    # La última conexión sale solo de la tabla de sesiones. La que quedó escrita
+    # en el usuario, de antes de que existiera, no sirve: la dejaron sobre todo
+    # las comprobaciones de las importaciones (16 cuentas «entraron» el mismo
+    # minuto y siguen con la contraseña provisional), y con ella la pestaña
+    # «Activos» enseñaba como activos a conductores que nunca han entrado.
     accesos = await _ultimos_accesos()
 
     # Devolver lista de usuarios sin contraseñas
     lista_usuarios = []
     for k, v in usuarios_db.items():
         lista_usuarios.append({
+            # `email` es la clave de la cuenta, con la que operan las acciones de
+            # la tabla; el correo que se enseña es `correo`.
             "email": v.get("identifier", k),
+            "correo": _correo_propio(k, v),
             "nombre": v.get("nombre", "Usuario"),
             "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
             "perfil_conductor": v.get("perfil_conductor", None),
-            "last_login": accesos.get(v.get("identifier", k)) or v.get("last_login", None),
+            "last_login": accesos.get(v.get("identifier", k)),
             "avatar": v.get("avatar", None)
         })
     return {"usuarios": lista_usuarios}
@@ -4594,12 +4591,14 @@ async def approve_user(
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
         
     usuarios_db[target_email]["estado"] = "Activo"
-    await refrescar_sesiones_de(usuarios_db[target_email])
 
     # Si es conductor y el admin proporcionó un Padrón (unidad_id)
     if usuarios_db[target_email].get("rol") == "Conductor" and unidad_id:
         usuarios_db[target_email]["unidad_id"] = unidad_id.strip()
         _sembrar_unidad(unidad_id.strip(), usuarios_db[target_email])
+    # Después de la unidad: refrescar antes dejaba en la sesión la unidad vieja
+    # hasta 12 horas, y con ella los pasajeros de otro coche.
+    await refrescar_sesiones_de(usuarios_db[target_email])
 
     registrar_actividad(
         "Acceso aprobado",
@@ -5872,6 +5871,9 @@ PROGRAMADOR_ERROR_STATUS = {
     "sin_filas_historico": (409, "El día de origen no tiene asignaciones válidas."),
     "accion_desconocida": (400, "La programación contiene una acción no reconocida."),
     "entrada_invalida": (400, "La novedad contiene datos inválidos."),
+    "no_esta_en_el_plan": (404, "Ese pasajero ya no está en tu servicio. Actualiza la lista."),
+    "estado_invalido": (400, "Estado de viaje no reconocido."),
+    "fuera_de_hora": (409, "Solo se puede marcar desde 3 horas antes hasta 6 horas después de la hora del servicio."),
 }
 
 
@@ -6530,84 +6532,173 @@ async def emergency_reassign(request: EmergencyRequest, session_token: SessionCo
         await persist()
         return {"message": f"Falla Temporal procesada. La ruta de las {request.horario} de {request.conductor_id} ha sido reasignada a {rescatista['conductor']}.", "rutas_actualizadas": rutas_estado_actual, "rescatista_id": rescatista["conductor"]}
 
-class EstadoPasajeroUpdate(BaseModel):
-    conductor_id: str
-    horario: str
-    agente_id: str
-    estado: str # "Recogido" u otro
-    evidencia_foto: Optional[str] = None
+# --- El plan, para el conductor y para el cliente ---------------------------
+#
+# Sus portales leían el tablero viejo (`rutas_estado_actual`), que nada vuelve a
+# escribir: lo que decidía el Programador no llegaba a nadie. Ahora leen
+# `programacion`, filtrada en la base (supabase/010): el plan de un día entero
+# son ~150 KB y a un conductor le tocan unos pocos.
 
-@app.get("/api/mis-rutas/{conductor_id}")
-async def mis_rutas(conductor_id: str, session_token: SessionCookie = None):
-    await require_session_owner(
-        session_token, actor_fields=("unidad_id",), requested=conductor_id,
-        resource="las rutas de esa unidad",
-    )
-    if _is_compat_storage() and not _full_cache_is_fresh():
-        await _load_compat_routes()
-    else:
-        await reload_db()
-    mis_rutas_asignadas = [r for r in rutas_estado_actual if r["conductor"] == conductor_id]
-    return mis_rutas_asignadas
+# El conductor ve hoy y mañana en sus pestañas. Mañana no es por adelantar: los
+# recojos con entrada de madrugada (00:00-02:00) empiezan la noche anterior. Y
+# se lee también ayer, sin pestaña: una salida de las 23:00 sigue dejando gente
+# pasada la medianoche, y sin ayer desaparecía a mitad de servicio. Qué se puede
+# marcar lo decide la base servicio a servicio (de 3 h antes a 6 h después de
+# su turno, `marcar_viaje` en supabase/011), no esta ventana de días.
+DIAS_DEL_CONDUCTOR = 2
+DIAS_ATRAS_CONDUCTOR = 1
 
-@app.post("/api/actualizar-pasajero")
-async def actualizar_pasajero(data: EstadoPasajeroUpdate, session_token: SessionCookie = None):
-    # Además de escribir en el tablero, sube una foto a un bucket público: sin
-    # sesión era un almacén abierto para cualquiera.
+# Cuánto hacia atrás consulta el cliente, para revisar quién no se presentó.
+# Hacia delante, lo mismo que se deja programar.
+DIAS_ATRAS_CLIENTE = 31
+
+ESTADOS_DE_VIAJE = ("a_bordo", "no_se_presento")
+MAYOR_BIGINT = 2 ** 63 - 1
+
+
+def _ventana_del_conductor() -> tuple:
+    """Hoy, y el primer y último día cuyos servicios lee (y puede marcar) un conductor."""
+    hoy = _hoy_en_lima()
+    return hoy, hoy - timedelta(days=DIAS_ATRAS_CONDUCTOR), hoy + timedelta(days=DIAS_DEL_CONDUCTOR - 1)
+
+
+def _unidad_consultada(actor: Optional[Dict[str, Any]], pedida: Optional[str]) -> str:
+    """La unidad cuyos servicios se leen, normalizada como en la base.
+
+    Un conductor lee la de su sesión y ninguna otra; un administrador, la que
+    pida. Sin actor no hay nada: con la exigencia de sesión apagada (el modo
+    de vuelta atrás) estas rutas quedarían abiertas a cualquiera, y no tienen
+    ningún cliente viejo que dependa de ello.
+    """
+    if actor is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if actor.get("rol") == "Conductor":
+        propia = _clave_de_vehiculo(actor.get("unidad_id"))
+        if not propia:
+            raise HTTPException(
+                status_code=409,
+                detail="Tu cuenta todavía no tiene una unidad asignada. Pídesela a Administración.",
+            )
+        if pedida and _clave_de_vehiculo(pedida) != propia:
+            raise HTTPException(status_code=403, detail="No tienes acceso a los servicios de esa unidad.")
+        return propia
+    if actor.get("rol") not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="El rol actual no tiene permiso para esta acción.")
+    clave = _clave_de_vehiculo(pedida)
+    if not clave:
+        raise HTTPException(status_code=400, detail="Indica la unidad.")
+    return clave
+
+
+@app.get("/api/conductor/servicios")
+async def servicios_del_conductor(unidad: Optional[str] = None,
+                                  session_token: SessionCookie = None):
+    """Los servicios de hoy y de mañana de una unidad, con sus pasajeros en orden."""
     actor = await require_any_session(session_token)
-    if (
-        actor is not None
-        and actor.get("rol") not in _ADMIN_ROLES
-        and _owner_key(actor.get("unidad_id")) != _owner_key(data.conductor_id)
-    ):
-        raise HTTPException(status_code=403, detail="No tienes acceso a esa ruta.")
-    await reload_db()
-    ruta = next((r for r in rutas_estado_actual if r["conductor"] == data.conductor_id and r["horario"] == data.horario), None)
-    if ruta:
-        agente = next((a for a in ruta["agentes"] if a["id"] == data.agente_id), None)
-        if agente:
-            agente["estado"] = data.estado
-            
-            # Guardar evidencia en Supabase Storage si existe
-            if data.evidencia_foto:
-                try:
-                    filename = f"evidencia_{data.agente_id}_{int(datetime.now().timestamp())}.jpg"
-                    public_url = await upload_evidence_to_supabase(data.evidencia_foto, filename)
-                    if public_url:
-                        agente["evidencia_foto_url"] = public_url
-                except Exception as e:
-                    print(f"Error guardando evidencia: {e}")
-            
-            await persist()
-            return {"message": "Estado del pasajero actualizado exitosamente."}
-    raise HTTPException(status_code=404, detail="Ruta o agente no encontrado")
+    clave = _unidad_consultada(actor, unidad)
+    hoy, desde, hasta = _ventana_del_conductor()
+    resultado = await _rpc_programador("servicios_de_unidad", {
+        "p_clave": clave, "p_desde": desde.isoformat(), "p_hasta": hasta.isoformat(),
+    })
+    resultado = resultado if isinstance(resultado, dict) else {}
+    return {
+        "hoy": hoy.isoformat(),
+        "dias": [(hoy + timedelta(days=n)).isoformat() for n in range(DIAS_DEL_CONDUCTOR)],
+        "unidad": clave,
+        "servicios": resultado.get("servicios") or [],
+        "dias_con_plan": resultado.get("dias_con_plan") or [],
+    }
 
-@app.get("/api/cliente/rutas/{empresa_id}")
-async def get_rutas_cliente(empresa_id: str, session_token: SessionCookie = None):
-    await require_session_owner(
-        session_token, actor_fields=("empresa_id",), requested=empresa_id,
-        resource="las rutas de esa empresa",
-    )
-    if _is_compat_storage() and not _full_cache_is_fresh():
-        await _load_compat_routes()
-    else:
-        await reload_db()
-    global rutas_estado_actual
-    try:
-        rutas_filtradas = []
-        for ruta in rutas_estado_actual:
-            agentes_empresa = [ag for ag in ruta.get("agentes", []) if ag.get("empresa") == empresa_id.upper()]
-            if agentes_empresa:
-                ruta_copy = ruta.copy()
-                ruta_copy["agentes"] = agentes_empresa
-                rutas_filtradas.append(ruta_copy)
-        return rutas_filtradas
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener rutas del cliente: {str(e)}")
 
-# Quién ve la ficha de un conductor: Administración, el cliente (su panel de
-# auditoría la enseña) y el propio conductor, solo la suya.
-_ROLES_FICHA_CONDUCTOR = (*_ADMIN_ROLES, "Cliente")
+@app.post("/api/conductor/servicios/marcar")
+async def marcar_pasajero(cuerpo: Dict[str, Any] = Body(...),
+                          session_token: SessionCookie = None):
+    """El conductor marca que un pasajero subió o no se presentó, o lo desmarca.
+
+    Solo el conductor de la unidad: la marca es su palabra sobre lo que pasó y
+    la ve el cliente. Vale para los mismos días que ve; la base comprueba que
+    ese pasajero siga en su servicio.
+    """
+    actor = await require_any_session(session_token)
+    if actor is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if actor.get("rol") != "Conductor":
+        raise HTTPException(status_code=403, detail="Solo el conductor de la unidad marca a sus pasajeros.")
+    clave = _unidad_consultada(actor, None)
+    fila = cuerpo.get("id")
+    # Un id fuera de `bigint` lo rechaza Postgres, y eso llegaba como un 503 que
+    # además vaciaba la caché de la instancia en cada intento.
+    if isinstance(fila, bool) or not isinstance(fila, int) or not 0 < fila <= MAYOR_BIGINT:
+        raise HTTPException(status_code=400, detail="Falta el pasajero.")
+    estado = cuerpo.get("estado")
+    if estado is not None and estado not in ESTADOS_DE_VIAJE:
+        raise HTTPException(status_code=400, detail="Estado de viaje no reconocido.")
+    _, desde, hasta = _ventana_del_conductor()
+    return await _rpc_programador("marcar_viaje", {
+        "p_id": fila, "p_clave": clave, "p_estado": estado,
+        # La clave de la cuenta, no `identifier`: 124 de 128 cuentas no lo
+        # llevan, y la marca quedaba sin autor según qué instancia respondiera.
+        "p_por": _clave_de_cuenta(actor),
+        "p_desde": desde.isoformat(), "p_hasta": hasta.isoformat(),
+    }, write=True)
+
+
+def _empresa_consultada(actor: Optional[Dict[str, Any]], pedida: Optional[str]) -> str:
+    """La empresa cuyo personal se consulta: la del cliente, o la que pida Administración."""
+    if actor is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
+    if actor.get("rol") == "Cliente":
+        propia = str(actor.get("empresa_id") or "").strip()
+        if not _clave_de_vehiculo(propia):
+            raise HTTPException(
+                status_code=409,
+                detail="Tu cuenta todavía no tiene una empresa asignada. Pídesela a Administración.",
+            )
+        if pedida and _clave_de_vehiculo(pedida) != _clave_de_vehiculo(propia):
+            raise HTTPException(status_code=403, detail="No tienes acceso al personal de esa empresa.")
+        return propia
+    if actor.get("rol") not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="El rol actual no tiene permiso para esta acción.")
+    if not _clave_de_vehiculo(pedida):
+        raise HTTPException(status_code=400, detail="Indica la empresa.")
+    return str(pedida).strip()
+
+
+@app.get("/api/cliente/servicios")
+async def servicios_del_cliente(fecha: Optional[str] = None, empresa: Optional[str] = None,
+                                session_token: SessionCookie = None):
+    """El transporte del personal de una empresa en un día, y lo que ya se marcó.
+
+    La empresa se reconoce por las primeras palabras de sus sedes, enteras
+    («TELEPERFORMANCE» en «TELEPERFORMANCE BELLAVISTA», pero no «TELE»): ver
+    `_es_de_la_empresa` en supabase/011.
+    """
+    actor = await require_any_session(session_token)
+    nombre = _empresa_consultada(actor, empresa)
+    dia = _dia_o_hoy(fecha)
+    hoy = _hoy_en_lima()
+    if not (hoy - timedelta(days=DIAS_ATRAS_CLIENTE)
+            <= date.fromisoformat(dia)
+            < hoy + timedelta(days=DIAS_PROGRAMABLES)):
+        raise HTTPException(status_code=400, detail="Ese día queda fuera de lo que se puede consultar.")
+    resultado = await _rpc_programador("servicios_de_empresa", {
+        "p_prefijo": nombre, "p_dia": dia,
+    })
+    resultado = resultado if isinstance(resultado, dict) else {}
+    return {
+        "hoy": hoy.isoformat(),
+        "fecha": dia,
+        "empresa": nombre,
+        "existe": bool(resultado.get("existe")),
+        "servicios": resultado.get("servicios") or [],
+        "pendientes": resultado.get("pendientes") or [],
+    }
+
+# Quién ve la ficha de un conductor —documento, fecha de nacimiento, domicilio
+# y teléfonos—: Administración y el propio conductor, solo la suya. El cliente
+# la veía entera desde su panel; ahora recibe con sus servicios quién conduce
+# y en qué vehículo, que es lo que necesita (ver `servicios_de_empresa`).
+_ROLES_FICHA_CONDUCTOR = tuple(_ADMIN_ROLES)
 
 
 @app.get("/api/conductor/info/{unidad_id}")

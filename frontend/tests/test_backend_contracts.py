@@ -324,23 +324,6 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         # solo llegaba a la base si otra acción guardaba más tarde.
         self.assertEqual(avisos_al_guardar, [1])
 
-    async def test_client_routes_only_include_matching_company_passengers(self):
-        backend.rutas_estado_actual = [{
-            "conductor": "K-001",
-            "micro_zona": "SURCO",
-            "horario": "08:00",
-            "agentes": [
-                {"id": "PAX-001", "empresa": "CLIENT A"},
-                {"id": "PAX-002", "empresa": "CLIENT B"},
-            ],
-        }]
-
-        with patch.object(backend, "reload_db", new=AsyncMock()):
-            routes = await backend.get_rutas_cliente("client a")
-
-        self.assertEqual(len(routes), 1)
-        self.assertEqual([agent["id"] for agent in routes[0]["agentes"]], ["PAX-001"])
-
     async def test_clear_routes_archives_current_board(self):
         original_routes = [{
             "conductor": "K-001",
@@ -496,18 +479,6 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vehicle["unidad_id"], "K-001")
         self.assertEqual(vehicle["real_placa"], "NEW-001")
         self.assertEqual(vehicle["celular"], "911111111")
-
-    async def test_driver_routes_are_filtered_by_assigned_unit(self):
-        backend.rutas_estado_actual = [
-            {"conductor": "K-001", "horario": "08:00", "agentes": []},
-            {"conductor": "K-002", "horario": "08:00", "agentes": []},
-        ]
-
-        with patch.object(backend, "reload_db", new=AsyncMock()):
-            routes = await backend.mis_rutas("K-001")
-
-        self.assertEqual(len(routes), 1)
-        self.assertEqual(routes[0]["conductor"], "K-001")
 
     async def test_manager_summary_uses_compact_persisted_shape(self):
         backend.routes_summary = [{
@@ -1086,10 +1057,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(backend.httpx, "AsyncClient", return_value=client):
             self.assertEqual(await backend.get_routes(), routes)
-            self.assertEqual(await backend.mis_rutas("K-001"), routes)
-            filtered = await backend.get_rutas_cliente("client a")
+            self.assertEqual(await backend.get_routes(), routes)
 
-        self.assertEqual(filtered, routes)
         self.assertEqual(client.get.await_count, 1)
         requested_url = client.get.call_args.args[0]
         self.assertIn("select=rutas", requested_url)
@@ -1848,8 +1817,35 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(por_clave["drv-1"]["last_login"].startswith(time.strftime("%Y-")))
         self.assertNotEqual(por_clave["drv-1"]["last_login"], "2026-09-01T10:00:00")
-        # Quien no ha vuelto a entrar conserva la fecha que ya tenía.
-        self.assertEqual(por_clave["drv-2"]["last_login"], "2026-08-01T10:00:00")
+        # La fecha escrita en el usuario es de antes de la tabla y la dejaron las
+        # pruebas de las importaciones: quien no ha entrado desde entonces, nunca.
+        self.assertIsNone(por_clave["drv-2"]["last_login"])
+
+    async def test_the_access_list_shows_the_persons_email_not_the_invented_account_key(self):
+        """Los importados tienen por clave un `apellido.apellido@kapital.com` inventado."""
+        backend.usuarios_db.update({
+            "admin@e.com": {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo"},
+            "silva.roncal@kapital.com": {
+                "rol": "Conductor", "estado": "Activo", "email": "rsilva@gmail.com",
+                "perfil_conductor": {"numDoc": "11111111", "correo": "rsilva@gmail.com"}},
+            "jara.quiliche@kapital.com": {
+                "rol": "Conductor", "estado": "Activo", "email": "jara.quiliche@kapital.com",
+                "perfil_conductor": {"numDoc": "22222222", "correo": None}},
+            "propio@gmail.com": {
+                "identifier": "propio@gmail.com", "rol": "Conductor", "estado": "Pendiente",
+                "email": "propio@gmail.com", "perfil_conductor": {"numDoc": "33333333"}},
+        })
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()), \
+                patch.object(backend, "reload_db", new=AsyncMock()):
+            listado = await backend.get_all_users("admin@e.com")
+        por_clave = {u["email"]: u for u in listado["usuarios"]}
+
+        self.assertEqual(por_clave["silva.roncal@kapital.com"]["correo"], "rsilva@gmail.com")
+        # Sin correo en su base, la importación dejó la clave: no es su correo.
+        self.assertIsNone(por_clave["jara.quiliche@kapital.com"]["correo"])
+        # Quien se dio de alta él mismo tiene por clave su propio correo.
+        self.assertEqual(por_clave["propio@gmail.com"]["correo"], "propio@gmail.com")
+        self.assertEqual(por_clave["admin@e.com"]["correo"], "admin@e.com")
 
     async def test_logins_still_appear_in_the_activity_history(self):
         admin = {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo",
@@ -1944,38 +1940,37 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.usuarios_db[identifier] = user
         return user, await backend.abrir_sesion(user)
 
-    async def test_driver_cannot_read_another_units_routes(self):
+    async def test_driver_cannot_read_another_units_services(self):
         backend.AUTH_ENFORCED = True
-        await self._session_for("drv-1", unidad_id="K-001")
         _, token = await self._session_for("drv-1", unidad_id="K-001")
-        backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
-        with self.assertRaises(HTTPException) as caught:
-            await backend.mis_rutas("K-002", token)
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            with self.assertRaises(HTTPException) as caught:
+                await backend.servicios_del_conductor("K-002", token)
         self.assertEqual(caught.exception.status_code, 403)
+        base.assert_not_awaited()
 
-    async def test_driver_reads_their_own_unit_routes(self):
+    async def test_driver_reads_their_own_unit_services(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._session_for("drv-1", unidad_id="K-001")
-        backend.rutas_estado_actual = [
-            {"conductor": "K-001", "agentes": []}, {"conductor": "K-002", "agentes": []},
-        ]
-        with patch.object(backend, "reload_db", new=AsyncMock()):
-            routes = await backend.mis_rutas("K-001", token)
-        self.assertEqual([r["conductor"] for r in routes], ["K-001"])
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base:
+            respuesta = await backend.servicios_del_conductor(None, token)
+        self.assertEqual(respuesta["unidad"], "K001")
+        self.assertEqual(base.await_args.args[1]["p_clave"], "K001")
 
-    async def test_admin_may_read_any_units_routes(self):
+    async def test_admin_may_read_any_units_services(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._session_for("adm", rol="Administrador")
-        backend.rutas_estado_actual = [{"conductor": "K-002", "agentes": []}]
-        with patch.object(backend, "reload_db", new=AsyncMock()):
-            self.assertEqual(len(await backend.mis_rutas("K-002", token)), 1)
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})):
+            self.assertEqual((await backend.servicios_del_conductor("K-002", token))["unidad"], "K002")
 
-    async def test_client_cannot_read_another_companys_routes(self):
+    async def test_client_cannot_read_another_companys_services(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._session_for("cli", rol="Cliente", empresa_id="GLOBO_AZUL")
-        with self.assertRaises(HTTPException) as caught:
-            await backend.get_rutas_cliente("OTRA_EMPRESA", token)
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            with self.assertRaises(HTTPException) as caught:
+                await backend.servicios_del_cliente(None, "OTRA_EMPRESA", token)
         self.assertEqual(caught.exception.status_code, 403)
+        base.assert_not_awaited()
 
     async def test_driver_reads_own_notifications_by_any_login_alias(self):
         """El login acepta correo o DNI: la propiedad debe aceptar los mismos
@@ -2023,8 +2018,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         backend.AUTH_ENFORCED = True
         with patch.object(backend, "_load_compat_users", new=AsyncMock()):
             for coro in (
-                backend.mis_rutas("K-001", None),
-                backend.get_rutas_cliente("GLOBO_AZUL", None),
+                backend.servicios_del_conductor("K-001", None),
+                backend.servicios_del_cliente(None, "GLOBO_AZUL", None),
                 backend.get_conductor_notifications("a@e.com", None),
             ):
                 with self.assertRaises(HTTPException) as caught:
@@ -2035,13 +2030,14 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         """El objetivo del lote: gatear sin volver a los ~3,42 MB de usuarios."""
         backend.AUTH_ENFORCED = True
         _, token = await self._session_for("drv-1", unidad_id="K-001")
-        backend.rutas_estado_actual = []
         with (
             patch.object(backend, "_load_compat_users", new=AsyncMock()) as heavy,
-            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_db", new=AsyncMock()) as completa,
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})),
         ):
-            await backend.mis_rutas("K-001", token)
+            await backend.servicios_del_conductor("K-001", token)
         heavy.assert_not_awaited()
+        completa.assert_not_awaited()
 
     # --- Lote 3: acceso cruzado (parcial; ver relevo §8) ---
 
@@ -3162,14 +3158,16 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),
             ("GET", "/api/reportes", {}),
-            ("POST", "/api/actualizar-pasajero",
-             {"json": {"conductor_id": "K-001", "horario": "08:00", "agente_id": "A", "estado": "Recogido"}}),
             ("GET", "/api/conductor/info/K-001", {}),
+            ("GET", "/api/conductor/servicios?unidad=K-001", {}),
+            ("POST", "/api/conductor/servicios/marcar", {"json": {"id": 1, "estado": "a_bordo"}}),
+            ("GET", "/api/cliente/servicios?empresa=TELEPERFORMANCE", {}),
         ]
         with (
             patch.object(backend, "reload_db", new=AsyncMock()) as recarga,
             patch.object(backend, "persist", new=AsyncMock()) as guardar,
             patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar_usuarios,
+            patch.object(backend, "_rpc_programador", new=AsyncMock()) as base,
         ):
             for metodo, ruta, extra in abiertos:
                 respuesta = await self._llamar(metodo, ruta, **extra)
@@ -3177,6 +3175,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         recarga.assert_not_awaited()
         guardar.assert_not_awaited()
         guardar_usuarios.assert_not_awaited()
+        base.assert_not_awaited()
 
     async def test_the_admin_notifications_are_for_administration_only(self):
         backend.AUTH_ENFORCED = True
@@ -3247,26 +3246,264 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(propio.status_code, 200)
         self.assertEqual([n["leido"] for n in backend.notifications_db], [True, False])
 
-    async def test_the_driver_card_is_for_administration_the_client_and_its_own_driver(self):
+    async def test_the_driver_card_is_for_administration_and_its_own_driver(self):
+        """El cliente veía la ficha entera: documento, nacimiento, domicilio y teléfonos.
+
+        Ahora recibe con sus servicios quién conduce y en qué vehículo.
+        """
         backend.AUTH_ENFORCED = True
         backend.conductores_db["K-001"] = {"capacidad": 4}
         _, propio = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
         _, ajeno = await self._sesion("otro@k.com", rol="Conductor", unidad_id="K-002")
         _, cliente = await self._sesion("cliente@k.com", rol="Cliente")
+        _, admin = await self._sesion("admin@k.com", rol="Administración")
         with patch.object(backend, "reload_db", new=AsyncMock()):
             self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", propio)).status_code, 200)
+            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", admin)).status_code, 200)
             self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", ajeno)).status_code, 403)
-            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", cliente)).status_code, 200)
+            self.assertEqual((await self._llamar("GET", "/api/conductor/info/K-001", cliente)).status_code, 403)
 
-    async def test_a_driver_updates_passengers_only_on_their_own_route(self):
+    async def test_a_driver_reads_the_services_of_their_own_unit_from_yesterday_to_tomorrow(self):
+        """Ayer sin pestaña: una salida de las 23:00 sigue dejando gente pasada la medianoche."""
         backend.AUTH_ENFORCED = True
-        _, token = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-002")
-        with patch.object(backend, "reload_db", new=AsyncMock()) as recarga:
-            respuesta = await self._llamar(
-                "POST", "/api/actualizar-pasajero", token,
-                json={"conductor_id": "K-001", "horario": "08:00", "agente_id": "A", "estado": "Recogido"})
-        self.assertEqual(respuesta.status_code, 403)
-        recarga.assert_not_awaited()
+        _, token = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        servicios = [{"fecha": "2026-09-28", "turno": "00:30", "pasajeros": []}]
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 27)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "servicios": servicios, "dias_con_plan": ["2026-09-28"]})) as base,
+        ):
+            respuesta = await self._llamar("GET", "/api/conductor/servicios", token)
+        self.assertEqual(respuesta.status_code, 200)
+        base.assert_awaited_once_with("servicios_de_unidad", {
+            "p_clave": "K001", "p_desde": "2026-09-26", "p_hasta": "2026-09-28"})
+        cuerpo = respuesta.json()
+        self.assertEqual(cuerpo["hoy"], "2026-09-27")
+        self.assertEqual(cuerpo["dias"], ["2026-09-27", "2026-09-28"])
+        self.assertEqual(cuerpo["servicios"], servicios)
+        self.assertEqual(cuerpo["dias_con_plan"], ["2026-09-28"])
+
+    async def test_a_driver_cannot_read_another_unit_and_needs_one_assigned(self):
+        backend.AUTH_ENFORCED = True
+        _, propio = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        _, sin_unidad = await self._sesion("nuevo@k.com", rol="Conductor", unidad_id="")
+        _, cliente = await self._sesion("cliente@k.com", rol="Cliente", empresa_id="TELEPERFORMANCE")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base:
+            ajena = await self._llamar("GET", "/api/conductor/servicios?unidad=K-002", propio)
+            misma = await self._llamar("GET", "/api/conductor/servicios?unidad=K001", propio)
+            ninguna = await self._llamar("GET", "/api/conductor/servicios", sin_unidad)
+            de_cliente = await self._llamar("GET", "/api/conductor/servicios?unidad=K-001", cliente)
+        self.assertEqual(ajena.status_code, 403)
+        self.assertEqual(misma.status_code, 200)
+        self.assertEqual(ninguna.status_code, 409)
+        self.assertEqual(de_cliente.status_code, 403)
+        base.assert_awaited_once()
+
+    async def test_administration_reads_any_unit_but_has_to_name_it(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base:
+            sin_unidad = await self._llamar("GET", "/api/conductor/servicios", token)
+            con_unidad = await self._llamar("GET", "/api/conductor/servicios?unidad=V-026", token)
+        self.assertEqual(sin_unidad.status_code, 400)
+        self.assertEqual(con_unidad.status_code, 200)
+        self.assertEqual(base.await_args.args[1]["p_clave"], "V026")
+
+    async def test_a_driver_marks_only_with_their_own_unit_and_session(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 27)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "id": 7, "viaje": "a_bordo", "marcado_en": "x"})) as base,
+        ):
+            # La unidad del cuerpo no cuenta: manda la de la sesión.
+            respuesta = await self._llamar("POST", "/api/conductor/servicios/marcar", token,
+                                           json={"id": 7, "estado": "a_bordo", "unidad": "K-999"})
+            desmarcar = await self._llamar("POST", "/api/conductor/servicios/marcar", token,
+                                           json={"id": 7, "estado": None})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(desmarcar.status_code, 200)
+        self.assertEqual(base.await_args_list[0].args, ("marcar_viaje", {
+            "p_id": 7, "p_clave": "K001", "p_estado": "a_bordo", "p_por": "chofer@k.com",
+            "p_desde": "2026-09-26", "p_hasta": "2026-09-28"}))
+        self.assertEqual(base.await_args_list[0].kwargs, {"write": True})
+        self.assertIsNone(base.await_args_list[1].args[1]["p_estado"])
+
+    async def test_marking_rejects_other_roles_and_malformed_marks_without_touching_the_db(self):
+        backend.AUTH_ENFORCED = True
+        _, chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        _, admin = await self._sesion("admin@k.com", rol="Administración")
+        _, cliente = await self._sesion("cliente@k.com", rol="Cliente", empresa_id="TELEPERFORMANCE")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            casos = [
+                (admin, {"id": 1, "estado": "a_bordo"}, 403),
+                (cliente, {"id": 1, "estado": "a_bordo"}, 403),
+                (chofer, {"id": 1, "estado": "Recogido"}, 400),
+                (chofer, {"id": True, "estado": "a_bordo"}, 400),
+                (chofer, {"id": "1", "estado": "a_bordo"}, 400),
+                (chofer, {"id": 0, "estado": "a_bordo"}, 400),
+                # Fuera de `bigint` Postgres lo rechazaba y llegaba como 503.
+                (chofer, {"id": 2 ** 63, "estado": "a_bordo"}, 400),
+                (chofer, {"estado": "a_bordo"}, 400),
+            ]
+            for token, cuerpo, esperado in casos:
+                respuesta = await self._llamar("POST", "/api/conductor/servicios/marcar", token, json=cuerpo)
+                self.assertEqual(respuesta.status_code, esperado, cuerpo)
+        base.assert_not_awaited()
+
+    async def test_a_mark_is_signed_with_the_account_key_not_the_identifier_field(self):
+        """124 de 128 cuentas no llevan `identifier`: la marca quedaba sin autor."""
+        backend.AUTH_ENFORCED = True
+        conductor = {"rol": "Conductor", "estado": "Activo", "unidad_id": "K-001", "nombre": "Sin id"}
+        backend.usuarios_db["perez.lopez@kapital.com"] = conductor
+        token = await backend.abrir_sesion(conductor)
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base:
+            respuesta = await self._llamar("POST", "/api/conductor/servicios/marcar", token,
+                                           json={"id": 5, "estado": "a_bordo"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(base.await_args.args[1]["p_por"], "perez.lopez@kapital.com")
+
+    async def test_without_session_enforcement_the_new_routes_stay_closed(self):
+        """El modo de vuelta atrás abre las rutas viejas; estas no tienen a quién servir así."""
+        backend.AUTH_ENFORCED = False
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            for metodo, ruta, extra in (
+                ("GET", "/api/conductor/servicios?unidad=K-001", {}),
+                ("POST", "/api/conductor/servicios/marcar", {"json": {"id": 1, "estado": "a_bordo", "unidad": "K-001"}}),
+                ("GET", "/api/cliente/servicios?empresa=TELEPERFORMANCE", {}),
+            ):
+                self.assertEqual((await self._llamar(metodo, ruta, **extra)).status_code, 401, ruta)
+        base.assert_not_awaited()
+
+    def test_marking_outside_the_service_hours_is_a_409_that_says_why(self):
+        with self.assertRaises(HTTPException) as fallo:
+            backend._raise_programador_result_error("marcar_viaje", {"error": "fuera_de_hora"})
+        self.assertEqual(fallo.exception.status_code, 409)
+        self.assertIn("6 horas", fallo.exception.detail)
+
+    async def test_registration_ignores_a_self_declared_unit_or_company(self):
+        """Declararse de la K-027 al registrarse y que alguien pulsara «Aprobar» daba sus pasajeros."""
+        backend.usuarios_db["admin@example.com"] = {
+            "identifier": "admin@example.com", "rol": "Administración", "estado": "Activo",
+        }
+        for identificador, rol in (("12345678", "Conductor"), ("cli@otra.com", "Cliente")):
+            with (
+                patch.object(backend, "reload_db", new=AsyncMock()),
+                patch.object(backend, "persist_users_only", new=AsyncMock()),
+                patch.object(backend, "_load_compat_fleet", new=AsyncMock()) as flota,
+                patch.object(backend, "_sembrar_unidad") as sembrar,
+            ):
+                await backend.register_user(backend.UsuarioRegistro(
+                    identifier=identificador, password="safe-password", nombre="Quien sea", rol=rol,
+                    unidad_id="K-027", empresa_id="TELEPERFORMANCE"))
+            guardado = backend.usuarios_db[identificador]
+            self.assertIsNone(guardado["unidad_id"], rol)
+            self.assertIsNone(guardado["empresa_id"], rol)
+            sembrar.assert_not_called()
+            flota.assert_not_awaited()
+
+    async def test_approving_refreshes_the_session_after_assigning_the_unit(self):
+        """Refrescar antes dejaba en la sesión la unidad vieja hasta 12 horas."""
+        backend.usuarios_db["admin@e.com"] = {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo"}
+        backend.usuarios_db["drv@e.com"] = {"identifier": "drv@e.com", "rol": "Conductor",
+                                            "estado": "Pendiente Revisión", "unidad_id": "K-999"}
+        vistas = []
+
+        async def refrescar(user):
+            vistas.append(user.get("unidad_id"))
+
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend, "_sembrar_unidad"),
+            patch.object(backend, "refrescar_sesiones_de", new=refrescar),
+        ):
+            await backend.approve_user("drv@e.com", "admin@e.com", "K-027")
+        self.assertEqual(vistas, ["K-027"])
+
+    async def test_a_rejected_unit_change_leaves_nothing_else_changed_in_memory(self):
+        """El 403 llegaba después de aplicar nombre y contraseña, y el siguiente guardado los escribía."""
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001", "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001",
+            "nombre": "Antes", "password": backend.hash_password("vieja-segura"),
+        }
+        antes = dict(backend.usuarios_db["driver-001"])
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            with self.assertRaises(HTTPException) as fallo:
+                await backend.update_profile(backend.UsuarioUpdate(
+                    identifier="driver-001", unidad_id="K-002", nombre="Después",
+                    current_password="vieja-segura", new_password="nueva-segura"))
+        self.assertEqual(fallo.exception.status_code, 403)
+        self.assertEqual(backend.usuarios_db["driver-001"], antes)
+        guardar.assert_not_awaited()
+
+    def test_a_mark_the_db_refuses_is_a_404_the_driver_can_act_on(self):
+        """Si el Programador sacó a esa persona del servicio, la marca no se guarda y se dice."""
+        with self.assertRaises(HTTPException) as fallo:
+            backend._raise_programador_result_error("marcar_viaje", {"error": "no_esta_en_el_plan"})
+        self.assertEqual(fallo.exception.status_code, 404)
+        self.assertIn("Actualiza", fallo.exception.detail)
+
+    async def test_a_client_reads_the_services_of_its_own_company(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("cliente@k.com", rol="Cliente", empresa_id="Teleperformance")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 27)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "existe": True, "servicios": [{"unidad": "K027"}], "pendientes": []})) as base,
+        ):
+            hoy = await self._llamar("GET", "/api/cliente/servicios", token)
+            ayer = await self._llamar("GET", "/api/cliente/servicios?fecha=2026-09-26", token)
+            otra = await self._llamar("GET", "/api/cliente/servicios?empresa=KONECTA", token)
+            lejos = await self._llamar("GET", "/api/cliente/servicios?fecha=2026-01-01", token)
+            mal = await self._llamar("GET", "/api/cliente/servicios?fecha=27-09-2026", token)
+        self.assertEqual(hoy.status_code, 200)
+        # La empresa va tal cual: la base la compara por palabras enteras.
+        self.assertEqual(base.await_args_list[0].args, ("servicios_de_empresa", {
+            "p_prefijo": "Teleperformance", "p_dia": "2026-09-27"}))
+        self.assertEqual(hoy.json()["servicios"], [{"unidad": "K027"}])
+        self.assertTrue(hoy.json()["existe"])
+        self.assertEqual(ayer.status_code, 200)
+        self.assertEqual(base.await_args_list[1].args[1]["p_dia"], "2026-09-26")
+        self.assertEqual(otra.status_code, 403)
+        self.assertEqual(lejos.status_code, 400)
+        self.assertEqual(mal.status_code, 400)
+        self.assertEqual(base.await_count, 2)
+
+    async def test_only_clients_and_administration_read_a_company(self):
+        backend.AUTH_ENFORCED = True
+        _, chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        _, sin_empresa = await self._sesion("cliente@k.com", rol="Cliente", empresa_id=None)
+        _, gerente = await self._sesion("gerente@k.com", rol="Gerente de Operaciones")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base:
+            self.assertEqual((await self._llamar(
+                "GET", "/api/cliente/servicios?empresa=TELEPERFORMANCE", chofer)).status_code, 403)
+            self.assertEqual((await self._llamar("GET", "/api/cliente/servicios", sin_empresa)).status_code, 409)
+            self.assertEqual((await self._llamar("GET", "/api/cliente/servicios", gerente)).status_code, 400)
+            self.assertEqual((await self._llamar(
+                "GET", "/api/cliente/servicios?empresa=TELEPERFORMANCE", gerente)).status_code, 200)
+        base.assert_awaited_once()
+
+    async def test_a_driver_cannot_move_to_another_unit_from_their_profile(self):
+        """La unidad decide qué pasajeros ve: cambiársela uno mismo era ver los de otro."""
+        backend.usuarios_db["driver-001"] = {
+            "identifier": "driver-001", "rol": "Conductor", "estado": "Activo", "unidad_id": "K-001",
+        }
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            with self.assertRaises(HTTPException) as fallo:
+                await backend.update_profile(backend.UsuarioUpdate(identifier="driver-001", unidad_id="K-002"))
+            # La misma unidad escrita de otra forma no es un cambio.
+            await backend.update_profile(backend.UsuarioUpdate(identifier="driver-001", unidad_id="K001"))
+        self.assertEqual(fallo.exception.status_code, 403)
+        self.assertEqual(backend.usuarios_db["driver-001"]["unidad_id"], "K-001")
+        guardar.assert_awaited_once()
 
     def test_a_notification_id_never_restarts_from_one(self):
         """Sin avisos cargados, «el mayor más uno» daba 1 y pisaba al aviso 1 al fusionar."""

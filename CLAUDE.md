@@ -203,6 +203,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **`/api/routes` devuelve `[]`** y nada vuelve a escribir `rutas_estado_actual`. De ahí derivaban
     las tres pantallas, así que dos calculaban sobre cero filas sin decirlo. **Las cuatro secciones
     leen ahora el histórico**, que es la única entrada real de información.
+  - **El plan ya llega al conductor y al cliente** (desde el 2026-09-27; hasta entonces sus portales
+    leían ese tablero vacío y lo que decidía el Programador se quedaba en su pantalla). Ver «El plan llega
+    al conductor y al cliente» más abajo.
   - **Cargar datos** es esa entrada: las dos pestañas descritas arriba.
   - **Operación** (la mesa) muestra la programación **realmente ejecutada** del día elegido, vía
     `GET /api/programador/programacion?fecha=`. Eso no es proponer rutas —el motor sigue congelado,
@@ -242,9 +245,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   ningún componente importaba). El backend sí conserva
   `POST /api/chat` y su `SYSTEM_PROMPT` en `api/index.py`, gateado con sesión porque consume cuota de pago.
   No asumir que el Copilot es una función disponible al rediseñar el portal del Programador.
-- **Migración de configuración en curso**: `SUPABASE_URL`/`SUPABASE_KEY` ya priorizan variables de entorno,
-  pero conservan valores fallback temporalmente para no interrumpir Vercel. El fallback se retirará después de
-  verificar las variables del despliegue. `JSON_PE_TOKEN` y `GEMINI_API_KEY` también están documentados en `.env.example`.
+- **Configuración**: las credenciales de Supabase salen **solo** de variables de entorno (comprobado el
+  2026-09-27: `_first_env` no tiene valor por defecto y no queda ninguna URL ni clave escrita en el código).
+  El único literal que queda es el de `JSON_PE_TOKEN`: hay que regenerarlo en JSON.pe, ponerlo en Vercel y
+  entonces retirarlo. `JSON_PE_TOKEN` y `GEMINI_API_KEY` están documentados en `.env.example`.
 - **Migración de contraseñas hecha**: el backend lee hashes PBKDF2 y texto plano, y **cifra al escribir por
   defecto** (`KAPITAL_PASSWORD_HASH_WRITE`, hoy `true`). Nació apagado para que un rollback anterior a la lectura
   compatible no dejara fuera a nadie; esa lectura está desplegada desde el PR #3, así que la precondición ya no
@@ -281,7 +285,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `/api/auth/me` —se llama al abrir la aplicación— dejó de descargar el estado completo. La «última
   conexión» de Accesos y los «Usuario inició sesión» del historial salen de la tabla (las filas se
   conservan 90 días como registro de accesos); antes se escribían en la fila y además los accesos de los
-  conductores expulsaban del historial, limitado a 500, las acciones de administración.
+  conductores expulsaban del historial, limitado a 500, las acciones de administración. **Solo** de la
+  tabla: el `last_login` que quedó escrito en 24 conductores es de las comprobaciones de las importaciones
+  (16 «entraron» el mismo minuto y siguen con la provisional), y con él «Activos» enseñaba como activos a
+  conductores que nunca habían entrado. En esa misma pantalla la columna de correo enseña `correo`
+  (`_correo_propio`), no la clave de la cuenta: en los importados la clave es un
+  `apellido.apellido@kapital.com` inventado, y las acciones siguen operando sobre ella.
   **La sesión pertenece a la clave de la cuenta, no al campo `identifier`**: 124 de las 128 cuentas —casi
   todos los conductores— no lo llevan escrito. Usar siempre `_clave_de_cuenta(user)`. El código viejo usaba
   `identifier`, dejaba esas sesiones sin dueño y en cada petición de un conductor acababa descargando a
@@ -292,10 +301,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
   `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
   nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
-  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. Al desplegar este cambio,
-  **justo después** de que el despliegue quede listo: `scripts/migrar_sesiones.py --aplicar`, que pasa las
-  sesiones abiertas del índice viejo a la tabla para que nadie tenga que volver a entrar (es repetible).
-  Volver a una versión anterior obligaría a todo el mundo a entrar de nuevo una vez, y nada más.
+  Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. **Desplegado en producción
+  el 2026-09-27** (merge `bee7f21`, junto con la escritura por diferencias, los endpoints cerrados y el
+  tope de intentos); `migrar_sesiones.py --aplicar` no encontró sesiones abiertas en el índice viejo.
+  Comprobado en producción: sin sesión, todo lo cerrado responde 401, y un login fallido queda anotado
+  en `intentos_acceso` con su origen. Volver a una versión anterior obligaría a todo el mundo a entrar
+  de nuevo una vez, y nada más.
 - **Tope de intentos** (desde el 2026-09-27): el login y el cambio de contraseña no tenían límite, y muchas
   cuentas de conductor conservan la provisional de la importación. En 15 minutos, más de **10 intentos a
   una cuenta desde un mismo origen**, **30 a una cuenta desde donde sea** o **50 desde un origen a
@@ -323,6 +334,65 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   base—: con `_db_http_request`, un tope caído alargaba el login ~20 s y podía dejar la instancia en 503.
   Contra la base real: `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el
   permiso de leer `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
+- **El plan llega al conductor y al cliente** (desde el 2026-09-27,
+  [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
+  recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor
+  (`GET /api/conductor/servicios`: **hoy y mañana** en pestañas, porque los recojos con entrada de 00:00 a
+  02:00 empiezan la noche anterior, y **ayer sin pestaña**, porque una salida de las 23:00 sigue dejando
+  gente pasada la medianoche y sin ayer desaparecía a mitad de servicio) y `servicios_de_empresa()` para el
+  cliente (`GET /api/cliente/servicios?fecha=`, de 31
+  días atrás a lo programable). La unidad y la empresa **salen de la sesión**, no de la URL: un conductor no
+  puede pedir otra unidad y un cliente no puede pedir otra empresa; Administración sí, pasándolas por
+  parámetro. Medido con la compresión que ya usa PostgREST: **~2 KB** la lectura de un conductor y **~16 KB**
+  la de un día entero del cliente (95 KB sin comprimir); el conductor relee cada 3 min y el cliente cada 2,
+  solo con la pantalla visible. La empresa se reconoce por las **primeras palabras enteras de la sede**
+  («TELEPERFORMANCE» en «TELEPERFORMANCE BELLAVISTA», pero no «TELE»: `_es_de_la_empresa()`,
+  [supabase/011_ventana_y_empresa.sql](supabase/011_ventana_y_empresa.sql)). La primera versión comparaba
+  un prefijo sin frontera de palabra y «TELE» abría a todo TELEPERFORMANCE.
+  **El conductor marca quién subió** (`POST /api/conductor/servicios/marcar`, «A bordo» o «No se presentó»,
+  y deshacer) y eso va a **`ejecucion_viajes`, no a `programacion`**: lo que se decidió y lo que pasó no se
+  mezclan (por lo mismo que el plan va aparte del histórico). La marca se enlaza al plan por la clave
+  natural (día, unidad, turno, sentido, persona), así que sobrevive a que el Programador vuelva a sembrar el
+  día; `marcar_viaje()` comprueba que la fila siga en el plan y sea de esa unidad (si no, **404**, «ya no está
+  en tu servicio») y que **ahora** esté entre 3 h antes y 6 h después del turno **de ese servicio**, en hora
+  de Lima (si no, **409**). Esa ventana la decide la base desde la 011: antes solo la aplicaba la pantalla y
+  por el API se podía marcar a las 08:00 como «no se presentó» a todo el turno de la noche siguiente. La
+  marca la firma `_clave_de_cuenta(actor)`, no `identifier` (casi ninguna cuenta lo lleva), y las rutas
+  nuevas **no responden sin sesión** aunque la exigencia esté apagada: no tienen clientes viejos. El pasajero se identifica por el `id` de su fila del plan:
+  **al conductor no le llega el DNI de nadie**. **Al cliente no le llegan direcciones ni coordenadas** (sabe
+  dónde vive su gente) **ni el documento, domicilio o teléfonos del conductor**: de la flota solo recibe
+  nombre, placa, vehículo y capacidad. Por lo mismo `GET /api/conductor/info/{unidad}` —la ficha entera—
+  **dejó de estar abierta al Cliente** (antes su panel la enseñaba, con documentos marcados «Subido» fueran
+  reales o no y una foto de vehículo de stock). Es reversible si los dueños lo deciden, y era la decisión de
+  producto pendiente. **Un conductor ya no puede cambiarse de unidad desde su perfil** (`PUT /api/user/profile`
+  con otra unidad da 403, antes de tocar nada más): con eso veía y marcaba a los pasajeros de otro coche.
+  **Y el registro público ya no acepta unidad ni empresa**: bastaba declararse de la K-027 al registrarse y
+  que alguien pulsara «Aprobar» para ver los domicilios de sus pasajeros. La unidad la asigna
+  Administración al aprobar con padrón (y la sesión se refresca **después** de asignarla, no antes), y la
+  empresa de un cliente se pone a mano.
+  **Documentos: el conductor con unidad ve sus servicios aunque le falten** (decisión del usuario,
+  2026-09-27). Los importados de las bases no tienen ningún documento subido —123 de 124— y la puerta de
+  documentos del portal los habría dejado a todos sin ver nada; son conductores que ya trabajan en la
+  empresa. Ven un aviso fijo con lo que les falta y un botón para subirlo; lo pueden subir ellos o
+  Administración en su nombre. Quien no tiene unidad sigue entrando por la pantalla de documentos.
+  **El cliente no ve las altas sin histórico** en «sin unidad asignada»: `programacion_pendientes` no guarda
+  la sede y sin histórico no se sabe de qué empresa son; enseñarlas daría nombres a otra empresa.
+  **Qué significa el turno está medido, no supuesto**: en un RECOJO es la hora de entrada a la sede (el coche
+  arranca ~85 min antes y llega ~22 min antes); en una SALIDA, la hora a la que sale de la sede. La pantalla
+  **no enseña una hora estimada de recogida**, porque el plan no la tiene y sería una promesa. Solo se puede
+  marcar de 3 h antes a 6 h después del turno. **Hoy solo 23 de las 51 unidades del plan tienen cuenta de
+  conductor**: las V###/M### no están dadas de alta y no verán nada hasta que lo estén.
+  Las pantallas son nuevas: la del conductor ([frontend/src/conductor/](frontend/src/conductor/)) está pensada
+  para el teléfono —próximo servicio arriba, paradas en orden con «Cómo llegar» (Google Maps y Waze, al punto
+  si está resuelto y si no a la dirección escrita), un modo guía de una parada cada vez, el botón «atrás» del
+  teléfono funcionando y el SOS con confirmación—; la del cliente
+  ([ClientPortal.jsx](frontend/src/ClientPortal.jsx), [frontend/src/cliente/](frontend/src/cliente/)) sirve en
+  el escritorio y en el teléfono. **El SOS decía «Central notificada» aunque la petición fallara** (un `fetch`
+  no lanza con un 4xx/5xx); ahora solo lo dice si el aviso llegó, y si no pide llamar a la central. **El
+  cliente no tenía cómo cerrar sesión**: su portal se pinta sin la barra de navegación. Contra la base real:
+  `scripts/probar_servicios.py` (31 comprobaciones dentro de una transacción que se deshace; mueve un
+  pasajero a «ahora» para probar la ventana). Todo lo anterior salió de una revisión independiente antes de
+  publicar, con una prueba que falla con el código previo por cada hallazgo.
 - **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
   `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
   memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que
@@ -501,7 +571,7 @@ Contexto que no cambia con cada lote:
    y el login y el cambio de contraseña tienen tope de intentos (ver «Tope de intentos» en §2). El usuario
    sembrado con contraseña por defecto que inyectaba `_decode_full_state` ya está retirado, y hay una prueba
    que falla si vuelve a aparecer una contraseña escrita en el módulo.
-4. Retirar los fallbacks de credenciales hardcodeadas tras verificar las variables en Vercel.
+4. Retirar el literal de `JSON_PE_TOKEN` tras regenerarlo y ponerlo en Vercel (los de Supabase ya no existen).
 5. **Separar backend y frontend en dos repositorios: evaluado el 2026-09-15 y descartado por ahora.**
    El mismo origen es carga estructural: sostiene la cookie `SameSite=Lax` (que hoy neutraliza el CORS
    wildcard), garantiza despliegues atómicos durante la migración de auth y mantiene un único baseline en CI.

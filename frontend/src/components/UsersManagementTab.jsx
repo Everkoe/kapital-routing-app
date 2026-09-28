@@ -103,6 +103,12 @@ const RoleBadge = ({ rol }) => {
   const [c, bg] = colors[rol] || ['#9ca3af','rgba(156,163,175,0.15)'];
   return <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, letterSpacing:'0.5px', color:c, background:bg, border:`1px solid ${c}44` }}>{rol}</span>;
 };
+// «Activos» son las cuentas que trabajan y han entrado. Un conductor con
+// documentos observados sigue trabajando (ve y marca sus servicios mientras
+// los corrige) y no es pendiente ni inactivo: fuera de aquí no salía en
+// ninguna pestaña salvo «Todos».
+const ESTADOS_QUE_TRABAJAN = ['Activo', 'Documentos Observados'];
+
 const StatusBadge = ({ estado }) => {
   const isPending = (estado || '').includes('Pendiente');
   const isInactive = estado === 'Inactivo' || estado === 'Rechazado';
@@ -194,7 +200,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     if (activeTab === 'Todos') matchesTab = true;
     else if (activeTab === 'Pendientes') matchesTab = u.estado.includes('Pendiente');
     else if (activeTab === 'Inactivos') matchesTab = u.estado === 'Inactivo' || u.estado === 'Rechazado';
-    else matchesTab = u.estado === 'Activo' && !!u.last_login;
+    else matchesTab = ESTADOS_QUE_TRABAJAN.includes(u.estado) && !!u.last_login;
 
     let matchesRole = false;
     if (activeRole === 'Todos') matchesRole = true;
@@ -692,7 +698,14 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                           <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>{u.nombre}</span>
                         </div>
                       </td>
-                      <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.86rem' }}>{u.email}</td>
+                      {/* `u.email` es la clave de la cuenta (en los importados, un
+                          apellido.apellido@kapital.com inventado); el correo de la
+                          persona es `u.correo`, y puede no haberlo. */}
+                      <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
+                        {'correo' in u
+                          ? (u.correo || <span style={{ fontStyle: 'italic', opacity: 0.7 }}>Sin correo propio</span>)
+                          : u.email}
+                      </td>
                       <td style={{ padding: '13px 14px' }}><RoleBadge rol={u.rol} /></td>
                       <td style={{ padding: '13px 14px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{formatTimeAgo(u.last_login)}</td>
                       <td style={{ padding: '13px 14px' }}><StatusBadge estado={u.estado} /></td>
