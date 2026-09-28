@@ -380,8 +380,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **Qué significa el turno está medido, no supuesto**: en un RECOJO es la hora de entrada a la sede (el coche
   arranca ~85 min antes y llega ~22 min antes); en una SALIDA, la hora a la que sale de la sede. La pantalla
   **no enseña una hora estimada de recogida**, porque el plan no la tiene y sería una promesa. Solo se puede
-  marcar de 3 h antes a 6 h después del turno. **Hoy solo 23 de las 51 unidades del plan tienen cuenta de
-  conductor**: las V###/M### no están dadas de alta y no verán nada hasta que lo estén.
+  marcar de 3 h antes a 6 h después del turno. **Lo que falta para los conductores reales es de datos, no
+  de código**: de las 52 unidades que operaron la última semana cargada (hasta el 2026-09-22), **29 no
+  tienen cuenta de conductor** —K230, M018, M864 y 26 V###— y llevan **el 77% de los viajes a bordo**. El
+  Programador les asignará servicios que nadie recibe hasta que se importen sus conductores (con
+  `scripts/importar_base_motorizados.py`; obligatorias nombre, DNI, padrón tal como lo escribe la intranet
+  y placa). Y 101 cuentas importadas son de unidades que no operaron esa semana (sobre todo Sharf y
+  Remisse): entran, pero no les llega nada mientras su unidad no esté en el plan. Una unidad con dos
+  conductores por turnos daría todos sus servicios a los dos: hoy no se distingue quién hace cada turno.
+  **Desplegado en producción el 2026-09-27** (merge `4341250`, PR #15): sin sesión las rutas nuevas dan
+  401 y las retiradas (`mis-rutas`, `cliente/rutas`, `actualizar-pasajero`) 404.
   Las pantallas son nuevas: la del conductor ([frontend/src/conductor/](frontend/src/conductor/)) está pensada
   para el teléfono —próximo servicio arriba, paradas en orden con «Cómo llegar» (Google Maps y Waze, al punto
   si está resuelto y si no a la dirección escrita), un modo guía de una parada cada vez, el botón «atrás» del
