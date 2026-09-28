@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, RotateCcw, Trash2, Upload,
+  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Trash2, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -126,8 +126,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // un plan, el día del que se copió.
   const referencia = modo === 'plan' ? sembradoDesde : comparadoCon;
   const [guardando, setGuardando] = useState(false);
-  // «rehacer» o «borrar» mientras se pide confirmación; `null` si no.
-  const [confirmar, setConfirmar] = useState(null);
+  // Abierto mientras se pide confirmación para borrar la programación del día.
+  const [confirmarBorrar, setConfirmarBorrar] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -261,23 +261,19 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     }
   }, [dia, esProgramable, refresh]);
 
-  // Rehacer y borrar tiran trabajo: se piden confirmados (ver `ConfirmarPlan`)
-  // y la base los rechaza igualmente sobre un día pasado o con marcas.
-  const cambiarPlanEntero = useCallback(async (accion) => {
+  // Borrar tira trabajo: se pide confirmado (ver `ConfirmarPlan`) y la base lo
+  // rechaza igualmente sobre un día pasado o con viajes marcados.
+  const borrarPlan = useCallback(async () => {
     setGuardando(true);
-    const rehacer = accion === 'rehacer';
-    const aviso = toast.loading(rehacer ? 'Rehaciendo la programación…' : 'Borrando la programación…');
+    const aviso = toast.loading('Borrando la programación…');
     try {
-      const r = requireRpcSuccess(await apiFetch(
-        rehacer ? '/api/programador/plan/sembrar' : '/api/programador/plan/borrar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(rehacer ? { fecha: dia, rehacer: true } : { fecha: dia }),
-        }), rehacer ? 'No se pudo rehacer la programación.' : 'No se pudo borrar la programación.');
-      toast.success(rehacer
-        ? `${r.creadas} asignaciones copiadas de nuevo del ${r.sembrado_desde}.`
-        : 'Programación borrada. El día queda sin programar.', { id: aviso });
-      setConfirmar(null);
+      requireRpcSuccess(await apiFetch('/api/programador/plan/borrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: dia }),
+      }), 'No se pudo borrar la programación.');
+      toast.success('Programación borrada. El día queda sin programar.', { id: aviso });
+      setConfirmarBorrar(false);
       await refresh();
     } catch (fallo) {
       toast.error(fallo?.message || 'No se pudo completar.', { id: aviso });
@@ -464,13 +460,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                 para que sigan alcanzándose desde el selector. */}
             {esProgramable && dia >= hoyISO() && (
               <span className="pw-notice-acciones">
-                <button type="button" className="pw-btn pw-btn-sm"
-                  onClick={() => setConfirmar('rehacer')} disabled={guardando}>
-                  <RotateCcw size={14} aria-hidden="true" />
-                  Rehacer
-                </button>
                 <button type="button" className="pw-btn pw-btn-sm pw-btn-peligro-suave"
-                  onClick={() => setConfirmar('borrar')} disabled={guardando}>
+                  onClick={() => setConfirmarBorrar(true)} disabled={guardando}>
                   <Trash2 size={14} aria-hidden="true" />
                   Borrar
                 </button>
@@ -591,12 +582,11 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         </section>
 
         <ConfirmarPlan
-          accion={confirmar}
+          abierto={confirmarBorrar}
           dia={formatoFecha(dia)}
-          sembradoDesde={sembradoDesde ? formatoFecha(sembradoDesde) : null}
           ocupado={guardando}
-          onConfirmar={() => cambiarPlanEntero(confirmar)}
-          onCancelar={() => setConfirmar(null)}
+          onConfirmar={borrarPlan}
+          onCancelar={() => setConfirmarBorrar(false)}
         />
 
         <PendingPanel
