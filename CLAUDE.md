@@ -494,7 +494,18 @@ Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muc
 - `react-hot-toast` — notificaciones
 - `react-dropzone` — carga de archivos
 - `xlsx` — asignación masiva de rutas vía Excel
-- `leaflet` / `react-leaflet` — mapa en vivo (`LiveMap.jsx`)
+- **Mapa de cada servicio del Programador: Google Maps incrustado, sin clave** (desde el 2026-09-28,
+  [mapaDeGoogle.js](frontend/src/programador/model/mapaDeGoogle.js)). El usuario no quiere pagar Google Cloud
+  para ver un mapa, y el mapa de Google con JavaScript exige tarjeta y cuenta de pago activa aunque no se
+  pase de lo gratuito. El visor incrustado (`maps.google.com/maps?...&output=embed`) no pide nada: con dos o
+  más domicilios Google traza el camino real por ellos en el orden del servicio (medido hasta 20 paradas).
+  **No está documentado como API**: si Google lo retira, la salida oficial es la Maps Embed API (gratuita e
+  ilimitada, con clave). Solo van coordenadas —ni nombres ni documentos—, y solo de quien tiene punto:
+  **se probó a mandar la dirección escrita de quien no lo tiene y Google no encontró ninguna de cuatro
+  reales** (manzana y lote; una calle de SJL la llevó al Estadio Nacional), y una parada que no encuentra
+  rompe la ruta entera. Buscar direcciones con Google no mejora eso gratis; lo que las resuelve es el GPS.
+- `leaflet` / `react-leaflet` — solo queda el mapa en vivo (`LiveMap.jsx`) del tablero heredado
+  (`DashboardView`, que usan los roles administrativos que no son Administración ni el Programador).
 - `framer-motion` — animaciones
 
 **Backend** (`frontend/api/index.py`, FastAPI/Python, ~6420 líneas y 57 endpoints en un solo archivo —
