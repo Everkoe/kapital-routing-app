@@ -3346,6 +3346,45 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         guardar.assert_not_awaited()
         self.assertNotIn("perfil_conductor", chofer)
 
+    async def test_resubmitting_the_same_document_is_not_a_duplicate(self):
+        """Si ya había otra cuenta con la otra forma del DNI, el dueño no podía reenviar el suyo."""
+        backend.AUTH_ENFORCED = True
+        await self._sesion("duplicada@k.com", rol="Conductor", estado="Pendiente", dni="01234567")
+        chofer, token = await self._sesion(
+            "chofer@k.com", rol="Conductor", perfil_conductor={"numDoc": "1234567"})
+        with (
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/driver/onboarding", token,
+                json={"email": "chofer@k.com", "perfilData": {"numDoc": " 1234567 ", "nombres": "Chofer"}})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(chofer["estado"], "Pendiente Revisión")
+
+    async def test_the_email_change_asks_for_a_session_before_reading_anything(self):
+        """Sin sesión respondía 401 o 404 según existiera la cuenta, y leía a todos."""
+        backend.AUTH_ENFORCED = True
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()) as leer:
+            existe = await self._llamar(
+                "PUT", "/api/conductor/correo", json={"identificador": "x@k.com", "correo": "a@b.com"})
+        self.assertEqual(existe.status_code, 401)
+        leer.assert_not_awaited()
+
+    async def test_a_bulk_delete_closes_the_sessions_too(self):
+        backend.AUTH_ENFORCED = True
+        _, token_admin = await self._sesion("admin@k.com", rol="Administración")
+        _, token_otro = await self._sesion("otro@k.com", rol="Conductor")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/admin/users/bulk", token_admin,
+                json={"admin_email": "admin@k.com", "target_emails": ["otro@k.com"], "action": "delete"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIsNone(await backend.sesion_de(token_otro))
+
     async def test_ownership_is_checked_on_the_account_that_is_changed(self):
         """Comprobar la propiedad con lo tecleado no basta.
 

@@ -3,6 +3,7 @@ import { AlertTriangle, RefreshCw, Search, Truck } from 'lucide-react';
 import { apiFetch } from '../utils/apiClient';
 import { useBoardData } from './data/useBoardData.js';
 import { capacityDistribution } from './model/analytics.js';
+import { fleetKey } from './model/serviceModel.js';
 import './programador.css';
 
 /**
@@ -20,12 +21,12 @@ import './programador.css';
  *
  * Los códigos no coinciden entre las dos fuentes —la flota guarda «K-027» y la
  * intranet registra «K027»—, así que el cruce va por el código sin guiones, y
- * lo hace el backend. Aun así solo cruzan 41 de 79: la intranet mueve unidades
- * «V###» y «M###» que no están dadas de alta aquí, y eso se dice en pantalla
- * en vez de dejar la tabla llena de ceros.
+ * la «KV-026» de la base es la «V026» de la intranet. Lo hacen `fleetKey` aquí
+ * y `_clave_de_vehiculo` en el backend, y tienen que coincidir: con una copia
+ * propia de la regla, esta pantalla dejaba las KV sin viajes. Las unidades de
+ * la intranet que siguen sin estar dadas de alta se dicen en pantalla en vez
+ * de dejar la tabla llena de ceros.
  */
-
-const clave = (valor) => String(valor ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 const pasajeros = (n) => `${n} ${Number(n) === 1 ? 'pasajero' : 'pasajeros'}`;
 
@@ -52,7 +53,7 @@ const FlotaProgramador = () => {
 
   const unidades = useMemo(
     () => Object.values(fleet)
-      .map((u) => ({ ...u, uso: medidos[clave(u.unidad_id)] || null }))
+      .map((u) => ({ ...u, uso: medidos[fleetKey(u.unidad_id)] || null }))
       .sort((a, b) => (b.uso?.viajes ?? -1) - (a.uso?.viajes ?? -1)),
     [fleet, medidos],
   );
@@ -65,15 +66,15 @@ const FlotaProgramador = () => {
   const visibles = useMemo(() => {
     const buscado = query.trim().toLowerCase();
     if (!buscado) return unidades;
-    const padron = clave(query);
-    const porPadron = unidades.filter((u) => clave(u.unidad_id).startsWith(padron));
+    const padron = fleetKey(query);
+    const porPadron = unidades.filter((u) => fleetKey(u.unidad_id).startsWith(padron));
     if (porPadron.length > 0) return porPadron;
     return unidades.filter((u) => [u.unidad_id, u.chofer]
       .some((campo) => String(campo ?? '').toLowerCase().includes(buscado)));
   }, [unidades, query]);
 
   const totales = useMemo(() => {
-    const enFlota = new Set(Object.values(fleet).map((u) => clave(u.unidad_id)));
+    const enFlota = new Set(Object.values(fleet).map((u) => fleetKey(u.unidad_id)));
     return {
       asientos: Object.values(fleet).reduce((n, u) => n + (u.capacidad ?? 0), 0),
       conHistorico: unidades.filter((u) => u.uso).length,

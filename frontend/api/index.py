@@ -3949,14 +3949,16 @@ async def actualizar_correo_conductor(payload: CorreoConductorPayload, session_t
     Lo puede hacer Administración —los correos del Excel eran inventados y hay
     que sustituirlos por los reales— y el propio conductor sobre el suyo.
     """
+    # La sesión primero: sin ella respondía 401 o 404 según existiera la cuenta,
+    # y cada llamada anónima costaba una lectura de todos los usuarios.
+    actor = await require_any_session(session_token)
+    clave_actor = _clave_de_cuenta(actor) if actor else None
     await _load_compat_users()
     user = get_user_by_identifier(payload.identificador)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
-    actor = await require_any_session(session_token)
-    _exigir_su_cuenta(actor, _clave_de_cuenta(actor) if actor else None, user,
-                      "No puedes cambiar el correo de otra cuenta.")
+    _exigir_su_cuenta(actor, clave_actor, user, "No puedes cambiar el correo de otra cuenta.")
 
     asignar_correo(user, payload.correo)
     await refrescar_sesiones_de(user)
@@ -4562,6 +4564,7 @@ async def bulk_users_action(payload: BulkActionPayload, session_token: SessionCo
                 usuarios_db[target]["estado"] = "Rechazado"
                 await refrescar_sesiones_de(usuarios_db[target])
             elif payload.action == "delete":
+                await revocar_sesiones_de(usuarios_db[target])
                 del usuarios_db[target]
                 
     await persist_users_only()
@@ -5234,8 +5237,14 @@ async def driver_onboarding(payload: DriverProfilePayload, session_token: Sessio
         raise HTTPException(status_code=403, detail="El usuario no es un conductor.")
 
     # El documento es también un alias de acceso: declararse el DNI de otro le
-    # quitaba a esa persona la entrada con su DNI.
-    if _cuenta_con_documento(payload.perfilData.get("numDoc"), excepto=user):
+    # quitaba a esa persona la entrada con su DNI. Solo se mira si cambia: si ya
+    # hay una cuenta duplicada con la otra forma de ese mismo DNI, el dueño
+    # tiene que poder seguir reenviando el suyo.
+    documento = payload.perfilData.get("numDoc")
+    perfil_actual = user.get("perfil_conductor") if isinstance(user.get("perfil_conductor"), dict) else {}
+    actuales = {str(v).strip().lower() for v in (perfil_actual.get("numDoc"), user.get("dni")) if v}
+    cambia = not actuales.intersection(_formas_de_identificador(documento))
+    if cambia and _cuenta_con_documento(documento, excepto=user):
         raise HTTPException(status_code=409, detail="Ese documento ya está registrado en otra cuenta.")
 
     user["perfil_conductor"] = conservar_documentos(user.get("perfil_conductor"), payload.perfilData)
