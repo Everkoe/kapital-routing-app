@@ -4352,6 +4352,23 @@ async def _eventos_de_acceso() -> List[Dict[str, Any]]:
     return [e for e in (_evento_de_acceso(f) for f in filas) if e]
 
 
+def _correo_propio(clave: str, usuario: Dict[str, Any]) -> Optional[str]:
+    """El correo de la persona, que no siempre es la clave de su cuenta.
+
+    Las cuentas importadas de las bases de conductores tienen por clave un
+    `apellido.apellido@kapital.com` inventado en la importación. Su correo real
+    está en `email` (y en `perfil_conductor.correo`, que `asignar_correo`
+    mantiene igual). Si la base no traía ninguno, la importación dejó la clave
+    en `email`, y eso no es un correo de la persona: se devuelve nada.
+    """
+    correo = str(usuario.get("email") or "").strip()
+    perfil = usuario.get("perfil_conductor")
+    sin_correo_declarado = isinstance(perfil, dict) and "correo" in perfil and not perfil.get("correo")
+    if sin_correo_declarado and correo.lower() == str(clave).strip().lower():
+        return None
+    return correo or str(clave)
+
+
 async def _ultimos_accesos() -> Dict[str, str]:
     """La última vez que entró cada cuenta. Si la tabla falla, vacío."""
     try:
@@ -4435,21 +4452,26 @@ async def get_all_users(email: str, session_token: SessionCookie = None):
         raise HTTPException(status_code=403, detail="Acceso denegado. Se requiere rol de Administración.")
     await require_request_actor(session_token, expected_user=req_user, allowed_roles=_ADMIN_ROLES)
     
-    # La última conexión sale de la tabla de sesiones. La que queda escrita en
-    # el usuario es la de antes de que existiera, y solo se usa si la cuenta no
-    # ha vuelto a entrar desde entonces: cualquier acceso nuevo es posterior.
+    # La última conexión sale solo de la tabla de sesiones. La que quedó escrita
+    # en el usuario, de antes de que existiera, no sirve: la dejaron sobre todo
+    # las comprobaciones de las importaciones (16 cuentas «entraron» el mismo
+    # minuto y siguen con la contraseña provisional), y con ella la pestaña
+    # «Activos» enseñaba como activos a conductores que nunca han entrado.
     accesos = await _ultimos_accesos()
 
     # Devolver lista de usuarios sin contraseñas
     lista_usuarios = []
     for k, v in usuarios_db.items():
         lista_usuarios.append({
+            # `email` es la clave de la cuenta, con la que operan las acciones de
+            # la tabla; el correo que se enseña es `correo`.
             "email": v.get("identifier", k),
+            "correo": _correo_propio(k, v),
             "nombre": v.get("nombre", "Usuario"),
             "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
             "perfil_conductor": v.get("perfil_conductor", None),
-            "last_login": accesos.get(v.get("identifier", k)) or v.get("last_login", None),
+            "last_login": accesos.get(v.get("identifier", k)),
             "avatar": v.get("avatar", None)
         })
     return {"usuarios": lista_usuarios}

@@ -1817,8 +1817,35 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(por_clave["drv-1"]["last_login"].startswith(time.strftime("%Y-")))
         self.assertNotEqual(por_clave["drv-1"]["last_login"], "2026-09-01T10:00:00")
-        # Quien no ha vuelto a entrar conserva la fecha que ya tenía.
-        self.assertEqual(por_clave["drv-2"]["last_login"], "2026-08-01T10:00:00")
+        # La fecha escrita en el usuario es de antes de la tabla y la dejaron las
+        # pruebas de las importaciones: quien no ha entrado desde entonces, nunca.
+        self.assertIsNone(por_clave["drv-2"]["last_login"])
+
+    async def test_the_access_list_shows_the_persons_email_not_the_invented_account_key(self):
+        """Los importados tienen por clave un `apellido.apellido@kapital.com` inventado."""
+        backend.usuarios_db.update({
+            "admin@e.com": {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo"},
+            "silva.roncal@kapital.com": {
+                "rol": "Conductor", "estado": "Activo", "email": "rsilva@gmail.com",
+                "perfil_conductor": {"numDoc": "11111111", "correo": "rsilva@gmail.com"}},
+            "jara.quiliche@kapital.com": {
+                "rol": "Conductor", "estado": "Activo", "email": "jara.quiliche@kapital.com",
+                "perfil_conductor": {"numDoc": "22222222", "correo": None}},
+            "propio@gmail.com": {
+                "identifier": "propio@gmail.com", "rol": "Conductor", "estado": "Pendiente",
+                "email": "propio@gmail.com", "perfil_conductor": {"numDoc": "33333333"}},
+        })
+        with patch.object(backend, "_load_compat_users", new=AsyncMock()), \
+                patch.object(backend, "reload_db", new=AsyncMock()):
+            listado = await backend.get_all_users("admin@e.com")
+        por_clave = {u["email"]: u for u in listado["usuarios"]}
+
+        self.assertEqual(por_clave["silva.roncal@kapital.com"]["correo"], "rsilva@gmail.com")
+        # Sin correo en su base, la importación dejó la clave: no es su correo.
+        self.assertIsNone(por_clave["jara.quiliche@kapital.com"]["correo"])
+        # Quien se dio de alta él mismo tiene por clave su propio correo.
+        self.assertEqual(por_clave["propio@gmail.com"]["correo"], "propio@gmail.com")
+        self.assertEqual(por_clave["admin@e.com"]["correo"], "admin@e.com")
 
     async def test_logins_still_appear_in_the_activity_history(self):
         admin = {"identifier": "admin@e.com", "rol": "Administración", "estado": "Activo",
