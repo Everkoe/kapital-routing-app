@@ -1431,3 +1431,69 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+/* --- Estado de la carga del histórico ------------------------------------- */
+
+/* «Al día» o «Falta el reporte de…», con la tira de los últimos días. */
+.historico-estado {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+}
+.historico-estado[data-tono='ok'] { border-color: var(--kapital-accent-green); }
+.historico-estado[data-tono='falta'] { border-color: var(--kapital-accent-orange); }
+.historico-estado-linea { display: flex; align-items: flex-start; gap: 10px; }
+.historico-estado[data-tono='ok'] .historico-estado-linea > svg { color: var(--kapital-accent-green); }
+.historico-estado[data-tono='falta'] .historico-estado-linea > svg { color: var(--kapital-accent-orange); }
+.historico-estado-linea p { margin: 0; font-size: 0.9rem; color: var(--kapital-text-primary); }
+.historico-estado-linea small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--kapital-text-secondary);
+}
+
+.historico-dias {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.historico-dias li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px dashed var(--kapital-border);
+  color: var(--kapital-text-secondary);
+  font-size: 0.75rem;
+}
+.historico-dias li[data-cargado] {
+  border-style: solid;
+  border-color: var(--kapital-accent-green);
+  color: var(--kapital-text-primary);
+}
+.historico-dias li[data-cargado] svg { color: var(--kapital-accent-green); }
+.historico-dia-semana { text-transform: capitalize; }
+.historico-dia-numero { font-size: 1rem; font-weight: 700; }
+
+/* La caja para subir, plegada cuando el día ya está cargado. */
+.historico-plegado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.historico-plegado p { margin: 0; font-size: 0.86rem; color: var(--kapital-text-secondary); }
+
+.pw-confirmar-icono.historico-recarga-icono { color: var(--primary); }

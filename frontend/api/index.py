@@ -5829,9 +5829,16 @@ async def _upsert_tabla(cliente: httpx.AsyncClient, tabla: str,
     return escritas
 
 
+async def _dias_cargados(desde: str, hasta: str) -> List[Dict[str, Any]]:
+    """Los días del histórico entre esas fechas, con cuántos servicios y cuándo se cargaron."""
+    filas = await _rpc_programador("dias_cargados", {"p_desde": desde, "p_hasta": hasta})
+    return filas if isinstance(filas, list) else []
+
+
 @app.post("/api/programador/historico")
 async def cargar_historico_intranet(
     file: UploadFile = File(...),
+    reemplazar: bool = Form(False),
     session_token: SessionCookie = None,
 ):
     """Recibe el reporte diario de la intranet y lo incorpora al histórico.
@@ -5870,6 +5877,25 @@ async def cargar_historico_intranet(
             status_code=400,
             detail="El reporte no trae ningún servicio con fecha y turno legibles.",
         )
+
+    # Si el día ya estaba, se para antes de escribir nada y se pregunta. Subirlo
+    # otra vez no duplica —la carga resuelve por la clave natural—, pero rehace
+    # el trabajo sin decirlo y casi siempre es un despiste: el archivo de ayer
+    # otra vez, o dos personas subiendo el mismo. Quien quiere recargarlo lo
+    # confirma y vuelve con `reemplazar`.
+    dias_del_archivo = sorted({str(fila["fecha_ejecutada"]) for fila in servicios
+                               if fila.get("fecha_ejecutada")})
+    if not reemplazar and dias_del_archivo:
+        ya_cargados = [dia for dia in await _dias_cargados(dias_del_archivo[0], dias_del_archivo[-1])
+                       if str(dia.get("fecha")) in dias_del_archivo]
+        if ya_cargados:
+            fechas = ", ".join(
+                date.fromisoformat(str(dia["fecha"])).strftime("%d/%m") for dia in ya_cargados)
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f"Ya estaba cargado: {fechas}. ¿Volver a cargarlo?",
+                "ya_cargados": ya_cargados,
+                "dias": dias_del_archivo,
+            })
 
     async with httpx.AsyncClient(timeout=90.0) as cliente:
         # Los dos grupos van por separado a propósito. Quien no declara
@@ -5922,10 +5948,23 @@ async def cargar_historico_intranet(
     return resumen
 
 
+# Los días que enseña la tira de la pantalla de carga, hasta el que toca subir.
+DIAS_EN_LA_TIRA = 7
+
+
 @app.get("/api/programador/estado-historico")
 async def estado_historico(session_token: SessionCookie = None):
-    """Qué hay cargado hoy: sirve para saber si falta subir el reporte."""
+    """Qué hay cargado: sirve para saber si falta subir el reporte.
+
+    El que toca es el del día que ya terminó —ayer, en Lima—, porque el reporte
+    «Detalle» de la intranet es de 00:00 a 23:59. Los días de la tira salen
+    resumidos de la base (`dias_cargados`), sin bajar sus servicios.
+    """
     await require_admin_session(session_token)
+    hoy = _hoy_en_lima()
+    esperado = hoy - timedelta(days=1)
+    dias = await _dias_cargados(
+        (esperado - timedelta(days=DIAS_EN_LA_TIRA - 1)).isoformat(), hoy.isoformat())
     cabeceras = {**HEADERS, "Prefer": "count=exact", "Range": "0-0"}
     async with httpx.AsyncClient(timeout=30.0) as cliente:
         async def cuenta(tabla, params=None):
@@ -5946,6 +5985,9 @@ async def estado_historico(session_token: SessionCookie = None):
                                        {"estado_ubicacion": "eq.no_resuelta"}),
             "duraciones": await cuenta("duraciones_base"),
             "ultimo_dia": filas[0]["fecha_ejecutada"] if filas else None,
+            "hoy": hoy.isoformat(),
+            "esperado": esperado.isoformat(),
+            "dias": dias,
         }
 
 

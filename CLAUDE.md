@@ -60,6 +60,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   puntos GPS que exige el umbral—. Por eso el padrón se escribe en dos grupos y quien no declara coordenada
   va **sin** las columnas de ubicación, para que lo ya aprendido sobreviva. Que «sin ubicar» suba tras una
   carga no es una regresión: son personas nuevas. La comprobación correcta es que las **resueltas** no bajen.
+  **La pantalla de carga dice si falta algo** (desde el 2026-09-28): el reporte que toca es el del día que
+  ya terminó —ayer en Lima, `esperado` en `GET /api/programador/estado-historico`—, con una tira de los
+  últimos siete días que sale resumida de la base (`dias_cargados()`,
+  [supabase/014_dias_cargados.sql](supabase/014_dias_cargados.sql)). Si ya está, la caja para subir se
+  pliega; si se sube un día que ya estaba, el servidor **para antes de escribir** con un 409 que lista lo
+  ya cargado y solo recarga si se confirma (`reemplazar`). Esa tira destapó el hueco: el 28/9 el histórico
+  tenía agosto entero y **de septiembre solo el 22**.
 - **Novedades del cliente — el cambio se deduce, no se lee**: es el otro archivo que maneja el Programador
   (altas, bajas y cambios para los próximos días; suele llegar el viernes con el fin de semana dentro) y se
   sube en **Cargar datos → Novedades** (`POST /api/programador/novedades`, en
