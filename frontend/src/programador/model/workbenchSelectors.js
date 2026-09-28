@@ -7,7 +7,7 @@
 
 // Extensión explícita: Node la exige al ejecutar las pruebas, aunque Vite la
 // resuelva sin ella.
-import { UNASSIGNED } from './serviceModel.js';
+import { UNASSIGNED, fleetKey } from './serviceModel.js';
 
 const norm = (value) => String(value ?? '').trim();
 const lower = (value) => norm(value).toLowerCase();
@@ -78,18 +78,16 @@ export const filterOptions = (services) => {
 };
 
 /**
- * Padrón escrito de cualquiera de las dos formas.
+ * Si esa unidad empieza por lo que se ha escrito.
  *
  * La flota registra «K-027» y el histórico de la intranet «K027», así que
  * quien buscaba su unidad con el guion —que es como está impresa— no
- * encontraba nada. Comparar sin guiones ni espacios hace que las dos formas
- * lleguen al mismo sitio.
+ * encontraba nada. Los dos lados pasan por `fleetKey`, que quita guiones y
+ * espacios y además hace que «KV-026» —como la escribe la base de
+ * conductores— encuentre la «V026» de la intranet.
  */
-const soloAlfanumerico = (valor) => lower(valor).replace(/[^a-z0-9]/g, '');
-
-/** Si esa unidad empieza por lo que se ha escrito. */
 const esPadron = (service, padron) =>
-  Boolean(padron) && soloAlfanumerico(service.conductor).startsWith(padron);
+  Boolean(padron) && fleetKey(service.conductor).startsWith(padron);
 
 /**
  * Busca en el servicio y también dentro de sus agentes: el Programador busca
@@ -138,7 +136,7 @@ export const applyFilters = (services, filters) => {
 
   if (!f.query) return previos;
 
-  const padron = soloAlfanumerico(f.query);
+  const padron = fleetKey(f.query);
   const porPadron = previos.filter((service) => esPadron(service, padron));
   if (porPadron.length > 0) return porPadron;
 

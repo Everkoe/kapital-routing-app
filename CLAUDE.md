@@ -229,10 +229,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **Los códigos de vehículo no coinciden entre las dos fuentes**: la flota guarda «K-027» y la
     intranet registra «K027». El cruce va por el código sin guiones —`_clave_de_vehiculo` en el
     backend, `fleetKey` en el modelo del frontend, que es lo que permite resolver la capacidad
-    declarada de un servicio del histórico—, y aun así
-    **solo cruzan 41 de 79**: la intranet mueve unidades «V###» y «M###» que no están dadas de alta en
-    `__flota__`. La pantalla lo dice en vez de enseñar ceros; decidir qué hacer con esas unidades es del
-    usuario, no del código.
+    declarada de un servicio del histórico—. **Y la «KV-026» de la base MASIVO es la «V026» de la
+    intranet** (desde el 2026-09-27, [supabase/012_unidades_kv.sql](supabase/012_unidades_kv.sql)): la
+    intranet no escribe nunca «KV», 29 de sus 33 V### tienen su KV-### con el mismo número y lo más que
+    llevó cada una cabe en la capacidad que declara la base (las VAN de 10 llevaron 10; las SUV de 6,
+    6). La regla vive en tres sitios que **tienen que coincidir**: `_clave_de_vehiculo`, `fleetKey` y
+    `_clave_normalizada`. Antes solo cruzaban 41 de 79 y las V### parecían unidades sin dar de alta.
+    Siguen sin cruzar algunas M### y unas pocas unidades nuevas: la pantalla lo dice en vez de enseñar
+    ceros.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
   (rewrites en [frontend/vercel.json](frontend/vercel.json)).
 - **Backend híbrido — ¡importante!**: además de Supabase, `api/index.py` mantiene estado en memoria
@@ -263,7 +267,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   hash. `KAPITAL_AUTH_ENFORCED=true` **está activo en producción desde el PR #3**, que llevó `/api/auth/me`,
   `/api/auth/logout`, el manejo de 401 en el frontend y el índice de sesiones. **Desde el 2026-09-27 todos
   los endpoints piden sesión** salvo `GET /api`, el login, el registro y el cambio de contraseña (que
-  exige la actual); los tres llevan tope de intentos (ver «Tope de intentos»). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
+  exige la actual); los tres llevan tope de intentos (ver «Tope de intentos»). El alta del conductor
+  (`POST /api/driver/onboarding`) se quedó fuera hasta el 2026-09-27 —cualquiera podía reescribir el
+  perfil y el correo de otro y dejarlo «Pendiente Revisión»—; ahora solo sobre la propia cuenta y sin
+  poder declararse el documento de otra (409). Los que faltaban **no eran «todos de lectura»**, como se creía: `resubmit-docs`
   dejaba a cualquiera cambiar los documentos de cualquier conductor —y, mandando `revision_docs` como si
   fuera un documento, aprobárselos solo—, `request-update` y `mark-read` escribían, `actualizar-pasajero`
   subía fotos a un bucket público, y `GET /api/conductor/info/{unidad}` y `/api/flota/export` entregaban
@@ -274,6 +281,14 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `src/constants/documentosConductor.js`). El WebSocket exige la cookie y que uno se conecte como sí
   mismo. Para comprobar que no queda ninguno abierto, la prueba
   `test_endpoints_that_never_asked_for_a_session_now_do` los llama sin cookie.
+  **La propiedad se comprueba sobre la cuenta que se va a cambiar, no sobre lo tecleado**
+  (`_exigir_su_cuenta`): `resubmit-docs`, `request-update` y el correo del conductor comprobaban que el
+  texto fuera «de» quien pregunta y cambiaban la cuenta que devolvía la búsqueda, que con dos cuentas del
+  mismo documento era la otra. Al añadir un endpoint que busque una cuenta por identificador, lo mismo.
+  **El DNI se busca con y sin sus ceros** (la importación se los quitó a 25 conductores), pero lo tecleado
+  tal cual gana y una variante que señala a dos cuentas no resuelve ninguna (`_formas_de_identificador`,
+  igual en `get_user_by_identifier` y en el índice de acceso). Borrar o rechazar una cuenta cierra sus
+  sesiones.
   **Desde el 2026-09-27 las sesiones viven en `public.sesiones`**, una fila por sesión
   ([supabase/007_sesiones.sql](supabase/007_sesiones.sql), almacén en
   [frontend/api/sesiones.py](frontend/api/sesiones.py)). Antes vivían dos veces dentro de la fila única
@@ -380,8 +395,19 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **Qué significa el turno está medido, no supuesto**: en un RECOJO es la hora de entrada a la sede (el coche
   arranca ~85 min antes y llega ~22 min antes); en una SALIDA, la hora a la que sale de la sede. La pantalla
   **no enseña una hora estimada de recogida**, porque el plan no la tiene y sería una promesa. Solo se puede
-  marcar de 3 h antes a 6 h después del turno. **Hoy solo 23 de las 51 unidades del plan tienen cuenta de
-  conductor**: las V###/M### no están dadas de alta y no verán nada hasta que lo estén.
+  marcar de 3 h antes a 6 h después del turno. **Lo que falta para los conductores reales es de datos, no
+  de código**: de las 52 unidades que operaron la última semana cargada (del 16 al 22 de septiembre),
+  **6 no tienen cuenta de conductor** —V098, V232, V233, K230, M864 y M018— y llevan el 6,8% de los viajes
+  a bordo. Se llegó a decir que eran 29 y el 77%: era un error de cruce, no de datos, porque 23 de ellas
+  son las KV-### de la base MASIVO (ver «Los códigos de vehículo» en §2). De las seis, KV-098 y K-230
+  figuran en la base general del usuario como «Baja» aunque siguieron operando. El Programador les asignará
+  servicios que nadie recibe hasta que se importen sus conductores (con
+  `scripts/importar_base_motorizados.py`; obligatorias nombre, DNI, padrón y placa, con el padrón escrito
+  como en la base —KV-098 vale por V098—). Y 78 de las 124 cuentas son de unidades que no operaron esa
+  semana (sobre todo Sharf y Remisse): entran, pero no les llega nada mientras su unidad no esté en el plan. Una unidad con dos
+  conductores por turnos daría todos sus servicios a los dos: hoy no se distingue quién hace cada turno.
+  **Desplegado en producción el 2026-09-27** (merge `4341250`, PR #15): sin sesión las rutas nuevas dan
+  401 y las retiradas (`mis-rutas`, `cliente/rutas`, `actualizar-pasajero`) 404.
   Las pantallas son nuevas: la del conductor ([frontend/src/conductor/](frontend/src/conductor/)) está pensada
   para el teléfono —próximo servicio arriba, paradas en orden con «Cómo llegar» (Google Maps y Waze, al punto
   si está resuelto y si no a la dirección escrita), un modo guía de una parada cada vez, el botón «atrás» del

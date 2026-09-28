@@ -31,7 +31,13 @@ const norm = (value) => String(value ?? '').trim();
  * de búsqueda, o la capacidad declarada no se encontraría nunca y la mesa
  * mostraría toda la flota sin denominador.
  */
-export const fleetKey = (value) => norm(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+// La base de conductores MASIVO escribe «KV-026» y la intranet de
+// Teleperformance «V026»: es la misma unidad (29 de las 33 V### tienen su
+// KV-### con el mismo número, y lo más que llevó cada una cabe en la capacidad
+// declarada). La misma regla está en `_clave_de_vehiculo` del backend y en
+// `_clave_normalizada` de Postgres (supabase/012): las tres deben coincidir.
+export const fleetKey = (value) =>
+  norm(value).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^KV(\d+)$/, 'V$1');
 
 /** Clave de negocio de un servicio, previa a desambiguar duplicados. */
 const businessKey = (route) =>
