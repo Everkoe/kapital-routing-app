@@ -117,6 +117,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   alguien cierra la pestaña a medias, y ese «¿guardé?» es lo que no debe tener quien programa de
   madrugada. Por lo mismo se retiró el botón «Guardar» del encabezado: anunciaba como
   pendiente algo que ya ocurre solo.
+  **Una programación se puede borrar** (desde el 2026-09-28, `POST /api/programador/plan/borrar`,
+  [supabase/013_borrar_y_rehacer_programacion.sql](supabase/013_borrar_y_rehacer_programacion.sql)): solo
+  un día de hoy en adelante y sin viajes marcados por los conductores —la base lo rechaza con 409 si no—, y
+  empezar de cero es borrar y volver a crear. Hizo falta porque **la aplicación local trabaja contra la base
+  real**: un plan de prueba de mañana les llega como real a los conductores de esas unidades. Hubo un
+  «Rehacer» aparte y se quitó: era borrar y crear en un paso, y confundía. Queda abierto (decisión de
+  producto) si hay que bloquear el borrado de un día cuyo primer servicio ya empezó aunque nadie haya
+  marcado todavía: marcar es nuevo y «sin marcas» dice poco.
+  **Desplegado en producción el 2026-09-28** (merge `6988f58`, PR #17), junto con el mapa de Google, la
+  ventana 10:00 y el aviso de lo ya cargado en la carga del histórico; la 013 y la 014 ya estaban aplicadas.
   **El eje de días no sale del histórico, y ese fue el fallo que dejó la función inalcanzable**: el
   selector solo ofrecía días ya ejecutados, y el día que un programador necesita —mañana— no está en
   `servicios_historicos` por definición. El plan del 26 existía en la base y no había manera de abrirlo
