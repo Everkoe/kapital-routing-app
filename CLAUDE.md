@@ -285,7 +285,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `/api/auth/me` —se llama al abrir la aplicación— dejó de descargar el estado completo. La «última
   conexión» de Accesos y los «Usuario inició sesión» del historial salen de la tabla (las filas se
   conservan 90 días como registro de accesos); antes se escribían en la fila y además los accesos de los
-  conductores expulsaban del historial, limitado a 500, las acciones de administración.
+  conductores expulsaban del historial, limitado a 500, las acciones de administración. **Solo** de la
+  tabla: el `last_login` que quedó escrito en 24 conductores es de las comprobaciones de las importaciones
+  (16 «entraron» el mismo minuto y siguen con la provisional), y con él «Activos» enseñaba como activos a
+  conductores que nunca habían entrado. En esa misma pantalla la columna de correo enseña `correo`
+  (`_correo_propio`), no la clave de la cuenta: en los importados la clave es un
+  `apellido.apellido@kapital.com` inventado, y las acciones siguen operando sobre ella.
   **La sesión pertenece a la clave de la cuenta, no al campo `identifier`**: 124 de las 128 cuentas —casi
   todos los conductores— no lo llevan escrito. Usar siempre `_clave_de_cuenta(user)`. El código viejo usaba
   `identifier`, dejaba esas sesiones sin dueño y en cada petición de un conductor acababa descargando a
