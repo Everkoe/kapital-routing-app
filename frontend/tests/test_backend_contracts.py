@@ -162,10 +162,61 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def test_only_a_dni_is_the_same_with_and_without_leading_zeros(self):
         self.assertEqual(backend._formas_de_identificador(" 04567891 "), ["04567891", "4567891"])
         self.assertEqual(backend._formas_de_identificador("4567891"), ["4567891", "04567891"])
+        # Uno de los importados perdió dos ceros: le quedan seis cifras.
+        self.assertEqual(backend._formas_de_identificador("00796328"), ["00796328", "796328"])
         # Un carné de extranjería (más de ocho cifras) se busca tal cual.
         self.assertEqual(backend._formas_de_identificador("001234567"), ["001234567"])
         self.assertEqual(backend._formas_de_identificador("Ana@K.com"), ["ana@k.com"])
         self.assertEqual(backend._formas_de_identificador(""), [])
+        # Lo que no llega a DNI no se estira hasta ocho cifras.
+        for corto in ("0", "12", "00000000", "0012345"):
+            self.assertEqual(backend._formas_de_identificador(corto), [corto], corto)
+        # Solo cifras ASCII: `isdigit` también acepta otras escrituras.
+        self.assertEqual(backend._formas_de_identificador("١٢٣٤٥٦٧"), ["١٢٣٤٥٦٧"])
+
+    def test_the_exact_alias_wins_over_a_zero_variant(self):
+        """Quien tiene «01234567» entraba en la cuenta de «1234567» si esa iba antes."""
+        sin_cero = {"rol": "Conductor", "perfil_conductor": {"numDoc": "1234567"}}
+        con_cero = {"rol": "Conductor", "dni": "01234567"}
+        backend.usuarios_db["sin.cero@kapital.com"] = sin_cero
+        backend.usuarios_db["con.cero@kapital.com"] = con_cero
+        self.assertIs(backend.get_user_by_identifier("01234567"), con_cero)
+        self.assertIs(backend.get_user_by_identifier("1234567"), sin_cero)
+
+    def test_zero_variants_that_point_to_two_accounts_resolve_to_none(self):
+        backend.usuarios_db["a@kapital.com"] = {"rol": "Conductor", "dni": "234567"}
+        backend.usuarios_db["b@kapital.com"] = {"rol": "Conductor", "dni": "00234567"}
+        self.assertIsNone(backend.get_user_by_identifier("0234567"))
+
+    async def test_the_login_index_prefers_the_exact_alias_and_refuses_ambiguity(self):
+        backend.login_index = {
+            "1234567": "sin.cero@kapital.com",
+            "01234567": "con.cero@kapital.com",
+            "234567": "a@kapital.com",
+            "00234567": "b@kapital.com",
+        }
+        backend._login_index_loaded_at = time.monotonic()
+        usuario = {"rol": "Conductor", "estado": "Activo"}
+        with patch.object(backend, "_fetch_usuario_por_clave", new=AsyncMock(return_value=usuario)) as leer:
+            self.assertIs(await backend._usuario_por_indice("01234567"), usuario)
+            leer.assert_awaited_once_with("con.cero@kapital.com")
+            leer.reset_mock()
+            self.assertIsNone(await backend._usuario_por_indice("0234567"))
+            leer.assert_not_awaited()
+
+    async def test_the_login_answers_with_an_identifier_the_account_owns(self):
+        """Devolvía lo tecleado; con el cero, las comprobaciones de propiedad lo rechazaban."""
+        backend.usuarios_db["perez.gomez@kapital.com"] = {
+            "rol": "Conductor", "estado": "Activo", "nombre": "Pérez",
+            "password": backend.hash_password("provisional-segura"),
+            "perfil_conductor": {"tipoDoc": "DNI", "numDoc": "4567891"},
+        }
+        with patch.object(backend, "reload_db", new=AsyncMock()), \
+                patch.object(backend, "persist_users_only", new=AsyncMock()):
+            respuesta = await backend.login_user(
+                backend.UsuarioLogin(identifier="04567891", password="provisional-segura"), Response())
+        usuario = backend.usuarios_db["perez.gomez@kapital.com"]
+        self.assertTrue(backend._owner_matches(usuario, backend._IDENTITY_FIELDS, respuesta["identifier"]))
 
     async def test_the_login_index_also_finds_a_dni_typed_with_its_zero(self):
         backend.login_index = {"4567891": "perez.gomez@kapital.com"}
@@ -3197,6 +3248,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ("POST", "/api/conductor/resubmit-docs", {"json": {"email": "x@k.com", "docs": {}}}),
             ("POST", "/api/conductor/request-update",
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
+            ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),
@@ -3252,6 +3304,119 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(respuesta.status_code, 400)
         guardar.assert_not_awaited()
         self.assertEqual(chofer["perfil_conductor"]["revision_docs"]["dniScaneado"]["estado"], "rechazado")
+
+    async def test_a_driver_submits_only_their_own_onboarding(self):
+        """No pedía sesión: cualquiera cambiaba el perfil y el estado de otro conductor."""
+        backend.AUTH_ENFORCED = True
+        chofer, token = await self._sesion("chofer@k.com", rol="Conductor")
+        otro, _ = await self._sesion("otro@k.com", rol="Conductor", perfil_conductor={"numDoc": "11111111"})
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            ajeno = await self._llamar(
+                "POST", "/api/driver/onboarding", token,
+                json={"email": "otro@k.com", "perfilData": {"numDoc": "999", "nombres": "X"}})
+            propio = await self._llamar(
+                "POST", "/api/driver/onboarding", token,
+                json={"email": "chofer@k.com", "perfilData": {"numDoc": "22222222", "nombres": "Chofer"}})
+        self.assertEqual(ajeno.status_code, 403)
+        self.assertEqual(otro["estado"], "Activo")
+        self.assertEqual(otro["perfil_conductor"], {"numDoc": "11111111"})
+        self.assertEqual(propio.status_code, 200)
+        self.assertEqual(chofer["estado"], "Pendiente Revisión")
+        guardar.assert_awaited_once()
+
+    async def test_onboarding_rejects_a_document_that_is_another_accounts(self):
+        """Declararse el DNI de otro le quitaba a esa persona la entrada con su DNI."""
+        backend.AUTH_ENFORCED = True
+        await self._sesion("otro@k.com", rol="Conductor", perfil_conductor={"numDoc": "1234567"})
+        chofer, token = await self._sesion("chofer@k.com", rol="Conductor")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            for documento in ("1234567", "01234567"):
+                respuesta = await self._llamar(
+                    "POST", "/api/driver/onboarding", token,
+                    json={"email": "chofer@k.com", "perfilData": {"numDoc": documento}})
+                self.assertEqual(respuesta.status_code, 409, documento)
+        guardar.assert_not_awaited()
+        self.assertNotIn("perfil_conductor", chofer)
+
+    async def test_ownership_is_checked_on_the_account_that_is_changed(self):
+        """Comprobar la propiedad con lo tecleado no basta.
+
+        Si dos cuentas comparten documento, el texto es «de» quien pregunta pero
+        la búsqueda devuelve la primera, y se cambiaba esa otra cuenta.
+        """
+        backend.AUTH_ENFORCED = True
+        victima, _ = await self._sesion(
+            "victima@k.com", rol="Conductor",
+            perfil_conductor={"numDoc": "12345678", "dniScaneado": "real.pdf", "revision_docs": {}})
+        _, token = await self._sesion(
+            "chofer@k.com", rol="Conductor",
+            perfil_conductor={"numDoc": "12345678", "revision_docs": {}})
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            for metodo, ruta, cuerpo in (
+                ("POST", "/api/conductor/resubmit-docs",
+                 {"email": "12345678", "docs": {"dniScaneado": "falso.pdf"}}),
+                ("POST", "/api/conductor/request-update",
+                 {"email": "12345678", "field": "telefono", "new_value": "1"}),
+                ("PUT", "/api/conductor/correo",
+                 {"identificador": "12345678", "correo": "atacante@evil.com"}),
+                ("POST", "/api/driver/onboarding",
+                 {"email": "12345678", "perfilData": {"nombres": "X"}}),
+            ):
+                respuesta = await self._llamar(metodo, ruta, token, json=cuerpo)
+                self.assertEqual(respuesta.status_code, 403, ruta)
+        guardar.assert_not_awaited()
+        self.assertEqual(victima["perfil_conductor"]["dniScaneado"], "real.pdf")
+        self.assertNotIn("solicitudes_cambio", victima["perfil_conductor"])
+        self.assertEqual(victima["email"], "victima@k.com")
+        self.assertEqual(victima["estado"], "Activo")
+
+    async def test_administration_still_edits_any_drivers_email(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("admin@k.com", rol="Administración")
+        chofer, _ = await self._sesion("chofer@k.com", rol="Conductor")
+        with (
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "PUT", "/api/conductor/correo", token,
+                json={"identificador": "chofer@k.com", "correo": "real@gmail.com"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(chofer["email"], "real@gmail.com")
+
+    async def test_deleting_an_account_closes_its_sessions(self):
+        """Borrada la cuenta, su sesión seguía abierta hasta caducar: doce horas."""
+        backend.AUTH_ENFORCED = True
+        _, token_admin = await self._sesion("admin@k.com", rol="Administración")
+        _, token_otro = await self._sesion("otro@k.com", rol="Conductor", estado="Inactivo")
+        _, token_pendiente = await self._sesion("nuevo@k.com", rol="Conductor", estado="Pendiente")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            borrado = await self._llamar(
+                "DELETE", "/api/admin/users/permanent/otro@k.com?admin_email=admin@k.com", token_admin)
+            rechazado = await self._llamar(
+                "DELETE", "/api/admin/users/reject/nuevo@k.com?admin_email=admin@k.com", token_admin)
+        self.assertEqual(borrado.status_code, 200)
+        self.assertEqual(rechazado.status_code, 200)
+        self.assertIsNone(await backend.sesion_de(token_otro))
+        self.assertIsNone(await backend.sesion_de(token_pendiente))
+        self.assertIsNotNone(await backend.sesion_de(token_admin))
 
     async def test_document_fields_accept_both_faces(self):
         self.assertTrue(backend._es_campo_documento("dniScaneado"))

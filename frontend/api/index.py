@@ -2945,17 +2945,44 @@ async def _fetch_usuario_por_clave(clave: str) -> Any:
 # contraseña fuera buena. Un documento más largo (carné de extranjería) se
 # busca tal cual: solo un DNI es el mismo con y sin ceros delante.
 LARGO_DNI = 8
+# Lo más corto que dejó la importación: uno perdió dos ceros y le quedan seis
+# cifras. Por debajo no es un DNI, y «12» no debe valer también por «00000012».
+MINIMO_DNI_SIN_CEROS = 6
 
 
 def _formas_de_identificador(texto: Any) -> List[str]:
-    """Lo tecleado y, si parece un DNI, sus formas con y sin ceros delante."""
+    """Lo tecleado —siempre lo primero— y, si parece un DNI, sus formas con y sin ceros.
+
+    Quien busca debe preferir lo tecleado tal cual y usar las otras formas solo
+    si ninguna cuenta lo tiene: «01234567» y «1234567» pueden ser dos cuentas.
+    """
     limpio = str(texto or "").strip().lower()
     formas = [limpio] if limpio else []
-    if limpio.isdigit() and len(limpio) <= LARGO_DNI:
+    parece_dni = (
+        limpio.isascii() and limpio.isdigit() and len(limpio) <= LARGO_DNI
+        and len(limpio.lstrip("0")) >= MINIMO_DNI_SIN_CEROS
+    )
+    if parece_dni:
         for otra in (limpio.lstrip("0"), limpio.zfill(LARGO_DNI)):
-            if otra and otra not in formas:
+            if otra not in formas:
                 formas.append(otra)
     return formas
+
+
+def _unica(candidatas: List[Any]) -> Any:
+    """La única cuenta distinta de la lista, o `None` si no hay o hay varias.
+
+    Cuando lo tecleado no coincide tal cual, una variante del DNI que apunta a
+    dos cuentas no dice cuál es la buena: elegir la primera sería entrar —o
+    escribir— en la de otro.
+    """
+    # Una cuenta es la misma por identidad; una clave del índice, por su texto.
+    distintas: List[Any] = []
+    for candidata in candidatas:
+        if not any(candidata is vista or (isinstance(candidata, str) and candidata == vista)
+                   for vista in distintas):
+            distintas.append(candidata)
+    return distintas[0] if len(distintas) == 1 else None
 
 
 async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
@@ -2978,7 +3005,9 @@ async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
             valor = await _fetch_proyeccion_sin_respaldo("__login__", "load_login_index")
             login_index = valor if isinstance(valor, dict) else {}
             _login_index_loaded_at = time.monotonic()
-        clave = next((login_index[forma] for forma in formas if login_index.get(forma)), None)
+        clave = login_index.get(formas[0]) or _unica(
+            [login_index[forma] for forma in formas[1:] if login_index.get(forma)]
+        )
         if not clave:
             return None
         usuario = await _fetch_usuario_por_clave(clave)
@@ -3839,21 +3868,22 @@ def get_user_by_identifier(identifier: str):
     user = usuarios_db.get(identifier_clean)
     if user: return user
     formas = _formas_de_identificador(identifier_clean)
-    for k, v in usuarios_db.items():
-        if k.lower() in formas:
-            return v
-        for alias in (
-            v.get("identifier"),
-            v.get("email"),
-            v.get("dni"),
-            v.get("login_identifier"),
-        ):
-            if alias and str(alias).strip().lower() in formas:
-                return v
-        perfil = v.get("perfil_conductor", {})
-        if perfil and str(perfil.get("numDoc") or "").strip().lower() in formas:
-            return v
-    return None
+    if not formas:
+        return None
+    # Mismo orden que el índice de acceso: lo tecleado tal cual gana (y entre
+    # varias cuentas con ese alias, la primera, como siempre); las otras formas
+    # del DNI solo cuentan si nadie lo tiene tal cual y señalan a una sola.
+    por_forma: Dict[str, List[Dict[str, Any]]] = {forma: [] for forma in formas}
+    for clave, usuario in usuarios_db.items():
+        if not isinstance(usuario, dict) or clave.startswith("__"):
+            continue
+        for alias in _alias_de_login(clave, usuario):
+            if alias in por_forma:
+                por_forma[alias].append(usuario)
+    exactas = por_forma[formas[0]]
+    if exactas:
+        return exactas[0]
+    return _unica([usuario for forma in formas[1:] for usuario in por_forma[forma]])
 
 # Un correo se guarda como dato de contacto, no como clave de la cuenta: los 108
 # conductores importados del Excel tienen por clave un correo inventado
@@ -3925,9 +3955,8 @@ async def actualizar_correo_conductor(payload: CorreoConductorPayload, session_t
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
     actor = await require_any_session(session_token)
-    if actor is not None and actor.get("rol") not in _ADMIN_ROLES:
-        if not _owner_matches(actor, _IDENTITY_FIELDS, payload.identificador):
-            raise HTTPException(status_code=403, detail="No puedes cambiar el correo de otra cuenta.")
+    _exigir_su_cuenta(actor, _clave_de_cuenta(actor) if actor else None, user,
+                      "No puedes cambiar el correo de otra cuenta.")
 
     asignar_correo(user, payload.correo)
     await refrescar_sesiones_de(user)
@@ -4056,7 +4085,22 @@ async def login_user(usuario: UsuarioLogin, response: Response, request: Request
     )
 
     
-    return _public_user_payload(user_in_db, usuario.identifier)
+    return _public_user_payload(user_in_db, _identificador_propio(user_in_db, usuario.identifier))
+
+def _identificador_propio(user: Dict[str, Any], tecleado: str) -> str:
+    """Lo tecleado en la forma que la cuenta guarda.
+
+    El frontend usa este identificador como dueño de sus peticiones, y las
+    comprobaciones de propiedad lo comparan tal cual: quien entró con el cero
+    que la importación le quitó al DNI recibía 403 sobre sus propios avisos.
+    """
+    if _owner_matches(user, _IDENTITY_FIELDS, tecleado):
+        return tecleado
+    for forma in _formas_de_identificador(tecleado)[1:]:
+        if _owner_matches(user, _IDENTITY_FIELDS, forma):
+            return forma
+    return tecleado
+
 
 @app.get("/api/auth/me")
 async def get_authenticated_user(session_token: SessionCookie = None):
@@ -4666,6 +4710,27 @@ def _owner_matches(actor: Dict[str, Any], fields: tuple, requested: Any) -> bool
     return any(_owner_key(value) == wanted for value in values)
 
 
+def _exigir_su_cuenta(
+    actor: Optional[Dict[str, Any]],
+    clave_actor: Optional[str],
+    user: Dict[str, Any],
+    detalle: str,
+) -> None:
+    """Administración, o el dueño de la cuenta que de verdad se va a cambiar.
+
+    Comprobar la propiedad con lo tecleado no basta: la búsqueda puede resolver
+    ese texto a otra cuenta —dos cuentas con el mismo documento, o un DNI con y
+    sin su cero— y entonces se cambiaba esa otra. `clave_actor` se toma al
+    validar la sesión, antes de cualquier recarga que sustituya los objetos.
+    Sin exigencia de sesión (`actor` a `None`) no hay a quién comparar.
+    """
+    if actor is None or actor.get("rol") in _ADMIN_ROLES or actor is user:
+        return
+    if clave_actor and clave_actor == _clave_de_cuenta(user):
+        return
+    raise HTTPException(status_code=403, detail=detalle)
+
+
 def _next_notification_id() -> int:
     """Id monotónico.
 
@@ -4709,6 +4774,8 @@ async def reject_user(target_email: str, admin_email: str, session_token: Sessio
     if target_email not in usuarios_db:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
 
+    # Antes de borrarla, mientras aún se sabe de quién son las sesiones.
+    await revocar_sesiones_de(usuarios_db[target_email])
     del usuarios_db[target_email]
     await persist_users_only()
     return {"message": f"Usuario {target_email} rechazado y eliminado."}
@@ -4792,6 +4859,8 @@ async def permanent_delete_user(target_email: str, admin_email: str, session_tok
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
 
     unidad = user.get("unidad_id")
+    # Sin esto, una cuenta borrada seguía dentro hasta que caducara su sesión.
+    await revocar_sesiones_de(user)
     del usuarios_db[target_email]
     if unidad and unidad in conductores_db:
         del conductores_db[unidad]
@@ -5130,18 +5199,45 @@ def conservar_documentos(anterior: Any, nuevo: Dict[str, Any]) -> Dict[str, Any]
     return resultado
 
 
+def _cuenta_con_documento(documento: Any, excepto: Dict[str, Any]) -> Optional[str]:
+    """La clave de otra cuenta que ya entra con ese documento (en cualquiera de sus formas)."""
+    formas = set(_formas_de_identificador(documento))
+    if not formas:
+        return None
+    for clave, usuario in usuarios_db.items():
+        if usuario is excepto or not isinstance(usuario, dict) or clave.startswith("__"):
+            continue
+        if formas.intersection(_alias_de_login(clave, usuario)):
+            return clave
+    return None
+
+
 @app.post("/api/driver/onboarding")
-async def driver_onboarding(payload: DriverProfilePayload):
-    # Cargar solo los usuarios, no el estado completo: el envío del perfil no
-    # necesita rutas ni pasajeros, y descargarlos añadía un viaje entero contra
-    # Supabase a una operación que ya rozaba el límite de tiempo de la función.
-    user = await _load_compat_user(payload.email)
+async def driver_onboarding(payload: DriverProfilePayload, session_token: SessionCookie = None):
+    # No pedía sesión: cualquiera podía cambiar el perfil, el nombre y el correo
+    # de cualquier conductor y dejarlo «Pendiente Revisión».
+    actor = await require_session_owner(
+        session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
+        resource="el perfil de ese conductor",
+    )
+    clave_actor = _clave_de_cuenta(actor) if actor else None
+    # Solo los usuarios, no el estado completo: el envío del perfil no necesita
+    # rutas ni pasajeros. Todos y no uno, porque hay que comprobar que el
+    # documento declarado no sea ya el de otra cuenta.
+    await _load_compat_users()
+    user = get_user_by_identifier(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
-    
+    _exigir_su_cuenta(actor, clave_actor, user, "No puedes enviar el perfil de otra cuenta.")
+
     if user.get("rol") != "Conductor":
         raise HTTPException(status_code=403, detail="El usuario no es un conductor.")
-        
+
+    # El documento es también un alias de acceso: declararse el DNI de otro le
+    # quitaba a esa persona la entrada con su DNI.
+    if _cuenta_con_documento(payload.perfilData.get("numDoc"), excepto=user):
+        raise HTTPException(status_code=409, detail="Ese documento ya está registrado en otra cuenta.")
+
     user["perfil_conductor"] = conservar_documentos(user.get("perfil_conductor"), payload.perfilData)
     user["estado"] = "Pendiente Revisión"
     
@@ -5235,10 +5331,11 @@ def _es_campo_documento(campo: str) -> bool:
 async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: SessionCookie = None):
     # El propio conductor o Administración. Antes no pedía sesión: cualquiera
     # podía cambiar los documentos de cualquier conductor sabiendo su correo.
-    await require_session_owner(
+    actor = await require_session_owner(
         session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
         resource="los documentos de ese conductor",
     )
+    clave_actor = _clave_de_cuenta(actor) if actor else None
     ajenos = sorted(campo for campo in payload.docs if not _es_campo_documento(str(campo)))
     if ajenos:
         # Sin esto se podía mandar `revision_docs` o `estado` como si fueran un
@@ -5247,6 +5344,7 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
     user = await _load_compat_user(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+    _exigir_su_cuenta(actor, clave_actor, user, "No tienes acceso a los documentos de ese conductor.")
     await reload_notifications()
 
     perfil = user.get("perfil_conductor")
@@ -5298,15 +5396,17 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
 
 @app.post("/api/conductor/request-update")
 async def request_data_update(payload: UpdateDataRequestPayload, session_token: SessionCookie = None):
-    await require_session_owner(
+    actor = await require_session_owner(
         session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
         resource="los datos de ese conductor",
     )
+    clave_actor = _clave_de_cuenta(actor) if actor else None
     user = await _load_compat_user(payload.email)
-    await reload_notifications()
     if not user or user.get("rol") != "Conductor":
         raise HTTPException(status_code=404, detail="Conductor no encontrado")
-    
+    _exigir_su_cuenta(actor, clave_actor, user, "No tienes acceso a los datos de ese conductor.")
+    await reload_notifications()
+
     if "perfil_conductor" not in user:
         user["perfil_conductor"] = {}
     

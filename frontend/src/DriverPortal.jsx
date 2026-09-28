@@ -443,8 +443,13 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: usuario.email || usuario.identifier, perfilData: data })
       });
-      if (!response.ok) throw new Error('Error al enviar perfil');
-      
+      if (!response.ok) {
+        // Un 409 dice por qué (el documento ya es de otra cuenta): mejor eso que un error genérico.
+        const { detail } = await response.json().catch(() => ({}));
+        toast.error(typeof detail === 'string' ? detail : "Hubo un error al enviar tu perfil.");
+        return;
+      }
+
       // Sin el perfil recién guardado, la pantalla siguiente lee el anterior y
       // da por faltante todo lo que el conductor acaba de subir.
       const updatedUser = { ...usuario, estado: 'Pendiente Revisión', perfil_conductor: data };
