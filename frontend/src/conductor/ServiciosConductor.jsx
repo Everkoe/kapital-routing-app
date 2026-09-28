@@ -10,6 +10,7 @@ import ModoGuia from './ModoGuia';
 import {
   claveDelServicio, conMarca, esRecojo, estadoDelServicio, horaDeLima, nombreDelDia,
   objetivoDelServicio, progresoDelServicio, proximoServicio, sePuedeMarcar, serviciosDelDia,
+  superponerMarcas,
 } from './modeloServicios';
 import './conductor.css';
 
@@ -109,6 +110,10 @@ const useServicios = () => {
   const [ocupados, setOcupados] = useState(() => new Set());
   const ultimaCarga = useRef(0);
   const enVuelo = useRef(null);
+  // Las marcas hechas desde esta pantalla, por pasajero. Una lectura que salió
+  // antes de guardarse una marca y llega después traería el estado anterior y
+  // la borraría: en el modo guía, devolvía al conductor a esa parada.
+  const escritas = useRef(new Map());
 
   // Lee sin tocar el estado hasta tener respuesta: la primera carga y la
   // periódica no enseñan el indicador; solo el botón «Actualizar» (`refrescar`).
@@ -116,9 +121,14 @@ const useServicios = () => {
     enVuelo.current?.abort();
     const control = new AbortController();
     enVuelo.current = control;
+    const salida = Date.now();
     try {
       const respuesta = await apiFetch('/api/conductor/servicios', { signal: control.signal });
-      setDatos({ ...respuesta, leidoEn: new Date().toISOString() });
+      const { servicios: leidos, vigentes } = superponerMarcas(respuesta?.servicios, escritas.current, salida);
+      [...escritas.current.keys()].forEach((id) => {
+        if (!vigentes.includes(id)) escritas.current.delete(id);
+      });
+      setDatos({ ...respuesta, servicios: leidos, leidoEn: new Date().toISOString() });
       setError(null);
       ultimaCarga.current = Date.now();
     } catch (fallo) {
@@ -155,23 +165,32 @@ const useServicios = () => {
 
   const marcar = async (pasajero, viaje) => {
     const antes = { viaje: pasajero.viaje, marcadoEn: pasajero.marcado_en };
+    const provisional = new Date().toISOString();
     setOcupados((actual) => new Set(actual).add(pasajero.id));
+    escritas.current.set(pasajero.id, { viaje, marcadoEn: provisional, pendiente: true, escritaEn: Date.now() });
     // Se enseña al momento: con mala cobertura, esperar la respuesta para cada
     // toque haría dudar de si se marcó.
-    cambiarServicios((servicios) => conMarca(servicios, pasajero.id, viaje, new Date().toISOString()));
+    cambiarServicios((servicios) => conMarca(servicios, pasajero.id, viaje, provisional));
     try {
       const guardado = await apiFetch('/api/conductor/servicios/marcar', {
         method: 'POST',
         json: { id: pasajero.id, estado: viaje },
       });
-      cambiarServicios((servicios) => conMarca(servicios, pasajero.id, guardado?.viaje ?? viaje, guardado?.marcado_en));
+      const final = guardado ? guardado.viaje ?? null : viaje;
+      escritas.current.set(pasajero.id, {
+        viaje: final, marcadoEn: guardado?.marcado_en ?? null, pendiente: false, escritaEn: Date.now(),
+      });
+      cambiarServicios((servicios) => conMarca(servicios, pasajero.id, final, guardado?.marcado_en));
     } catch (fallo) {
+      escritas.current.delete(pasajero.id);
       cambiarServicios((servicios) => conMarca(servicios, pasajero.id, antes.viaje, antes.marcadoEn));
       const sinConexion = fallo?.status === undefined;
       toast.error(sinConexion
         ? 'Sin conexión: no se guardó. Vuelve a intentarlo.'
         : (fallo?.message || 'No se pudo guardar.'));
-      if (fallo?.status === 404) cargar();
+      // Lo de antes puede estar viejo (otra pestaña, otra marca): se relee lo
+      // que dice la base, salvo sin conexión, que no traería nada.
+      if (!sinConexion) cargar();
     } finally {
       setOcupados((actual) => {
         const siguiente = new Set(actual);
@@ -191,9 +210,16 @@ const useServicios = () => {
 
 /** Qué pantalla se ve, con el botón «atrás» del teléfono funcionando. */
 const useVista = () => {
-  const [vista, setVista] = useState(() => window.history.state?.kapitalConductor || { tipo: 'lista' });
+  // Se empieza siempre por la lista: lo que haya quedado en el historial es de
+  // una visita anterior (volver del perfil, u otra cuenta en la misma pestaña).
+  const [vista, setVista] = useState({ tipo: 'lista' });
 
   useEffect(() => {
+    if (window.history.state?.kapitalConductor) {
+      const limpio = { ...window.history.state };
+      delete limpio.kapitalConductor;
+      window.history.replaceState(limpio, '');
+    }
     const alVolver = (evento) => setVista(evento.state?.kapitalConductor || { tipo: 'lista' });
     window.addEventListener('popstate', alVolver);
     return () => window.removeEventListener('popstate', alVolver);
@@ -271,7 +297,10 @@ const ServiciosConductor = ({ usuario, avisos = null }) => {
   }
 
   const dias = datos?.dias || [];
-  const diaActivo = diaElegido || (proximo && dias.includes(proximo.fecha) ? proximo.fecha : hoy);
+  // Pasada la medianoche, el día elegido puede haber salido de las pestañas.
+  const diaActivo = diaElegido && dias.includes(diaElegido)
+    ? diaElegido
+    : (proximo && dias.includes(proximo.fecha) ? proximo.fecha : hoy);
   const delDia = serviciosDelDia(servicios, diaActivo);
   const sinCerrar = servicios.filter((s) => estadoDelServicio(s, ahora) === 'sin_cerrar');
 

@@ -203,3 +203,23 @@ export const conMarca = (servicios, idPasajero, viaje, marcadoEn = null) =>
         p.id === idPasajero ? { ...p, viaje, marcado_en: viaje ? marcadoEn : null } : p),
     };
   });
+
+/**
+ * Lo leído del servidor con las marcas hechas desde esta pantalla encima.
+ *
+ * Una lectura que salió antes de guardarse una marca y llega después trae el
+ * estado anterior, y la borraría. Manda la marca si sigue sin respuesta o se
+ * escribió después de salir la lectura; las anteriores ya vienen en lo leído y
+ * dejan de hacer falta. `vigentes` dice cuáles hay que seguir recordando.
+ */
+export const superponerMarcas = (servicios, escritas, salida) => {
+  let resultado = servicios || [];
+  const vigentes = [];
+  for (const [id, marca] of escritas) {
+    if (marca.pendiente || marca.escritaEn >= salida) {
+      resultado = conMarca(resultado, id, marca.viaje, marca.marcadoEn);
+      vigentes.push(id);
+    }
+  }
+  return { servicios: resultado, vigentes };
+};

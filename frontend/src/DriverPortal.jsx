@@ -3,7 +3,7 @@ import DriverOnboardingWizard from './components/DriverOnboardingWizard';
 import DocumentResubmission from './components/DocumentResubmission';
 import { documentoEntregado, documentosRequeridos } from './constants/camposOnboarding';
 import ServiciosConductor from './conductor/ServiciosConductor';
-import { Bell, X } from 'lucide-react';
+import { Bell, ChevronLeft, FileText, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { apiFetch } from './utils/apiClient';
 import './App.css';
@@ -63,6 +63,32 @@ const AvisosDelConductor = ({ notificaciones, onLeida }) => {
   );
 };
 
+// Los documentos pendientes, sin cerrarle el paso: un conductor con unidad
+// asignada ya trabaja para la empresa (los importados de las bases entran sin
+// ningún documento subido), así que ve sus servicios y aquí se le recuerda qué
+// le falta. Los sube él o Administración en su nombre.
+const AvisoDeDocumentos = ({ faltan, observados, enRevision, onAbrir }) => {
+  if (!faltan && !observados && !enRevision) return null;
+  let titulo = 'Tus documentos están en revisión';
+  if (observados) titulo = 'Tienes documentos observados';
+  else if (faltan) titulo = faltan === 1 ? 'Te falta 1 documento' : `Te faltan ${faltan} documentos`;
+  const detalle = observados || faltan
+    ? 'Súbelos para completar tu registro. Mientras tanto puedes trabajar con normalidad.'
+    : 'Administración los está revisando.';
+  return (
+    <div className="cd-aviso cd-aviso--ambar">
+      <FileText size={18} />
+      <span>
+        <strong>{titulo}</strong>
+        {detalle}
+      </span>
+      <button type="button" className="cd-boton cd-boton--ambar" onClick={onAbrir}>
+        {observados || faltan ? 'Subir' : 'Ver'}
+      </button>
+    </div>
+  );
+};
+
 const DriverPortal = ({ usuario, setUsuarioActual }) => {
   const [notificaciones, setNotificaciones] = useState(() => {
     try {
@@ -81,6 +107,8 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
 
   // Si el usuario ya está en revisión, su perfil está completo
   const [profileComplete, setProfileComplete] = useState(usuario.profileComplete || usuario.estado === 'Pendiente Revisión' || false);
+  // Solo cuenta para quien tiene unidad: sin ella, los documentos son su pantalla.
+  const [verDocumentos, setVerDocumentos] = useState(false);
 
   // --- WebSocket en tiempo real (reemplaza el polling) ---
   const wsRef = useRef(null);
@@ -438,6 +466,7 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
     if (setUsuarioActual) {
       setUsuarioActual(updatedUser);
     }
+    setVerDocumentos(false);
     toast.success("Documentos enviados para revisión.");
   };
 
@@ -451,11 +480,12 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
 
   const REQUIRED_DOCS = documentosRequeridos();
 
-  const hasMissingDocs = REQUIRED_DOCS.some(key => {
+  const docsQueFaltan = REQUIRED_DOCS.filter(key => {
     const hasDoc = documentoEntregado(key, usuario?.perfil_conductor);
     const isPendingOrRejected = usuario?.perfil_conductor?.revision_docs?.[key]?.estado;
     return !hasDoc && !isPendingOrRejected;
-  });
+  }).length;
+  const hasMissingDocs = docsQueFaltan > 0;
 
   const hasRejectedDocs = Object.values(usuario?.perfil_conductor?.revision_docs || {})
     .some(rev => rev.estado?.toLowerCase() === 'rechazado');
@@ -463,10 +493,18 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
   const isPending = usuario?.estado === 'Pendiente Revisión' || usuario?.estado === 'Documentos Observados';
 
   const needsDocumentAction = hasMissingDocs || hasRejectedDocs || isPending;
+  // La unidad la asigna Administración (al aprobar, o la importación): tenerla
+  // es lo que dice que ya trabaja para la empresa.
+  const tieneUnidad = Boolean(String(usuario?.unidad_id || '').trim());
 
-  if (needsDocumentAction) {
+  if (needsDocumentAction && (!tieneUnidad || verDocumentos)) {
     return (
       <main style={{ padding: '20px', minHeight: '100vh', background: 'var(--bg)' }}>
+        {tieneUnidad && (
+          <button type="button" className="cd-volver" onClick={() => setVerDocumentos(false)}>
+            <ChevronLeft size={20} /> Mis servicios
+          </button>
+        )}
         <DocumentResubmission
           usuario={usuario}
           // With a live WebSocket, let the resubmission view perform only its
@@ -485,7 +523,19 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
   return (
     <ServiciosConductor
       usuario={usuario}
-      avisos={<AvisosDelConductor notificaciones={notificaciones} onLeida={markNotificationRead} />}
+      avisos={(
+        <>
+          {needsDocumentAction && (
+            <AvisoDeDocumentos
+              faltan={docsQueFaltan}
+              observados={hasRejectedDocs || usuario?.estado === 'Documentos Observados'}
+              enRevision={usuario?.estado === 'Pendiente Revisión'}
+              onAbrir={() => setVerDocumentos(true)}
+            />
+          )}
+          <AvisosDelConductor notificaciones={notificaciones} onLeida={markNotificationRead} />
+        </>
+      )}
     />
   );
 };

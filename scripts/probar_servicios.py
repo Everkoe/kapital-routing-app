@@ -6,7 +6,7 @@ Las pruebas del backend simulan PostgREST: comprueban qué pide el API, no que
 Postgres devuelva lo que debe. Aquí se llaman `servicios_de_unidad`,
 `marcar_viaje` y `servicios_de_empresa` sobre el último día con plan de la
 base real: que cada conductor vea solo lo suyo, que no se le pueda marcar a
-nadie de otro coche ni de otro día, y que al cliente no le lleguen direcciones
+nadie de otro coche ni fuera de la hora de su servicio, y que al cliente no le lleguen direcciones
 ni los datos personales del conductor.
 
 Cómo no deja rastro
@@ -17,9 +17,9 @@ propósito, lo que deshace la transacción entera, marcas incluidas.
 Cómo se usa
 -----------
     python scripts/probar_servicios.py
-    python scripts/probar_servicios.py --con-migracion   # antes de aplicar la 010
+    python scripts/probar_servicios.py --con-migracion   # antes de aplicar una migración
 
-Con `--con-migracion` manda la 010 en la misma llamada, así que se prueba sin
+Con `--con-migracion` manda la 010 y la 011 en la misma llamada, así que se prueba sin
 haberla aplicado y se deshace con todo lo demás. Desde la raíz del
 repositorio, con el entorno de `frontend/`; necesita `SUPABASE_ACCESS_TOKEN`.
 """
@@ -36,13 +36,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aplicar_sql  # noqa: E402
 
 SENAL = "PRUEBA_TERMINADA"
-MIGRACION = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "supabase", "010_servicios_conductor_cliente.sql")
+SUPABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase")
+# Las que definen lo que se prueba, en orden: la 011 reemplaza funciones de la 010.
+MIGRACIONES = ("010_servicios_conductor_cliente.sql", "011_ventana_y_empresa.sql")
 
 BLOQUE = r"""
 do $prueba$
 declare
   dia date;
+  hoy date := (now() at time zone 'America/Lima')::date;
   codigo text;
   clave text;
   otra_clave text;
@@ -54,6 +56,7 @@ declare
   c jsonb;
   res jsonb := '{}'::jsonb;
   t0 timestamptz;
+  mover timestamp;
 begin
   select max(fecha) into dia from programacion_dias;
   if dia is null then
@@ -100,27 +103,7 @@ begin
        where p ? 'direccion' and p ? 'lat'),
     'dia_con_plan', (s -> 'dias_con_plan') @> jsonb_build_array(dia));
 
-  -- Marcar: el suyo sí; el de otro coche, otro día o con un estado raro, no.
-  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', dia, dia);
-  res := res || jsonb_build_object('marca_propia', r ->> 'viaje' = 'a_bordo' and r ? 'marcado_en');
-  s := servicios_de_unidad(clave, dia, dia);
-  res := res || jsonb_build_object('marca_se_ve', exists (
-    select 1 from jsonb_array_elements(s -> 'servicios') x,
-                  jsonb_array_elements(x -> 'pasajeros') p
-     where (p ->> 'id')::bigint = una and p ->> 'viaje' = 'a_bordo'));
-  r := marcar_viaje(una, clave, 'no_se_presento', 'prueba', dia, dia);
-  res := res || jsonb_build_object('remarcar_cambia', r ->> 'viaje' = 'no_se_presento'
-    and (select count(*) from ejecucion_viajes e where e.fecha = dia and e.codigo_vehiculo = codigo) = 1);
-  r := marcar_viaje(otra, coalesce(otra_clave, 'NADIE'), 'a_bordo', 'prueba', dia, dia);
-  res := res || jsonb_build_object('otro_coche_no', r ->> 'error' = 'no_esta_en_el_plan');
-  r := marcar_viaje(otra, clave, 'a_bordo', 'prueba', dia + 1, dia + 2);
-  res := res || jsonb_build_object('otro_dia_no', r ->> 'error' = 'no_esta_en_el_plan');
-  r := marcar_viaje(otra, clave, 'recogido', 'prueba', dia, dia);
-  res := res || jsonb_build_object('estado_raro_no', r ->> 'error' = 'estado_invalido');
-  r := marcar_viaje(-1, clave, 'a_bordo', 'prueba', dia, dia);
-  res := res || jsonb_build_object('fila_inexistente_no', r ->> 'error' = 'no_esta_en_el_plan');
-
-  -- Lo que ve el cliente, con la marca de antes.
+  -- Lo que ve el cliente del día entero, y que la empresa sea palabra entera.
   t0 := clock_timestamp();
   c := servicios_de_empresa('TELEPERFORMANCE', dia);
   res := res || jsonb_build_object(
@@ -129,10 +112,6 @@ begin
     'cliente_ve_su_personal', (
       select sum(jsonb_array_length(x -> 'personas')) from jsonb_array_elements(c -> 'servicios') x
     ) = (select count(*) from programacion p where p.fecha = dia and p.estado = 'programado'),
-    'cliente_ve_la_marca', exists (
-      select 1 from jsonb_array_elements(c -> 'servicios') x,
-                    jsonb_array_elements(x -> 'personas') p
-       where _clave_normalizada(x ->> 'unidad') = clave and p ->> 'viaje' = 'no_se_presento'),
     'cliente_sin_direcciones', not exists (
       select 1 from jsonb_array_elements(c -> 'servicios') x,
                     jsonb_array_elements(x -> 'personas') p
@@ -143,13 +122,66 @@ begin
     'cliente_ve_quien_conduce', exists (
       select 1 from jsonb_array_elements(c -> 'servicios') x
        where x -> 'conductor' ->> 'placa' is not null),
+    'empresa_en_minusculas_es_la_misma', servicios_de_empresa('Teleperformance', dia) = c,
+    'un_trozo_de_palabra_no_abre_nada', jsonb_array_length(servicios_de_empresa('TELE', dia) -> 'servicios') = 0,
     'otra_empresa_no_ve_nada', jsonb_array_length(servicios_de_empresa('KONECTAXYZ', dia) -> 'servicios') = 0,
-    'prefijo_vacio_no_ve_nada', jsonb_array_length(servicios_de_empresa('', dia) -> 'servicios') = 0);
+    'prefijo_vacio_no_ve_nada', jsonb_array_length(servicios_de_empresa('', dia) -> 'servicios') = 0,
+    'una_sede_ve_solo_la_suya', (
+      select count(*) from jsonb_array_elements(servicios_de_empresa('TELEPERFORMANCE BELLAVISTA', dia) -> 'servicios') x
+       where x ->> 'sede' <> 'TELEPERFORMANCE BELLAVISTA') = 0,
+    'sin_servicios_duplicados', (
+      select count(*) = count(distinct (x ->> 'unidad', x ->> 'turno', x ->> 'modalidad'))
+        from jsonb_array_elements(c -> 'servicios') x));
 
-  -- Desmarcar.
-  r := marcar_viaje(una, clave, null, 'prueba', dia, dia);
-  res := res || jsonb_build_object('desmarcar', r ->> 'viaje' is null
-    and not exists (select 1 from ejecucion_viajes e where e.fecha = dia and e.codigo_vehiculo = codigo));
+  -- Marcar. La ventana es la del servicio (de 3 h antes a 6 h después de su
+  -- turno, en hora de Lima), así que se trae un pasajero a ahora mismo.
+  update programacion
+     set fecha = hoy, turno = to_char(now() at time zone 'America/Lima', 'HH24:MI')
+   where id = una;
+  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('marca_propia', r ->> 'viaje' = 'a_bordo' and r ? 'marcado_en');
+  s := servicios_de_unidad(clave, hoy, hoy);
+  res := res || jsonb_build_object('marca_se_ve', exists (
+    select 1 from jsonb_array_elements(s -> 'servicios') x,
+                  jsonb_array_elements(x -> 'pasajeros') p
+     where (p ->> 'id')::bigint = una and p ->> 'viaje' = 'a_bordo'));
+  r := marcar_viaje(una, clave, 'no_se_presento', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('remarcar_cambia', r ->> 'viaje' = 'no_se_presento'
+    and (select count(*) from ejecucion_viajes e where e.fecha = hoy and e.codigo_vehiculo = codigo) = 1);
+  c := servicios_de_empresa('TELEPERFORMANCE', hoy);
+  res := res || jsonb_build_object('cliente_ve_la_marca', exists (
+    select 1 from jsonb_array_elements(c -> 'servicios') x,
+                  jsonb_array_elements(x -> 'personas') p
+     where _clave_normalizada(x ->> 'unidad') = clave and p ->> 'viaje' = 'no_se_presento'));
+  r := marcar_viaje(una, coalesce(otra_clave, 'NADIE'), 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('otro_coche_no', r ->> 'error' = 'no_esta_en_el_plan');
+  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', hoy + 1, hoy + 2);
+  res := res || jsonb_build_object('otro_dia_no', r ->> 'error' = 'no_esta_en_el_plan');
+  r := marcar_viaje(una, clave, 'recogido', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('estado_raro_no', r ->> 'error' = 'estado_invalido');
+  r := marcar_viaje(-1, clave, 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('fila_inexistente_no', r ->> 'error' = 'no_esta_en_el_plan');
+
+  -- Fuera de la ventana de su servicio, no, aunque el día valga.
+  mover := (now() at time zone 'America/Lima') + interval '4 hours';
+  update programacion set fecha = mover::date, turno = to_char(mover, 'HH24:MI') where id = una;
+  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('cuatro_horas_antes_no', r ->> 'error' = 'fuera_de_hora');
+  mover := (now() at time zone 'America/Lima') - interval '7 hours';
+  update programacion set fecha = mover::date, turno = to_char(mover, 'HH24:MI') where id = una;
+  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('siete_horas_despues_no', r ->> 'error' = 'fuera_de_hora');
+  -- Un servicio de hace cinco horas (una salida de ayer a última hora, pasada
+  -- la medianoche) se sigue pudiendo marcar.
+  mover := (now() at time zone 'America/Lima') - interval '5 hours';
+  update programacion set fecha = mover::date, turno = to_char(mover, 'HH24:MI') where id = una;
+  r := marcar_viaje(una, clave, 'a_bordo', 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('cinco_horas_despues_si', r ->> 'viaje' = 'a_bordo');
+  r := marcar_viaje(una, clave, null, 'prueba', hoy - 1, hoy + 1);
+  res := res || jsonb_build_object('desmarcar', r ->> 'viaje' is null and not (r ? 'error')
+    and not exists (select 1 from ejecucion_viajes e join programacion p on p.id = una
+                     where e.fecha = p.fecha and e.codigo_vehiculo = p.codigo_vehiculo
+                       and e.turno = p.turno and e.modalidad = p.modalidad and e.dni = p.dni));
 
   -- Quien sale del servicio deja de estar en la lista, se avisa, y ya no se marca.
   update programacion set estado = 'retirado' where id = otra;
@@ -169,6 +201,7 @@ begin
     not has_function_privilege('anon', 'public.servicios_de_unidad(text,date,date)', 'execute')
     and not has_function_privilege('anon', 'public.marcar_viaje(bigint,text,text,text,date,date)', 'execute')
     and not has_function_privilege('anon', 'public.servicios_de_empresa(text,date)', 'execute')
+    and not has_function_privilege('anon', 'public._es_de_la_empresa(text,text)', 'execute')
     and not has_function_privilege('authenticated', 'public.marcar_viaje(bigint,text,text,text,date,date)', 'execute')
     and not has_table_privilege('anon', 'public.ejecucion_viajes', 'select')
     and not has_table_privilege('authenticated', 'public.ejecucion_viajes', 'insert'));
@@ -182,8 +215,11 @@ end $prueba$;
 def main() -> int:
     sql = BLOQUE
     if "--con-migracion" in sys.argv:
-        with open(MIGRACION, encoding="utf-8") as mano:
-            sql = mano.read() + "\n" + BLOQUE
+        partes = []
+        for nombre in MIGRACIONES:
+            with open(os.path.join(SUPABASE, nombre), encoding="utf-8") as mano:
+                partes.append(mano.read())
+        sql = "\n".join(partes + [BLOQUE])
     try:
         aplicar_sql.ejecutar(sql)
     except SystemExit as salida:

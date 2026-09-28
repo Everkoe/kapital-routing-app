@@ -337,27 +337,46 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **El plan llega al conductor y al cliente** (desde el 2026-09-27,
   [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
   recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor
-  (`GET /api/conductor/servicios`, **hoy y mañana**, porque los recojos con entrada de 00:00 a 02:00 empiezan
-  la noche anterior) y `servicios_de_empresa()` para el cliente (`GET /api/cliente/servicios?fecha=`, de 31
+  (`GET /api/conductor/servicios`: **hoy y mañana** en pestañas, porque los recojos con entrada de 00:00 a
+  02:00 empiezan la noche anterior, y **ayer sin pestaña**, porque una salida de las 23:00 sigue dejando
+  gente pasada la medianoche y sin ayer desaparecía a mitad de servicio) y `servicios_de_empresa()` para el
+  cliente (`GET /api/cliente/servicios?fecha=`, de 31
   días atrás a lo programable). La unidad y la empresa **salen de la sesión**, no de la URL: un conductor no
   puede pedir otra unidad y un cliente no puede pedir otra empresa; Administración sí, pasándolas por
   parámetro. Medido con la compresión que ya usa PostgREST: **~2 KB** la lectura de un conductor y **~16 KB**
   la de un día entero del cliente (95 KB sin comprimir); el conductor relee cada 3 min y el cliente cada 2,
-  solo con la pantalla visible. La empresa se reconoce por el **principio de la sede** («TELEPERFORMANCE» en
-  «TELEPERFORMANCE BELLAVISTA»), con la misma normalización que las unidades (`_clave_normalizada`).
+  solo con la pantalla visible. La empresa se reconoce por las **primeras palabras enteras de la sede**
+  («TELEPERFORMANCE» en «TELEPERFORMANCE BELLAVISTA», pero no «TELE»: `_es_de_la_empresa()`,
+  [supabase/011_ventana_y_empresa.sql](supabase/011_ventana_y_empresa.sql)). La primera versión comparaba
+  un prefijo sin frontera de palabra y «TELE» abría a todo TELEPERFORMANCE.
   **El conductor marca quién subió** (`POST /api/conductor/servicios/marcar`, «A bordo» o «No se presentó»,
   y deshacer) y eso va a **`ejecucion_viajes`, no a `programacion`**: lo que se decidió y lo que pasó no se
   mezclan (por lo mismo que el plan va aparte del histórico). La marca se enlaza al plan por la clave
   natural (día, unidad, turno, sentido, persona), así que sobrevive a que el Programador vuelva a sembrar el
-  día; `marcar_viaje()` comprueba que la fila siga en el plan, sea de esa unidad y caiga en su ventana, y si
-  no, **404** («ya no está en tu servicio»). El pasajero se identifica por el `id` de su fila del plan:
+  día; `marcar_viaje()` comprueba que la fila siga en el plan y sea de esa unidad (si no, **404**, «ya no está
+  en tu servicio») y que **ahora** esté entre 3 h antes y 6 h después del turno **de ese servicio**, en hora
+  de Lima (si no, **409**). Esa ventana la decide la base desde la 011: antes solo la aplicaba la pantalla y
+  por el API se podía marcar a las 08:00 como «no se presentó» a todo el turno de la noche siguiente. La
+  marca la firma `_clave_de_cuenta(actor)`, no `identifier` (casi ninguna cuenta lo lleva), y las rutas
+  nuevas **no responden sin sesión** aunque la exigencia esté apagada: no tienen clientes viejos. El pasajero se identifica por el `id` de su fila del plan:
   **al conductor no le llega el DNI de nadie**. **Al cliente no le llegan direcciones ni coordenadas** (sabe
   dónde vive su gente) **ni el documento, domicilio o teléfonos del conductor**: de la flota solo recibe
   nombre, placa, vehículo y capacidad. Por lo mismo `GET /api/conductor/info/{unidad}` —la ficha entera—
   **dejó de estar abierta al Cliente** (antes su panel la enseñaba, con documentos marcados «Subido» fueran
   reales o no y una foto de vehículo de stock). Es reversible si los dueños lo deciden, y era la decisión de
   producto pendiente. **Un conductor ya no puede cambiarse de unidad desde su perfil** (`PUT /api/user/profile`
-  con otra unidad da 403): con eso veía y marcaba a los pasajeros de otro coche. La asigna Administración.
+  con otra unidad da 403, antes de tocar nada más): con eso veía y marcaba a los pasajeros de otro coche.
+  **Y el registro público ya no acepta unidad ni empresa**: bastaba declararse de la K-027 al registrarse y
+  que alguien pulsara «Aprobar» para ver los domicilios de sus pasajeros. La unidad la asigna
+  Administración al aprobar con padrón (y la sesión se refresca **después** de asignarla, no antes), y la
+  empresa de un cliente se pone a mano.
+  **Documentos: el conductor con unidad ve sus servicios aunque le falten** (decisión del usuario,
+  2026-09-27). Los importados de las bases no tienen ningún documento subido —123 de 124— y la puerta de
+  documentos del portal los habría dejado a todos sin ver nada; son conductores que ya trabajan en la
+  empresa. Ven un aviso fijo con lo que les falta y un botón para subirlo; lo pueden subir ellos o
+  Administración en su nombre. Quien no tiene unidad sigue entrando por la pantalla de documentos.
+  **El cliente no ve las altas sin histórico** en «sin unidad asignada»: `programacion_pendientes` no guarda
+  la sede y sin histórico no se sabe de qué empresa son; enseñarlas daría nombres a otra empresa.
   **Qué significa el turno está medido, no supuesto**: en un RECOJO es la hora de entrada a la sede (el coche
   arranca ~85 min antes y llega ~22 min antes); en una SALIDA, la hora a la que sale de la sede. La pantalla
   **no enseña una hora estimada de recogida**, porque el plan no la tiene y sería una promesa. Solo se puede
@@ -371,7 +390,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   el escritorio y en el teléfono. **El SOS decía «Central notificada» aunque la petición fallara** (un `fetch`
   no lanza con un 4xx/5xx); ahora solo lo dice si el aviso llegó, y si no pide llamar a la central. **El
   cliente no tenía cómo cerrar sesión**: su portal se pinta sin la barra de navegación. Contra la base real:
-  `scripts/probar_servicios.py` (24 comprobaciones dentro de una transacción que se deshace).
+  `scripts/probar_servicios.py` (31 comprobaciones dentro de una transacción que se deshace; mueve un
+  pasajero a «ahora» para probar la ventana). Todo lo anterior salió de una revisión independiente antes de
+  publicar, con una prueba que falla con el código previo por cada hallazgo.
 - **Escritura por diferencias** (desde el 2026-09-27): en `V2_COMPAT` ningún guardado reescribe
   `app_state.usuarios`. Antes cada `persist*` mandaba un PATCH con la columna entera desde la copia en
   memoria de la instancia —hasta 45 s vieja, sin candado entre instancias— y deshacía en silencio lo que

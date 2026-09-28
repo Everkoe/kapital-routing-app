@@ -15,6 +15,7 @@ import {
   sePuedeMarcar,
   serviciosDelDia,
   sumarDias,
+  superponerMarcas,
 } from '../src/conductor/modeloServicios.js';
 
 const pasajero = (id, extra = {}) => ({
@@ -138,4 +139,26 @@ test('marcar cambia solo a ese pasajero y no toca lo anterior', () => {
   assert.equal(antes[0].pasajeros[1].viaje, null);
   assert.equal(despues[1], antes[1]);
   assert.equal(conMarca(despues, 2, null)[0].pasajeros[1].marcado_en, null);
+});
+
+test('una lectura que salió antes de una marca no la borra al llegar', () => {
+  const leido = [servicio('22:01')]; // el servidor aún no tenía ninguna marca
+  const escritas = new Map([
+    [1, { viaje: 'a_bordo', marcadoEn: 'x', pendiente: false, escritaEn: 2000 }],
+    [2, { viaje: 'no_se_presento', marcadoEn: null, pendiente: true, escritaEn: 500 }],
+  ]);
+  const { servicios, vigentes } = superponerMarcas(leido, escritas, 1000);
+  assert.equal(servicios[0].pasajeros[0].viaje, 'a_bordo');
+  assert.equal(servicios[0].pasajeros[1].viaje, 'no_se_presento');
+  assert.deepEqual(vigentes, [1, 2]);
+  assert.equal(leido[0].pasajeros[0].viaje, null);
+});
+
+test('una lectura posterior a la marca ya la trae y manda ella', () => {
+  const leido = [servicio('22:01', { pasajeros: [pasajero(1, { viaje: null })] })];
+  const escritas = new Map([[1, { viaje: 'a_bordo', marcadoEn: 'x', pendiente: false, escritaEn: 500 }]]);
+  const { servicios, vigentes } = superponerMarcas(leido, escritas, 1000);
+  // Si otro la deshizo después, la lectura nueva lo dice y no se tapa.
+  assert.equal(servicios[0].pasajeros[0].viaje, null);
+  assert.deepEqual(vigentes, []);
 });

@@ -11,8 +11,9 @@ import {
 } from './cliente/modeloCliente';
 import './cliente/cliente.css';
 
-// El día de hoy se relee cada dos minutos con la pestaña visible: es cuando
-// los conductores van marcando. Los demás días no cambian solos.
+// Se relee cada dos minutos con la pestaña visible, sea cual sea el día: hoy
+// es cuando los conductores marcan, mañana el Programador sigue ajustando el
+// plan, y un «mañana» que se deja abierto pasa a ser hoy a medianoche.
 const REFRESCO_MS = 2 * 60_000;
 // Lo que deja consultar el backend (DIAS_ATRAS_CLIENTE y DIAS_PROGRAMABLES).
 const DIAS_ATRAS = 31;
@@ -24,7 +25,7 @@ const MODALIDADES = [
   { valor: 'SALIDA', texto: 'Salidas' },
 ];
 
-/** Lee el día pedido, o hoy si no se pide ninguno, y relee hoy mientras se mira. */
+/** Lee el día pedido, o hoy si no se pide ninguno, y lo relee mientras se mira. */
 const useServiciosDelCliente = (fecha) => {
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
@@ -54,7 +55,7 @@ const useServiciosDelCliente = (fecha) => {
     // Primera lectura en un temporizador: el efecto solo se suscribe.
     const primera = setTimeout(cargar, 0);
     const intervalo = setInterval(() => {
-      if (!document.hidden && !fecha) cargar();
+      if (!document.hidden) cargar();
     }, REFRESCO_MS);
     return () => {
       clearTimeout(primera);
@@ -245,7 +246,7 @@ const ClientPortal = ({ usuario, onLogout, theme, toggleTheme }) => {
             <h1>Transporte de tu personal</h1>
             <p>
               {datos?.leidoEn ? `Actualizado a las ${horaDeLima(datos.leidoEn)}` : 'Cargando…'}
-              {diaActivo === hoy && ' · se actualiza solo cada 2 minutos'}
+              {datos?.leidoEn && ' · se actualiza solo cada 2 minutos'}
             </p>
           </div>
           <button type="button" className="cl-boton cl-boton--icono" onClick={refrescar} disabled={cargando}
