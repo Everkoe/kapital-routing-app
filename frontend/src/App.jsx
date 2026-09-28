@@ -301,7 +301,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
             </>
           )}
           {usuarioActual?.rol === 'Conductor' && (
-            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Mis Rutas</a>
+            <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>Mis servicios</a>
           )}
           {usuarioActual?.rol === 'Cliente' && (
             <a onClick={() => handleNav('flota')} className={vistaActual === 'flota' ? 'nav-link active' : 'nav-link'}>Control de Conformidad</a>
@@ -372,7 +372,7 @@ const Navbar = ({ vistaActual, setVistaActual, onLogout, theme, toggleTheme, usu
         {usuarioActual?.rol === 'Conductor' && (
           <a onClick={() => handleNav('dashboard')} className={vistaActual === 'dashboard' ? 'nav-link active' : 'nav-link'}>
             <Truck size={20} />
-            <span>Mis Rutas</span>
+            <span>Mis servicios</span>
           </a>
         )}
         {usuarioActual?.rol === 'Cliente' && (
