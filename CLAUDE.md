@@ -235,6 +235,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
     llevó cada una cabe en la capacidad que declara la base (las VAN de 10 llevaron 10; las SUV de 6,
     6). La regla vive en tres sitios que **tienen que coincidir**: `_clave_de_vehiculo`, `fleetKey` y
     `_clave_normalizada`. Antes solo cruzaban 41 de 79 y las V### parecían unidades sin dar de alta.
+    **Desplegado en producción el 2026-09-28** (merge `b78d1bf`, PR #16, con la 012 aplicada y
+    `probar_servicios.py` en verde contra la base), junto con el DNI con y sin cero y los arreglos de
+    las dos revisiones (el alta del conductor sin sesión, la propiedad sobre la cuenta resuelta).
     Siguen sin cruzar algunas M### y unas pocas unidades nuevas: la pantalla lo dice en vez de enseñar
     ceros.
 - **Vercel**: despliega el frontend estático + `frontend/api/index.py` como función serverless
