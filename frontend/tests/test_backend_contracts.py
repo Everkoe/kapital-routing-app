@@ -133,6 +133,49 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["estado"], "Pendiente")
         self.assertEqual(backend.usuarios_db["planner@example.com"]["estado"], "Pendiente")
 
+    async def test_a_driver_logs_in_with_the_dni_whether_or_not_it_keeps_its_leading_zero(self):
+        """La importación guardó 25 DNI sin su cero; quien lo tecleaba entero no entraba."""
+        backend.usuarios_db["perez.gomez@kapital.com"] = {
+            "rol": "Conductor", "estado": "Activo", "nombre": "Pérez",
+            "password": backend.hash_password("provisional-segura"),
+            "perfil_conductor": {"tipoDoc": "DNI", "numDoc": "4567891"},
+        }
+        backend.usuarios_db["con.cero@kapital.com"] = {
+            "rol": "Conductor", "estado": "Activo", "nombre": "Cero", "dni": "09704190",
+            "password": backend.hash_password("otra-segura"),
+        }
+        with patch.object(backend, "reload_db", new=AsyncMock()), \
+                patch.object(backend, "persist_users_only", new=AsyncMock()):
+            for tecleado, contrasena, nombre in (
+                ("04567891", "provisional-segura", "Pérez"),
+                ("4567891", "provisional-segura", "Pérez"),
+                ("9704190", "otra-segura", "Cero"),
+            ):
+                respuesta = await backend.login_user(
+                    backend.UsuarioLogin(identifier=tecleado, password=contrasena), Response())
+                self.assertEqual(respuesta["nombre"], nombre, tecleado)
+            with self.assertRaises(HTTPException) as fallo:
+                await backend.login_user(
+                    backend.UsuarioLogin(identifier="04567891", password="otra-segura"), Response())
+        self.assertEqual(fallo.exception.status_code, 401)
+
+    def test_only_a_dni_is_the_same_with_and_without_leading_zeros(self):
+        self.assertEqual(backend._formas_de_identificador(" 04567891 "), ["04567891", "4567891"])
+        self.assertEqual(backend._formas_de_identificador("4567891"), ["4567891", "04567891"])
+        # Un carné de extranjería (más de ocho cifras) se busca tal cual.
+        self.assertEqual(backend._formas_de_identificador("001234567"), ["001234567"])
+        self.assertEqual(backend._formas_de_identificador("Ana@K.com"), ["ana@k.com"])
+        self.assertEqual(backend._formas_de_identificador(""), [])
+
+    async def test_the_login_index_also_finds_a_dni_typed_with_its_zero(self):
+        backend.login_index = {"4567891": "perez.gomez@kapital.com"}
+        backend._login_index_loaded_at = time.monotonic()
+        usuario = {"rol": "Conductor", "estado": "Activo"}
+        with patch.object(backend, "_fetch_usuario_por_clave", new=AsyncMock(return_value=usuario)) as leer:
+            encontrado = await backend._usuario_por_indice("04567891")
+        self.assertIs(encontrado, usuario)
+        leer.assert_awaited_once_with("perez.gomez@kapital.com")
+
     async def test_pending_user_cannot_log_in(self):
         backend.usuarios_db["planner@example.com"] = {
             "identifier": "planner@example.com",

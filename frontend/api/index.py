@@ -2938,6 +2938,26 @@ async def _fetch_usuario_por_clave(clave: str) -> Any:
     return valor if isinstance(valor, dict) else _MISSING
 
 
+# Un DNI peruano tiene ocho dígitos, y la intranet —y con ella la importación
+# de las bases— le quita los ceros de delante (ver `dni_de`): 25 de los 124
+# conductores importados quedaron con siete cifras. Quien tecleaba su DNI
+# entero, con el cero, no coincidía con nada y no podía entrar aunque la
+# contraseña fuera buena. Un documento más largo (carné de extranjería) se
+# busca tal cual: solo un DNI es el mismo con y sin ceros delante.
+LARGO_DNI = 8
+
+
+def _formas_de_identificador(texto: Any) -> List[str]:
+    """Lo tecleado y, si parece un DNI, sus formas con y sin ceros delante."""
+    limpio = str(texto or "").strip().lower()
+    formas = [limpio] if limpio else []
+    if limpio.isdigit() and len(limpio) <= LARGO_DNI:
+        for otra in (limpio.lstrip("0"), limpio.zfill(LARGO_DNI)):
+            if otra and otra not in formas:
+                formas.append(otra)
+    return formas
+
+
 async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
     """Resuelve un login en dos saltos pequeños, o `None` si no puede.
 
@@ -2945,8 +2965,8 @@ async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
     Quien llama debe caer entonces a la lectura completa.
     """
     global login_index, _login_index_loaded_at
-    buscado = str(identificador or "").strip().lower()
-    if not buscado:
+    formas = _formas_de_identificador(identificador)
+    if not formas:
         return None
     try:
         if not login_index or not _cache_is_fresh(_login_index_loaded_at):
@@ -2958,7 +2978,7 @@ async def _usuario_por_indice(identificador: str) -> Optional[Dict[str, Any]]:
             valor = await _fetch_proyeccion_sin_respaldo("__login__", "load_login_index")
             login_index = valor if isinstance(valor, dict) else {}
             _login_index_loaded_at = time.monotonic()
-        clave = login_index.get(buscado)
+        clave = next((login_index[forma] for forma in formas if login_index.get(forma)), None)
         if not clave:
             return None
         usuario = await _fetch_usuario_por_clave(clave)
@@ -3818,8 +3838,9 @@ def get_user_by_identifier(identifier: str):
     identifier_clean = identifier.strip()
     user = usuarios_db.get(identifier_clean)
     if user: return user
+    formas = _formas_de_identificador(identifier_clean)
     for k, v in usuarios_db.items():
-        if k.lower() == identifier_clean.lower():
+        if k.lower() in formas:
             return v
         for alias in (
             v.get("identifier"),
@@ -3827,10 +3848,10 @@ def get_user_by_identifier(identifier: str):
             v.get("dni"),
             v.get("login_identifier"),
         ):
-            if alias and str(alias).strip().lower() == identifier_clean.lower():
+            if alias and str(alias).strip().lower() in formas:
                 return v
         perfil = v.get("perfil_conductor", {})
-        if perfil and perfil.get("numDoc") == identifier_clean:
+        if perfil and str(perfil.get("numDoc") or "").strip().lower() in formas:
             return v
     return None
 
