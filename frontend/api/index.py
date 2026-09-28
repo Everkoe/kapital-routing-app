@@ -6014,6 +6014,8 @@ PROGRAMADOR_ERROR_STATUS = {
     "no_esta_en_el_plan": (404, "Ese pasajero ya no está en tu servicio. Actualiza la lista."),
     "estado_invalido": (400, "Estado de viaje no reconocido."),
     "fuera_de_hora": (409, "Solo se puede marcar desde 3 horas antes hasta 6 horas después de la hora del servicio."),
+    "dia_pasado": (409, "Ese día ya pasó: su programación no se borra ni se rehace."),
+    "con_marcas": (409, "Los conductores ya marcaron viajes de ese día: su programación no se borra ni se rehace."),
 }
 
 
@@ -6184,12 +6186,37 @@ async def sembrar_plan(cuerpo: Dict[str, Any] = Body(...),
     }, write=True)
     if resultado.get("creadas"):
         registrar_actividad(
-            "Programación creada", actor=actor, entity_type="programacion",
+            "Programación rehecha" if cuerpo.get("rehacer") else "Programación creada",
+            actor=actor, entity_type="programacion",
             entity_id=dia,
             entity_label=f"{resultado['creadas']} asignaciones",
             description=(f"Sembrada desde el {resultado.get('sembrado_desde')}."),
         )
         await persist_users_only()
+    return resultado
+
+
+@app.post("/api/programador/plan/borrar")
+async def borrar_plan(cuerpo: Dict[str, Any] = Body(...),
+                      session_token: SessionCookie = None):
+    """Quita la programación de un día que no ha pasado.
+
+    No había forma de deshacer un «Crear programación», y como la aplicación
+    local trabaja contra la base real, un plan de prueba de mañana les llegaba
+    como real a los conductores de esas unidades. La base lo rechaza si el día
+    ya pasó o si algún conductor ya marcó viajes de ese día: lo que ocurrió no
+    se borra.
+    """
+    actor = await require_admin_session(session_token)
+    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    resultado = await _rpc_programador("borrar_programacion", {"dia": dia}, write=True)
+    registrar_actividad(
+        "Programación borrada", actor=actor, entity_type="programacion",
+        entity_id=dia, entity_label=f"{resultado.get('borradas', 0)} asignaciones",
+        description="El día queda sin programación; se puede volver a crear.",
+        status="error",
+    )
+    await persist_users_only()
     return resultado
 
 

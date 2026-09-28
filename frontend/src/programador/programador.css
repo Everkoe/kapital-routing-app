@@ -1379,3 +1379,55 @@
 .pw-table tr[data-destino='encima'] td { box-shadow: inset 0 2px 0 var(--kapital-badge-text); }
 
 .pw-table tr[data-destino='debajo'] td { box-shadow: inset 0 -2px 0 var(--kapital-badge-text); }
+
+/* --- Rehacer y borrar la programación de un día ---------------------------- */
+
+.pw-notice-acciones {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.pw-btn-peligro-suave { color: var(--kapital-accent-red); }
+.pw-btn-peligro {
+  background: var(--kapital-accent-red);
+  border-color: var(--kapital-accent-red);
+  color: var(--kapital-on-accent);
+}
+
+.pw-confirmar { position: relative; gap: 10px; color: var(--kapital-text-primary); }
+.pw-confirmar h3 { margin: 4px 0; font-size: 1.1rem; }
+.pw-confirmar p { margin: 0; font-size: 0.88rem; line-height: 1.5; color: var(--kapital-text-secondary); }
+.pw-confirmar-icono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--kapital-accent-red);
+  border: 1px solid var(--kapital-border);
+}
+.pw-confirmar-cerrar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: none;
+  border: none;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+}
+.pw-confirmar-cerrar:hover:not(:disabled) { opacity: 0.8; }
+.pw-confirmar .pw-confirmar-aviso {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--kapital-accent-orange);
+  font-weight: 600;
+}
+.pw-confirmar-botones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

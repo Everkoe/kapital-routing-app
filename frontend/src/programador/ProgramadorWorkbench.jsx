@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Upload,
+  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, RotateCcw, Trash2, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -17,11 +17,12 @@ import {
   filterOptions,
   sortServices,
 } from './model/workbenchSelectors.js';
-import { fecha as formatoFecha } from './fechas';
+import { fecha as formatoFecha, hoyISO } from './fechas';
 import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
+import ConfirmarPlan from './components/ConfirmarPlan.jsx';
 import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
@@ -125,6 +126,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // un plan, el día del que se copió.
   const referencia = modo === 'plan' ? sembradoDesde : comparadoCon;
   const [guardando, setGuardando] = useState(false);
+  // «rehacer» o «borrar» mientras se pide confirmación; `null` si no.
+  const [confirmar, setConfirmar] = useState(null);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -257,6 +260,31 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       setGuardando(false);
     }
   }, [dia, esProgramable, refresh]);
+
+  // Rehacer y borrar tiran trabajo: se piden confirmados (ver `ConfirmarPlan`)
+  // y la base los rechaza igualmente sobre un día pasado o con marcas.
+  const cambiarPlanEntero = useCallback(async (accion) => {
+    setGuardando(true);
+    const rehacer = accion === 'rehacer';
+    const aviso = toast.loading(rehacer ? 'Rehaciendo la programación…' : 'Borrando la programación…');
+    try {
+      const r = requireRpcSuccess(await apiFetch(
+        rehacer ? '/api/programador/plan/sembrar' : '/api/programador/plan/borrar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rehacer ? { fecha: dia, rehacer: true } : { fecha: dia }),
+        }), rehacer ? 'No se pudo rehacer la programación.' : 'No se pudo borrar la programación.');
+      toast.success(rehacer
+        ? `${r.creadas} asignaciones copiadas de nuevo del ${r.sembrado_desde}.`
+        : 'Programación borrada. El día queda sin programar.', { id: aviso });
+      setConfirmar(null);
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo completar.', { id: aviso });
+    } finally {
+      setGuardando(false);
+    }
+  }, [dia, refresh]);
 
   // Cada cambio se guarda al momento y no al pulsar un botón. Acumularlos
   // obliga a resolver qué pasa si alguien cierra la pestaña a medias, y ese
@@ -431,6 +459,23 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   creer lo contrario. */}
               {guardando ? 'guardando…' : 'cada cambio se guarda solo'}
             </span>
+            {/* Solo sobre un día que no ha pasado: lo ejecutado no se borra.
+                No basta `esProgramable`, que también incluye los planes viejos
+                para que sigan alcanzándose desde el selector. */}
+            {esProgramable && dia >= hoyISO() && (
+              <span className="pw-notice-acciones">
+                <button type="button" className="pw-btn pw-btn-sm"
+                  onClick={() => setConfirmar('rehacer')} disabled={guardando}>
+                  <RotateCcw size={14} aria-hidden="true" />
+                  Rehacer
+                </button>
+                <button type="button" className="pw-btn pw-btn-sm pw-btn-peligro-suave"
+                  onClick={() => setConfirmar('borrar')} disabled={guardando}>
+                  <Trash2 size={14} aria-hidden="true" />
+                  Borrar
+                </button>
+              </span>
+            )}
           </p>
         ) : esProgramable ? (
           <p className="pw-notice">
@@ -544,6 +589,15 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
               ))}
           </div>
         </section>
+
+        <ConfirmarPlan
+          accion={confirmar}
+          dia={formatoFecha(dia)}
+          sembradoDesde={sembradoDesde ? formatoFecha(sembradoDesde) : null}
+          ocupado={guardando}
+          onConfirmar={() => cambiarPlanEntero(confirmar)}
+          onCancelar={() => setConfirmar(null)}
+        />
 
         <PendingPanel
           pending={pending}

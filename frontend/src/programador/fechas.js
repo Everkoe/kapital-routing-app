@@ -11,4 +11,14 @@ export const fecha = (iso) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE');
 };
 
+/** El día de hoy en ISO según el reloj del navegador, que es el de la operación. */
+export const hoyISO = () => {
+  const d = new Date();
+  return [
+    d.getFullYear(),
+    `${d.getMonth() + 1}`.padStart(2, '0'),
+    `${d.getDate()}`.padStart(2, '0'),
+  ].join('-');
+};
+
 export default fecha;

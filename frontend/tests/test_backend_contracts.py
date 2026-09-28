@@ -3249,6 +3249,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ("POST", "/api/conductor/request-update",
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
             ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
+            ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),
@@ -3545,6 +3546,50 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ninguna.status_code, 409)
         self.assertEqual(de_cliente.status_code, 403)
         base.assert_awaited_once()
+
+    async def test_the_programador_deletes_the_plan_of_a_day_to_come(self):
+        """Crear una programación no tenía vuelta atrás, y una de prueba les llegaba a los conductores."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        _, chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        with (
+            patch.object(backend, "_rpc_programador", new=AsyncMock(
+                return_value={"fecha": "2026-09-29", "borradas": 396})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/programador/plan/borrar", token, json={"fecha": "2026-09-29"})
+            de_conductor = await self._llamar(
+                "POST", "/api/programador/plan/borrar", chofer, json={"fecha": "2026-09-29"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["borradas"], 396)
+        self.assertEqual(de_conductor.status_code, 403)
+        base.assert_awaited_once_with("borrar_programacion", {"dia": "2026-09-29"}, write=True)
+        self.assertEqual(backend.actividad_db[0]["action_type"], "Programación borrada")
+
+    async def test_redoing_a_plan_is_logged_as_redone_not_created(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 28)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "fecha": "2026-09-29", "creadas": 396, "sembrado_desde": "2026-09-22"})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/programador/plan/sembrar", token,
+                json={"fecha": "2026-09-29", "rehacer": True})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(base.await_args.args[1]["rehacer"])
+        self.assertEqual(backend.actividad_db[0]["action_type"], "Programación rehecha")
+
+    def test_a_day_already_run_or_with_marks_is_neither_deleted_nor_redone(self):
+        for codigo in ("dia_pasado", "con_marcas", "sin_programacion"):
+            with self.subTest(codigo=codigo), self.assertRaises(HTTPException) as ctx:
+                backend._raise_programador_result_error("borrar_programacion", {"error": codigo})
+            self.assertEqual(ctx.exception.status_code, 409)
+            # Un motivo, no el «no se pudo completar» genérico.
+            self.assertNotIn("No se pudo completar", ctx.exception.detail)
 
     def test_the_masivo_base_kv_units_are_the_intranets_v_units(self):
         """La base MASIVO escribe «KV-026» y la intranet «V026»: es la misma unidad."""
