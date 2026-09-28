@@ -16,6 +16,10 @@ from fastapi import HTTPException, Response, UploadFile
 
 from api import index as backend
 
+# Las pruebas que sustituyen `httpx.AsyncClient` del backend no deben sustituir
+# también el cliente con el que las pruebas llaman al API.
+_CLIENTE_HTTP_REAL = httpx.AsyncClient
+
 
 async def actor_de(token):
     """El actor que ve esta instancia para un token, o `None`.
@@ -3227,7 +3231,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     async def _llamar(self, metodo, ruta, token=None, **kwargs):
         cookies = {backend.SESSION_COOKIE_NAME: token} if token else None
         transport = httpx.ASGITransport(app=backend.app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as client:
+        async with _CLIENTE_HTTP_REAL(transport=transport, base_url="http://test", cookies=cookies) as client:
             return await client.request(metodo, ruta, **kwargs)
 
     async def _sesion(self, clave, **campos):
@@ -3249,6 +3253,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ("POST", "/api/conductor/request-update",
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
             ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
+            ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),
@@ -3545,6 +3550,161 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ninguna.status_code, 409)
         self.assertEqual(de_cliente.status_code, 403)
         base.assert_awaited_once()
+
+    async def test_the_programador_deletes_the_plan_of_a_day_to_come(self):
+        """Crear una programación no tenía vuelta atrás, y una de prueba les llegaba a los conductores."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        _, chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-001")
+        with (
+            patch.object(backend, "_rpc_programador", new=AsyncMock(
+                return_value={"fecha": "2026-09-29", "borradas": 396})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/programador/plan/borrar", token, json={"fecha": "2026-09-29"})
+            de_conductor = await self._llamar(
+                "POST", "/api/programador/plan/borrar", chofer, json={"fecha": "2026-09-29"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["borradas"], 396)
+        self.assertEqual(de_conductor.status_code, 403)
+        base.assert_awaited_once_with("borrar_programacion", {"dia": "2026-09-29"}, write=True)
+        self.assertEqual(backend.actividad_db[0]["action_type"], "Programación borrada")
+
+    async def test_deleting_a_plan_needs_the_day_to_be_named(self):
+        """Sin fecha borraba el plan de hoy: con un borrado, nada se da por supuesto."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with patch.object(backend, "_rpc_programador", new=AsyncMock()) as base:
+            respuesta = await self._llamar("POST", "/api/programador/plan/borrar", token, json={})
+        self.assertEqual(respuesta.status_code, 400)
+        base.assert_not_awaited()
+
+    async def test_redoing_a_plan_is_logged_as_redone_not_created(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 28)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "fecha": "2026-09-29", "creadas": 396, "sembrado_desde": "2026-09-22"})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/programador/plan/sembrar", token,
+                json={"fecha": "2026-09-29", "rehacer": True})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(base.await_args.args[1]["rehacer"])
+        self.assertEqual(backend.actividad_db[0]["action_type"], "Programación rehecha")
+
+    def test_a_day_already_run_or_with_marks_is_neither_deleted_nor_redone(self):
+        for codigo in ("dia_pasado", "con_marcas", "sin_programacion"):
+            with self.subTest(codigo=codigo), self.assertRaises(HTTPException) as ctx:
+                backend._raise_programador_result_error("borrar_programacion", {"error": codigo})
+            self.assertEqual(ctx.exception.status_code, 409)
+            # Un motivo, no el «no se pudo completar» genérico.
+            self.assertNotIn("No se pudo completar", ctx.exception.detail)
+
+    # --- Carga del histórico: avisar de lo ya cargado ---------------------------
+
+    class _ClienteFalso:
+        """Lo mínimo de `httpx.AsyncClient` que usan la carga y el estado."""
+
+        def __init__(self, *args, **kwargs):
+            self.posts = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            self.posts.append(url)
+            return httpx.Response(200, json=[{"resueltas": 1, "dudosas": 0, "pendientes": 0}])
+
+        async def get(self, url, **kwargs):
+            return httpx.Response(200, json=[{"fecha_ejecutada": "2026-09-22"}],
+                                  headers={"content-range": "0-0/518"})
+
+    def _parches_de_carga(self, ya_cargados):
+        servicios = [{"fecha_ejecutada": "2026-09-27", "dni": "1"},
+                     {"fecha_ejecutada": "2026-09-27", "dni": "2"}]
+        hi = backend.historico_intranet
+        return (
+            patch.object(hi, "leer_reporte", return_value=object()),
+            patch.object(hi, "construir_padron", return_value=([], [])),
+            patch.object(hi, "construir_historico", return_value=servicios),
+            patch.object(hi, "construir_duraciones", return_value=[]),
+            patch.object(hi, "resumen", return_value={
+                "servicios": 2, "desde": "2026-09-27", "hasta": "2026-09-27",
+                "pasajeros": 2, "ubicacion_pendiente": 0}),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=ya_cargados)),
+            patch.object(backend, "_upsert_tabla", new=AsyncMock(return_value=2)),
+            patch.object(backend.httpx, "AsyncClient", new=self._ClienteFalso),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        )
+
+    async def _subir(self, token, **datos):
+        return await self._llamar(
+            "POST", "/api/programador/historico", token,
+            files={"file": ("historial.xls", b"<table></table>", "application/vnd.ms-excel")},
+            data=datos)
+
+    async def test_uploading_a_day_already_loaded_stops_before_writing(self):
+        """Volver a subir el mismo día no avisaba: rehacía el trabajo sin decirlo."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        cargado = [{"fecha": "2026-09-27", "servicios": 518, "cargado_en": "2026-09-28T13:15:00+00:00"}]
+        parches = self._parches_de_carga(cargado)
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5] as base, \
+                parches[6] as escribir, parches[7], parches[8]:
+            respuesta = await self._subir(token)
+        self.assertEqual(respuesta.status_code, 409)
+        detalle = respuesta.json()["detail"]
+        self.assertEqual(detalle["ya_cargados"], cargado)
+        self.assertIn("27", detalle["mensaje"])
+        escribir.assert_not_awaited()
+        base.assert_awaited_once_with("dias_cargados", {"p_desde": "2026-09-27", "p_hasta": "2026-09-27"})
+
+    async def test_uploading_it_again_on_purpose_does_load_it(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        parches = self._parches_de_carga([{"fecha": "2026-09-27", "servicios": 518, "cargado_en": None}])
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5], \
+                parches[6] as escribir, parches[7], parches[8]:
+            respuesta = await self._subir(token, reemplazar="true")
+        self.assertEqual(respuesta.status_code, 200)
+        escribir.assert_awaited()
+
+    async def test_a_new_day_loads_without_asking(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        parches = self._parches_de_carga([])
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5], \
+                parches[6] as escribir, parches[7], parches[8]:
+            respuesta = await self._subir(token)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["hasta"], "2026-09-27")
+        escribir.assert_awaited()
+
+    async def test_the_history_status_says_which_day_is_due_and_the_last_week(self):
+        """El reporte que toca es el del día que ya terminó: ayer, en Lima."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        dias = [{"fecha": "2026-09-22", "servicios": 518, "cargado_en": "2026-09-23T04:12:46+00:00"}]
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 28)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=dias)) as base,
+            patch.object(backend.httpx, "AsyncClient", new=self._ClienteFalso),
+        ):
+            respuesta = await self._llamar("GET", "/api/programador/estado-historico", token)
+        self.assertEqual(respuesta.status_code, 200)
+        cuerpo = respuesta.json()
+        self.assertEqual(cuerpo["hoy"], "2026-09-28")
+        self.assertEqual(cuerpo["esperado"], "2026-09-27")
+        self.assertEqual(cuerpo["dias"], dias)
+        self.assertEqual(cuerpo["ultimo_dia"], "2026-09-22")
+        base.assert_awaited_once_with("dias_cargados", {"p_desde": "2026-09-21", "p_hasta": "2026-09-28"})
 
     def test_the_masivo_base_kv_units_are_the_intranets_v_units(self):
         """La base MASIVO escribe «KV-026» y la intranet «V026»: es la misma unidad."""

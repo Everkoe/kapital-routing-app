@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Upload,
+  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Trash2, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -17,11 +17,13 @@ import {
   filterOptions,
   sortServices,
 } from './model/workbenchSelectors.js';
-import { fecha as formatoFecha } from './fechas';
+import { fecha as formatoFecha, hoyISO } from './fechas';
 import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
+import ConfirmarPlan from './components/ConfirmarPlan.jsx';
+import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
 /**
@@ -48,9 +50,6 @@ import './programador.css';
  * Dibujar cualquiera de los tres ahora sería simular funcionalidad.
  */
 
-// Ventana operativa fija mientras no se decida si es configurable por
-// operación (decisión pendiente 22 del documento de contratos).
-const VENTANA_OPERATIVA = '11:00 — 07:00';
 const OPERACION = 'TP';
 
 const rpcErrorMessage = (payload, fallback) => {
@@ -127,6 +126,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   // un plan, el día del que se copió.
   const referencia = modo === 'plan' ? sembradoDesde : comparadoCon;
   const [guardando, setGuardando] = useState(false);
+  // Abierto mientras se pide confirmación para borrar la programación del día.
+  const [confirmarBorrar, setConfirmarBorrar] = useState(false);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -259,6 +260,27 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       setGuardando(false);
     }
   }, [dia, esProgramable, refresh]);
+
+  // Borrar tira trabajo: se pide confirmado (ver `ConfirmarPlan`) y la base lo
+  // rechaza igualmente sobre un día pasado o con viajes marcados.
+  const borrarPlan = useCallback(async () => {
+    setGuardando(true);
+    const aviso = toast.loading('Borrando la programación…');
+    try {
+      requireRpcSuccess(await apiFetch('/api/programador/plan/borrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: dia }),
+      }), 'No se pudo borrar la programación.');
+      toast.success('Programación borrada. El día queda sin programar.', { id: aviso });
+      setConfirmarBorrar(false);
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo completar.', { id: aviso });
+    } finally {
+      setGuardando(false);
+    }
+  }, [dia, refresh]);
 
   // Cada cambio se guarda al momento y no al pulsar un botón. Acumularlos
   // obliga a resolver qué pasa si alguien cierra la pestaña a medias, y ese
@@ -433,6 +455,18 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   creer lo contrario. */}
               {guardando ? 'guardando…' : 'cada cambio se guarda solo'}
             </span>
+            {/* Solo sobre un día que no ha pasado: lo ejecutado no se borra.
+                No basta `esProgramable`, que también incluye los planes viejos
+                para que sigan alcanzándose desde el selector. */}
+            {esProgramable && dia >= hoyISO() && (
+              <span className="pw-notice-acciones">
+                <button type="button" className="pw-btn pw-btn-sm pw-btn-peligro-suave"
+                  onClick={() => setConfirmarBorrar(true)} disabled={guardando}>
+                  <Trash2 size={14} aria-hidden="true" />
+                  Borrar
+                </button>
+              </span>
+            )}
           </p>
         ) : esProgramable ? (
           <p className="pw-notice">
@@ -546,6 +580,14 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
               ))}
           </div>
         </section>
+
+        <ConfirmarPlan
+          abierto={confirmarBorrar}
+          dia={formatoFecha(dia)}
+          ocupado={guardando}
+          onConfirmar={borrarPlan}
+          onCancelar={() => setConfirmarBorrar(false)}
+        />
 
         <PendingPanel
           pending={pending}

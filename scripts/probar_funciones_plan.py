@@ -18,6 +18,10 @@ otra, es el error de verdad. Si el día elegido ya tiene plan, no hace nada.
 Cómo se usa
 -----------
     python scripts/probar_funciones_plan.py
+    python scripts/probar_funciones_plan.py --con-migracion   # antes de aplicar la 013
+
+Con `--con-migracion` manda la 013 en la misma llamada: se prueba sin haberla
+aplicado y se deshace con todo lo demás.
 
 Desde la raíz del repositorio, con el entorno de `frontend/`. Necesita
 `SUPABASE_ACCESS_TOKEN`, como `aplicar_sql.py`.
@@ -35,6 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aplicar_sql  # noqa: E402
 
 SENAL = "PRUEBA_TERMINADA"
+SUPABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase")
+MIGRACION = "013_borrar_y_rehacer_programacion.sql"
 
 # El último día de la ventana: es el que menos probable es que tenga plan.
 BLOQUE = r"""
@@ -47,6 +53,8 @@ declare
   destino record;
   lista jsonb;
   nuevo text;
+  pasado date;
+  hoy date := (now() at time zone 'America/Lima')::date;
 begin
   if exists (select 1 from programacion_dias d where d.fecha = dia) then
     raise exception 'OMITIDA: el % ya tiene plan y no se toca', dia;
@@ -110,6 +118,44 @@ begin
   r := leer_programacion(dia);
   res := res || jsonb_build_object('leer', jsonb_array_length(r -> 'rutas'));
 
+  -- Con un viaje marcado por un conductor, ni rehacer ni borrar.
+  insert into ejecucion_viajes (fecha, codigo_vehiculo, turno, modalidad, dni, estado, marcado_por)
+  select p.fecha, p.codigo_vehiculo, p.turno, p.modalidad, p.dni, 'a_bordo', 'prueba'
+  from programacion p where p.fecha = dia limit 1;
+  res := res || jsonb_build_object(
+    'rehacer_con_marcas_no', (sembrar_programacion(dia, null, true) ->> 'error' = 'con_marcas')::int,
+    'borrar_con_marcas_no', (borrar_programacion(dia) ->> 'error' = 'con_marcas')::int);
+  delete from ejecucion_viajes e where e.fecha = dia;
+
+  -- Rehacer vuelve a copiar el día: lo tocado a mano se pierde.
+  r := sembrar_programacion(dia, null, true);
+  res := res || jsonb_build_object('rehacer', r -> 'creadas');
+  res := res || jsonb_build_object('rehacer_sin_lo_manual', (not exists (
+    select 1 from programacion p where p.fecha = dia and p.origen = 'manual'))::int);
+
+  -- Borrar deja el día sin nada, y una segunda vez ya no hay qué borrar.
+  r := borrar_programacion(dia);
+  res := res || jsonb_build_object('borrar', r -> 'borradas');
+  res := res || jsonb_build_object('borrado_limpio', (
+    not exists (select 1 from programacion p where p.fecha = dia)
+    and not exists (select 1 from programacion_dias d where d.fecha = dia)
+    and not exists (select 1 from programacion_pendientes x where x.fecha = dia))::int);
+  res := res || jsonb_build_object(
+    'borrar_otra_vez_no', (borrar_programacion(dia) ->> 'error' = 'sin_programacion')::int);
+
+  -- Lo que ya pasó no se borra ni se rehace, aunque tenga plan.
+  select max(d.fecha) into pasado from programacion_dias d where d.fecha < hoy;
+  if pasado is not null then
+    res := res || jsonb_build_object(
+      'pasado_no_se_borra', (borrar_programacion(pasado) ->> 'error' = 'dia_pasado')::int,
+      'pasado_no_se_rehace', (sembrar_programacion(pasado, null, true) ->> 'error' = 'dia_pasado')::int);
+  end if;
+
+  res := res || jsonb_build_object('cerradas_a_anon', (
+    not has_function_privilege('anon', 'public.borrar_programacion(date)', 'execute')
+    and not has_function_privilege('authenticated', 'public.borrar_programacion(date)', 'execute')
+    and not has_function_privilege('anon', 'public.sembrar_programacion(date,date,boolean)', 'execute'))::int);
+
   raise exception '% %', '""" + SENAL + r"""', res;
 end $prueba$;
 """
@@ -118,12 +164,20 @@ end $prueba$;
 MINIMOS = {
     "sembrar": 1, "retirar": 1, "reponer": 1, "ordenar": 1,
     "mover": 1, "agregar": 1, "baja": 1, "leer": 1,
+    "rehacer_con_marcas_no": 1, "borrar_con_marcas_no": 1,
+    "rehacer": 1, "rehacer_sin_lo_manual": 1,
+    "borrar": 1, "borrado_limpio": 1, "borrar_otra_vez_no": 1,
+    "pasado_no_se_borra": 1, "pasado_no_se_rehace": 1, "cerradas_a_anon": 1,
 }
 
 
 def main() -> int:
+    sql = BLOQUE
+    if "--con-migracion" in sys.argv:
+        with open(os.path.join(SUPABASE, MIGRACION), encoding="utf-8") as mano:
+            sql = mano.read() + chr(10) + BLOQUE
     try:
-        aplicar_sql.ejecutar(BLOQUE)
+        aplicar_sql.ejecutar(sql)
     except SystemExit as salida:
         mensaje = str(salida)
     else:

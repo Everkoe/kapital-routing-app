@@ -11,6 +11,7 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
+import { hoyISO } from '../fechas';
 
 /**
  * Encabezado y tira de KPIs.
@@ -41,16 +42,6 @@ const fechaCorta = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE',
     { weekday: 'short', day: '2-digit', month: 'short' });
-};
-
-/** El día de hoy en ISO según el reloj del navegador, que es el de la operación. */
-const hoyISO = () => {
-  const d = new Date();
-  return [
-    d.getFullYear(),
-    `${d.getMonth() + 1}`.padStart(2, '0'),
-    `${d.getDate()}`.padStart(2, '0'),
-  ].join('-');
 };
 
 /** Desplaza una fecha ISO los días que se le pidan, sin salirse del día local. */

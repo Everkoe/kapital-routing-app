@@ -5829,9 +5829,16 @@ async def _upsert_tabla(cliente: httpx.AsyncClient, tabla: str,
     return escritas
 
 
+async def _dias_cargados(desde: str, hasta: str) -> List[Dict[str, Any]]:
+    """Los días del histórico entre esas fechas, con cuántos servicios y cuándo se cargaron."""
+    filas = await _rpc_programador("dias_cargados", {"p_desde": desde, "p_hasta": hasta})
+    return filas if isinstance(filas, list) else []
+
+
 @app.post("/api/programador/historico")
 async def cargar_historico_intranet(
     file: UploadFile = File(...),
+    reemplazar: bool = Form(False),
     session_token: SessionCookie = None,
 ):
     """Recibe el reporte diario de la intranet y lo incorpora al histórico.
@@ -5870,6 +5877,25 @@ async def cargar_historico_intranet(
             status_code=400,
             detail="El reporte no trae ningún servicio con fecha y turno legibles.",
         )
+
+    # Si el día ya estaba, se para antes de escribir nada y se pregunta. Subirlo
+    # otra vez no duplica —la carga resuelve por la clave natural—, pero rehace
+    # el trabajo sin decirlo y casi siempre es un despiste: el archivo de ayer
+    # otra vez, o dos personas subiendo el mismo. Quien quiere recargarlo lo
+    # confirma y vuelve con `reemplazar`.
+    dias_del_archivo = sorted({str(fila["fecha_ejecutada"]) for fila in servicios
+                               if fila.get("fecha_ejecutada")})
+    if not reemplazar and dias_del_archivo:
+        ya_cargados = [dia for dia in await _dias_cargados(dias_del_archivo[0], dias_del_archivo[-1])
+                       if str(dia.get("fecha")) in dias_del_archivo]
+        if ya_cargados:
+            fechas = ", ".join(
+                date.fromisoformat(str(dia["fecha"])).strftime("%d/%m") for dia in ya_cargados)
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f"Ya estaba cargado: {fechas}. ¿Volver a cargarlo?",
+                "ya_cargados": ya_cargados,
+                "dias": dias_del_archivo,
+            })
 
     async with httpx.AsyncClient(timeout=90.0) as cliente:
         # Los dos grupos van por separado a propósito. Quien no declara
@@ -5922,10 +5948,23 @@ async def cargar_historico_intranet(
     return resumen
 
 
+# Los días que enseña la tira de la pantalla de carga, hasta el que toca subir.
+DIAS_EN_LA_TIRA = 7
+
+
 @app.get("/api/programador/estado-historico")
 async def estado_historico(session_token: SessionCookie = None):
-    """Qué hay cargado hoy: sirve para saber si falta subir el reporte."""
+    """Qué hay cargado: sirve para saber si falta subir el reporte.
+
+    El que toca es el del día que ya terminó —ayer, en Lima—, porque el reporte
+    «Detalle» de la intranet es de 00:00 a 23:59. Los días de la tira salen
+    resumidos de la base (`dias_cargados`), sin bajar sus servicios.
+    """
     await require_admin_session(session_token)
+    hoy = _hoy_en_lima()
+    esperado = hoy - timedelta(days=1)
+    dias = await _dias_cargados(
+        (esperado - timedelta(days=DIAS_EN_LA_TIRA - 1)).isoformat(), hoy.isoformat())
     cabeceras = {**HEADERS, "Prefer": "count=exact", "Range": "0-0"}
     async with httpx.AsyncClient(timeout=30.0) as cliente:
         async def cuenta(tabla, params=None):
@@ -5946,6 +5985,9 @@ async def estado_historico(session_token: SessionCookie = None):
                                        {"estado_ubicacion": "eq.no_resuelta"}),
             "duraciones": await cuenta("duraciones_base"),
             "ultimo_dia": filas[0]["fecha_ejecutada"] if filas else None,
+            "hoy": hoy.isoformat(),
+            "esperado": esperado.isoformat(),
+            "dias": dias,
         }
 
 
@@ -6014,6 +6056,8 @@ PROGRAMADOR_ERROR_STATUS = {
     "no_esta_en_el_plan": (404, "Ese pasajero ya no está en tu servicio. Actualiza la lista."),
     "estado_invalido": (400, "Estado de viaje no reconocido."),
     "fuera_de_hora": (409, "Solo se puede marcar desde 3 horas antes hasta 6 horas después de la hora del servicio."),
+    "dia_pasado": (409, "Ese día ya pasó: su programación no se borra ni se rehace."),
+    "con_marcas": (409, "Los conductores ya marcaron viajes de ese día: su programación no se borra ni se rehace."),
 }
 
 
@@ -6077,7 +6121,7 @@ def _hoy_en_lima() -> date:
 
     En Vercel el reloj es UTC y Lima va cinco horas por detrás: desde las 19:00
     de Lima, `datetime.now()` ya dice mañana. Para una operación cuya ventana es
-    11:00 → 07:00 eso no es un detalle, porque son justo las horas en las que se
+    10:00 → 07:00 eso no es un detalle, porque son justo las horas en las que se
     programa: daría por vencido un día que todavía se está trabajando.
     """
     return datetime.now(ZONA_LIMA).date()
@@ -6184,12 +6228,40 @@ async def sembrar_plan(cuerpo: Dict[str, Any] = Body(...),
     }, write=True)
     if resultado.get("creadas"):
         registrar_actividad(
-            "Programación creada", actor=actor, entity_type="programacion",
+            "Programación rehecha" if cuerpo.get("rehacer") else "Programación creada",
+            actor=actor, entity_type="programacion",
             entity_id=dia,
             entity_label=f"{resultado['creadas']} asignaciones",
             description=(f"Sembrada desde el {resultado.get('sembrado_desde')}."),
         )
         await persist_users_only()
+    return resultado
+
+
+@app.post("/api/programador/plan/borrar")
+async def borrar_plan(cuerpo: Dict[str, Any] = Body(...),
+                      session_token: SessionCookie = None):
+    """Quita la programación de un día que no ha pasado.
+
+    No había forma de deshacer un «Crear programación», y como la aplicación
+    local trabaja contra la base real, un plan de prueba de mañana les llegaba
+    como real a los conductores de esas unidades. La base lo rechaza si el día
+    ya pasó o si algún conductor ya marcó viajes de ese día: lo que ocurrió no
+    se borra.
+    """
+    actor = await require_admin_session(session_token)
+    # Con un borrado no se da nada por supuesto: sin fecha borraba el de hoy.
+    if not cuerpo.get("fecha"):
+        raise HTTPException(status_code=400, detail="Indica el día cuya programación se borra.")
+    dia = _dia_o_hoy(cuerpo.get("fecha"))
+    resultado = await _rpc_programador("borrar_programacion", {"dia": dia}, write=True)
+    registrar_actividad(
+        "Programación borrada", actor=actor, entity_type="programacion",
+        entity_id=dia, entity_label=f"{resultado.get('borradas', 0)} asignaciones",
+        description="El día queda sin programación; se puede volver a crear.",
+        status="error",
+    )
+    await persist_users_only()
     return resultado
 
 

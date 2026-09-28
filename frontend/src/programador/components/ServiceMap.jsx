@@ -1,12 +1,9 @@
 import { useMemo } from 'react';
-import { MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet';
-import { MapPinOff } from 'lucide-react';
-import L from 'leaflet';
-import { hasCoordinate } from '../model/serviceModel.js';
-import 'leaflet/dist/leaflet.css';
+import { ExternalLink, MapPinOff } from 'lucide-react';
+import { paradasConPunto, urlDelMapa, urlParaAbrir } from '../model/mapaDeGoogle.js';
 
 /**
- * Los domicilios de un servicio sobre el mapa.
+ * Los domicilios de un servicio sobre el mapa de Google.
  *
  * **Solo se dibuja lo que se sabe.** El domicilio de cada pasajero no viene
  * del archivo: lo deduce la base a partir del GPS de sus recojos, y hoy lo
@@ -15,103 +12,53 @@ import 'leaflet/dist/leaflet.css';
  * coordenada inventada que no se anuncia es peor que un hueco: manda a un
  * vehículo a una casa que no existe.
  *
- * La línea que une los puntos **no es la ruta**. Es el orden en que se recogió
- * a la gente según el histórico, en línea recta. No hay callejero detrás y no
- * se debe leer como el camino que hizo el vehículo.
+ * Con dos o más domicilios, Google traza el camino real pasando por ellos en
+ * el orden del servicio (ver `mapaDeGoogle.js`, que explica por qué es el
+ * visor incrustado, sin clave, y no el mapa de Google con JavaScript). Empieza
+ * en el primer domicilio: no incluye el garaje ni la sede.
  */
-
-// Leaflet resuelve sus iconos por ruta relativa y con Vite eso no funciona.
-// Es el mismo arreglo que ya hace `LiveMap`.
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-/** Un punto numerado, en el color que le corresponda por ser nuevo o no. */
-const marcador = (orden, nuevo) => L.divIcon({
-  className: 'pw-map-pin-wrap',
-  html: `<span class="pw-map-pin${nuevo ? ' es-nuevo' : ''}">${orden}</span>`,
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
-});
-
 const ServiceMap = ({ agentes = [], titulo, plan = false }) => {
-  const ubicados = useMemo(
-    () => agentes
-      .map((agente, indice) => ({ ...agente, orden: indice + 1 }))
-      // `hasCoordinate` y no `Number.isFinite(Number(...))`: `Number(null)`
-      // vale 0, y cada agente sin ubicación se pintaba en el (0, 0), en el
-      // golfo de Guinea, alejando el mapa a medio mundo. Con 352 personas aún
-      // sin ubicar, pasaba en casi cualquier servicio.
-      .filter((agente) => hasCoordinate(agente.lat) && hasCoordinate(agente.lng)),
-    [agentes],
-  );
+  const url = useMemo(() => urlDelMapa(agentes), [agentes]);
+  const ubicados = paradasConPunto(agentes).length;
+  const sinUbicar = agentes.length - ubicados;
 
-  const sinUbicar = agentes.length - ubicados.length;
-
-  if (ubicados.length === 0) {
+  if (!url) {
     return (
       <div className="pw-map-vacio">
         <MapPinOff size={22} aria-hidden="true" />
         <p>
-          Ninguno de los {agentes.length} agentes de este servicio tiene el
-          domicilio resuelto todavía, así que no hay nada que situar.
+          {agentes.length === 1
+            ? 'El agente de este servicio no tiene el domicilio resuelto todavía,'
+            : `Ninguno de los ${agentes.length} agentes de este servicio tiene el domicilio resuelto todavía,`}
+          {' así que no hay nada que situar.'}
         </p>
       </div>
     );
   }
 
-  const trazo = ubicados.map((a) => [Number(a.lat), Number(a.lng)]);
-
-  // El encuadre sale de los propios puntos, no de un zoom fijo: con un zoom
-  // fijo y el centro en la media, dos domicilios separados se quedaban fuera
-  // de la vista y el mapa aparecía vacío. Con un solo punto no hay extensión
-  // que encuadrar, así que ahí sí se centra y se fija el zoom.
-  const unico = trazo.length === 1;
-  const encuadre = unico
-    ? { center: trazo[0], zoom: 15 }
-    : { bounds: trazo, boundsOptions: { padding: [28, 28], maxZoom: 15 } };
-
   return (
     <div className="pw-map">
-      <MapContainer {...encuadre} scrollWheelZoom={false}
-        style={{ height: '280px', width: '100%' }}
-        aria-label={`Domicilios del servicio ${titulo || ''}`}>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {trazo.length > 1 && (
-          <Polyline positions={trazo} pathOptions={{ weight: 2, opacity: 0.5, dashArray: '5 6' }} />
-        )}
-        {ubicados.map((agente) => (
-          <Marker key={`${agente.id}-${agente.orden}`}
-            position={[Number(agente.lat), Number(agente.lng)]}
-            icon={marcador(agente.orden, agente.nuevo)}>
-            <Popup>
-              <strong>{agente.nombre}</strong>
-              <br />{agente.direccion || 'Sin dirección'}
-              {agente.hora && <><br />Recogido a las {String(agente.hora).slice(0, 5)}</>}
-              {agente.nuevo && <><br /><em>Nuevo en este servicio</em></>}
-              {agente.ubicacion === 'dudosa' && (
-                <><br /><em>Ubicación aproximada</em></>
-              )}
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+      {/* `key`: el visor no recarga si solo cambia la dirección del iframe. */}
+      {/* Sin `referrerPolicy`: el visor sin clave no la necesita, y la del
+          navegador solo envía el dominio, no la dirección de la página. */}
+      <iframe key={url} src={url} className="pw-map-google" loading="lazy"
+        title={`Domicilios del servicio ${titulo || ''} en Google Maps`} />
 
       <p className="pw-map-nota">
-        {plan
-          ? 'La línea es el orden de recogida de la programación, en línea recta: no es el camino que hará el vehículo.'
-          : 'La línea es el orden de recogida del histórico, en línea recta: no es el camino que hizo el vehículo.'}
+        {ubicados > 1
+          ? (plan
+            ? 'Google calcula el camino pasando por los domicilios en el orden de la programación, desde el primero.'
+            : 'Google calcula el camino pasando por los domicilios en el orden del histórico, desde el primero.')
+          : 'El domicilio del único agente con ubicación.'}
         {sinUbicar > 0 && (
           <> <strong>{sinUbicar} agente(s) no aparecen</strong> porque su domicilio
             aún no está resuelto.
           </>
         )}
+        {' '}
+        <a className="pw-map-abrir" href={urlParaAbrir(agentes)} target="_blank" rel="noopener noreferrer">
+          Abrir en Google Maps <ExternalLink size={12} aria-hidden="true" />
+        </a>
       </p>
     </div>
   );

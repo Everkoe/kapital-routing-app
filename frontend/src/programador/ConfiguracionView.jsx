@@ -1,4 +1,5 @@
 import { Clock, HelpCircle, Info, Lock, Settings } from 'lucide-react';
+import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
 /**
@@ -22,7 +23,7 @@ const PARAMETROS = [
   },
   {
     label: 'Ventana operativa',
-    valor: '11:00 — 07:00',
+    valor: VENTANA_OPERATIVA,
     detalle: 'Fija en el código. Queda por decidir si debe configurarse por operación.',
   },
   {
