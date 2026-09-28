@@ -5952,13 +5952,23 @@ LOTE_CONSULTA_DNI = 40
 PAGINA_POSTGREST = 1000
 
 
+# La base de conductores MASIVO escribe «KV-026» y la intranet de
+# Teleperformance «V026»: es la misma unidad. 29 de las 33 V### de la intranet
+# tienen su KV-### con el mismo número, lo más que llevó cada una cabe en la
+# capacidad que declara la base (las VAN de 10 llevaron 10; las SUV de 6, 6), y
+# de las KV marcadas solo KONECTA casi ninguna aparece en la intranet de TP.
+# Sin esto, 23 unidades con conductor no recibían su servicio. La misma regla
+# está en `fleetKey` (frontend) y en `_clave_normalizada` (supabase/012).
+_KV_DE_LA_BASE = re.compile(r"^KV(\d+)$")
+
+
 def _clave_de_vehiculo(codigo: Any) -> str:
     """El código de una unidad, comparable entre las dos fuentes.
 
     La flota de `app_state` guarda «K-027» y la intranet registra «K027». Sin
     normalizar no cruzaba ni una sola de las 110 unidades.
     """
-    return re.sub(r"[^A-Z0-9]", "", str(codigo or "").upper())
+    return _KV_DE_LA_BASE.sub(r"V\1", re.sub(r"[^A-Z0-9]", "", str(codigo or "").upper()))
 
 
 async def _filas_por_dni(cliente: httpx.AsyncClient, tabla: str, columnas: str,

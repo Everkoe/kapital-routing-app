@@ -491,3 +491,19 @@ test('una fila manual también hace visible el servicio como modificado', () => 
   assert.equal(changed.cambio.modificado, true);
   assert.equal(changed.cambio.nuevos, 1);
 });
+
+test('la «KV-026» de la base MASIVO es la «V026» de la intranet', () => {
+  // La base de conductores escribe KV-### y la intranet de Teleperformance
+  // V###: 29 de sus 33 V### tienen su KV-### con el mismo número, y lo más que
+  // llevó cada una cabe en la capacidad declarada. Sin esto, 23 unidades con
+  // conductor no recibían su servicio ni su capacidad.
+  const flota = indexFleet([{ unidad_id: 'KV-026', capacidad: 10, chofer: 'Quispe' }]);
+  assert.equal(resolveCapacity('V026', 7, flota).total, 10);
+  const services = buildServices([ruta('V026', 'CALLAO', '03:00 recojo', [agente('A1')])], flota);
+  for (const query of ['KV-026', 'V026', 'v-026']) {
+    assert.equal(applyFilters(services, { ...emptyFilters(), query }).length, 1, query);
+  }
+  // Solo el prefijo KV seguido de cifras: la de prueba y las K se quedan como están.
+  assert.equal(resolveCapacity('KVTEST', 1, indexFleet([{ unidad_id: 'KV TEST', capacidad: 4 }])).total, 4);
+  assert.equal(resolveCapacity('V027', 1, indexFleet([{ unidad_id: 'K-027', capacidad: 4 }])).known, false);
+});

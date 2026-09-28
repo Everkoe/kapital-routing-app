@@ -19,8 +19,8 @@ Cómo se usa
     python scripts/probar_servicios.py
     python scripts/probar_servicios.py --con-migracion   # antes de aplicar una migración
 
-Con `--con-migracion` manda la 010 y la 011 en la misma llamada, así que se prueba sin
-haberla aplicado y se deshace con todo lo demás. Desde la raíz del
+Con `--con-migracion` manda la 010, la 011 y la 012 en la misma llamada, así que se prueba sin
+haberlas aplicado y se deshace con todo lo demás. Desde la raíz del
 repositorio, con el entorno de `frontend/`; necesita `SUPABASE_ACCESS_TOKEN`.
 """
 
@@ -37,8 +37,9 @@ import aplicar_sql  # noqa: E402
 
 SENAL = "PRUEBA_TERMINADA"
 SUPABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase")
-# Las que definen lo que se prueba, en orden: la 011 reemplaza funciones de la 010.
-MIGRACIONES = ("010_servicios_conductor_cliente.sql", "011_ventana_y_empresa.sql")
+# Las que definen lo que se prueba, en orden: la 011 y la 012 reemplazan funciones de la 010.
+MIGRACIONES = ("010_servicios_conductor_cliente.sql", "011_ventana_y_empresa.sql",
+               "012_unidades_kv.sql")
 
 BLOQUE = r"""
 do $prueba$
@@ -132,6 +133,17 @@ begin
     'sin_servicios_duplicados', (
       select count(*) = count(distinct (x ->> 'unidad', x ->> 'turno', x ->> 'modalidad'))
         from jsonb_array_elements(c -> 'servicios') x));
+
+  -- La «KV-026» de la base de conductores es la «V026» de la intranet (012).
+  res := res || jsonb_build_object(
+    'kv_de_la_base_es_la_v_de_la_intranet',
+      _clave_normalizada('KV-026') = 'V026' and _clave_normalizada('V026') = 'V026'
+      and _clave_normalizada('K-027') = 'K027' and _clave_normalizada('KV TEST') = 'KVTEST',
+    'cliente_ve_el_vehiculo_de_una_v', not exists (
+      select 1 from programacion p where p.fecha = dia and p.codigo_vehiculo ~ '^V[0-9]+$')
+      or exists (
+      select 1 from jsonb_array_elements(c -> 'servicios') x
+       where x ->> 'unidad' ~ '^V[0-9]+$' and x -> 'conductor' ->> 'placa' is not null));
 
   -- Marcar. La ventana es la del servicio (de 3 h antes a 6 h después de su
   -- turno, en hora de Lima), así que se trae un pasajero a ahora mismo.

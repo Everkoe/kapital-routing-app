@@ -3507,6 +3507,28 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(de_cliente.status_code, 403)
         base.assert_awaited_once()
 
+    def test_the_masivo_base_kv_units_are_the_intranets_v_units(self):
+        """La base MASIVO escribe «KV-026» y la intranet «V026»: es la misma unidad."""
+        self.assertEqual(backend._clave_de_vehiculo("KV-026"), "V026")
+        self.assertEqual(backend._clave_de_vehiculo("V026"), "V026")
+        self.assertEqual(backend._clave_de_vehiculo("K-027"), "K027")
+        self.assertEqual(backend._clave_de_vehiculo("KV TEST"), "KVTEST")
+        self.assertEqual(backend._clave_de_vehiculo("SM001"), "SM001")
+
+    async def test_a_kv_driver_reads_the_services_the_intranet_files_under_v(self):
+        """23 conductores con cuenta no recibían nada: su unidad era KV-### y el plan decía V###."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("quispe@k.com", rol="Conductor", unidad_id="KV-026")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 27)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={})) as base,
+        ):
+            propia = await self._llamar("GET", "/api/conductor/servicios", token)
+            con_v = await self._llamar("GET", "/api/conductor/servicios?unidad=V026", token)
+        self.assertEqual(propia.status_code, 200)
+        self.assertEqual(con_v.status_code, 200)
+        self.assertEqual([llamada.args[1]["p_clave"] for llamada in base.await_args_list], ["V026", "V026"])
+
     async def test_administration_reads_any_unit_but_has_to_name_it(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
