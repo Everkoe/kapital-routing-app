@@ -55,3 +55,36 @@ export const yaCargadosDelError = (detalle) =>
     && detalle.ya_cargados.length > 0)
     ? detalle.ya_cargados
     : null;
+
+// Hasta cuántos días ya cargados se enseñan uno por uno; con más, se resumen.
+// Subir el reporte de agosto listaba 31 líneas que no cabían en la ventana.
+export const MAX_DIAS_EN_LISTA = 3;
+
+const LIMA_MS = 5 * 60 * 60 * 1000;
+const diaEnLima = (iso) => new Date(Date.parse(iso) - LIMA_MS).toISOString().slice(0, 10);
+
+/**
+ * Lo que se enseña al preguntar si se vuelve a cargar: los días ya cargados
+ * resumidos (cuántos, de cuándo a cuándo, cuántos servicios), la lista solo si
+ * son pocos, los días del archivo que son nuevos, y cuándo se subieron si fue
+ * todo el mismo día —si no, no se inventa una fecha común—.
+ */
+export const resumenDeRecarga = (yaCargados, diasDelArchivo = []) => {
+  const cargados = [...(yaCargados || [])]
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+  const fechasCargadas = new Set(cargados.map((dia) => String(dia.fecha)));
+  const nuevos = [...(diasDelArchivo || [])].map(String)
+    .filter((dia) => !fechasCargadas.has(dia)).sort();
+  const subidas = cargados.map((dia) => dia.cargado_en).filter(Boolean);
+  const unSoloDia = subidas.length === cargados.length && subidas.length > 0
+    && new Set(subidas.map(diaEnLima)).size === 1;
+  return {
+    dias: cargados.length,
+    desde: cargados[0]?.fecha ?? null,
+    hasta: cargados.at(-1)?.fecha ?? null,
+    servicios: cargados.reduce((total, dia) => total + Number(dia.servicios || 0), 0),
+    lista: cargados.length <= MAX_DIAS_EN_LISTA ? cargados : [],
+    nuevos,
+    subidoEl: unSoloDia ? subidas.sort()[0] : null,
+  };
+};

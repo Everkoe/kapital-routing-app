@@ -8,7 +8,7 @@ import Indicador from './Indicador';
 import ZonaDeCarga from './ZonaDeCarga';
 import { fecha } from './fechas';
 import {
-  diaEsperado, fueraDeLoEsperado, huecosAnteriores, tiraDeDias, yaCargadosDelError,
+  diaEsperado, fueraDeLoEsperado, huecosAnteriores, resumenDeRecarga, tiraDeDias, yaCargadosDelError,
 } from './model/cargaHistorico.js';
 
 /**
@@ -47,6 +47,9 @@ const diaCorto = (iso) => {
     numero: d.getDate(),
   };
 };
+
+/** Solo el día, en hora de Lima: «22/9/2026». */
+const diaDeSubida = (iso) => new Date(iso).toLocaleDateString('es-PE', { timeZone: 'America/Lima' });
 
 /** Cuándo se cargó, en hora de Lima: «28/09 08:15». */
 const momento = (iso) => (iso
@@ -108,11 +111,21 @@ const EstadoDelDia = ({ estado }) => {
   );
 };
 
-/** Pregunta antes de volver a cargar un día que ya estaba. */
+/**
+ * Pregunta antes de volver a cargar lo que ya estaba.
+ *
+ * Con pocos días los lista; con más, los resume en una línea: el reporte de un
+ * mes entero listaba 31 días y no cabía en la ventana. Si el archivo trae
+ * además días nuevos, se dice aparte, porque entonces cargarlo sí añade algo.
+ */
 const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
   if (!pendiente) return null;
-  const { yaCargados } = pendiente;
-  const uno = yaCargados.length === 1;
+  const r = resumenDeRecarga(pendiente.yaCargados, pendiente.dias);
+  const titulo = r.nuevos.length > 0
+    ? 'Parte de ese archivo ya estaba cargada'
+    : (r.dias === 1 ? 'Ese día ya estaba cargado' : 'Ese archivo ya estaba cargado');
+  const servicios = `${r.servicios.toLocaleString('es-PE')} servicios`;
+
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="historico-recarga-titulo">
       <div className="modal-content pw-confirmar">
@@ -123,20 +136,34 @@ const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
         <div className="pw-confirmar-icono historico-recarga-icono">
           <RefreshCw size={22} aria-hidden="true" />
         </div>
-        <h3 id="historico-recarga-titulo">
-          {uno ? 'Ese día ya estaba cargado' : 'Esos días ya estaban cargados'}
-        </h3>
-        <ul className="historico-resultado">
-          {yaCargados.map((dia) => (
-            <li key={dia.fecha}>
-              <strong>{fecha(dia.fecha)}</strong>: {Number(dia.servicios).toLocaleString('es-PE')} servicios
-              {dia.cargado_en && <>, subido el {momento(dia.cargado_en)}</>}
-            </li>
-          ))}
-        </ul>
+        <h3 id="historico-recarga-titulo">{titulo}</h3>
+        {r.lista.length > 0 ? (
+          <ul className="historico-resultado">
+            {r.lista.map((dia) => (
+              <li key={dia.fecha}>
+                <strong>{fecha(dia.fecha)}</strong>: {Number(dia.servicios).toLocaleString('es-PE')} servicios
+                {dia.cargado_en && <> (subido el {momento(dia.cargado_en)})</>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="historico-recarga-resumen">
+            <strong>{r.dias} días</strong>, del {fecha(r.desde)} al {fecha(r.hasta)}: {servicios}
+            {r.subidoEl && <> (subidos el {diaDeSubida(r.subidoEl)})</>}.
+          </p>
+        )}
+        {r.nuevos.length > 0 && (
+          <p className="historico-recarga-resumen">
+            Y trae <strong>{r.nuevos.length} {r.nuevos.length === 1 ? 'día nuevo' : 'días nuevos'}</strong>
+            {r.nuevos.length <= 3
+              ? `: ${r.nuevos.map((d) => fecha(d)).join(', ')}.`
+              : `, del ${fecha(r.nuevos[0])} al ${fecha(r.nuevos.at(-1))}.`}
+          </p>
+        )}
         <p>
-          Volver a cargarlo actualiza esos servicios con lo que trae el archivo; no
-          se duplica nada. Si no esperabas esto, quizá sea el archivo de otro día.
+          {r.nuevos.length > 0
+            ? 'Cargarlo añade los días nuevos y actualiza los que ya estaban; no se duplica nada.'
+            : 'Volver a cargarlo actualiza esos servicios con lo que trae el archivo; no se duplica nada. Si no esperabas esto, quizá sea el archivo de otro día.'}
         </p>
         <div className="pw-confirmar-botones">
           <button type="button" className="pw-btn" onClick={onCancelar} disabled={ocupado}>
@@ -145,7 +172,7 @@ const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
           <button type="button" className="pw-btn pw-btn-primary" onClick={onConfirmar}
             disabled={ocupado} autoFocus>
             <RefreshCw size={16} aria-hidden="true" />
-            Volver a cargar
+            {r.nuevos.length > 0 ? 'Cargar' : 'Volver a cargar'}
           </button>
         </div>
       </div>
@@ -198,11 +225,12 @@ const PanelHistorico = () => {
         { id: aviso });
       await leerEstado();
     } catch (error) {
-      const yaCargados = error?.status === 409 ? yaCargadosDelError(error?.payload?.detail) : null;
+      const detalle = error?.payload?.detail;
+      const yaCargados = error?.status === 409 ? yaCargadosDelError(detalle) : null;
       if (yaCargados) {
         // No es un fallo: el servidor paró antes de escribir y hay que preguntar.
         toast.dismiss(aviso);
-        setPendiente({ archivo, yaCargados });
+        setPendiente({ archivo, yaCargados, dias: detalle.dias || [] });
       } else {
         toast.error(error?.message || 'No se pudo cargar el reporte.', { id: aviso });
       }

@@ -1497,3 +1497,6 @@
 .historico-plegado p { margin: 0; font-size: 0.86rem; color: var(--kapital-text-secondary); }
 
 .pw-confirmar-icono.historico-recarga-icono { color: var(--primary); }
+.historico-recarga-resumen strong { color: var(--kapital-text-primary); }
+/* Por si el contenido crece: la ventana se desplaza en vez de salirse de la pantalla. */
+.pw-confirmar { max-height: 88vh; overflow-y: auto; }
