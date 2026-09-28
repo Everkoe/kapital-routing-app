@@ -6077,7 +6077,7 @@ def _hoy_en_lima() -> date:
 
     En Vercel el reloj es UTC y Lima va cinco horas por detrás: desde las 19:00
     de Lima, `datetime.now()` ya dice mañana. Para una operación cuya ventana es
-    11:00 → 07:00 eso no es un detalle, porque son justo las horas en las que se
+    10:00 → 07:00 eso no es un detalle, porque son justo las horas en las que se
     programa: daría por vencido un día que todavía se está trabajando.
     """
     return datetime.now(ZONA_LIMA).date()

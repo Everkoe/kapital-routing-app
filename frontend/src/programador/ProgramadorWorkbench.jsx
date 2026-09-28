@@ -22,6 +22,7 @@ import WorkbenchHeader from './components/WorkbenchHeader.jsx';
 import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
+import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
 /**
@@ -48,9 +49,6 @@ import './programador.css';
  * Dibujar cualquiera de los tres ahora sería simular funcionalidad.
  */
 
-// Ventana operativa fija mientras no se decida si es configurable por
-// operación (decisión pendiente 22 del documento de contratos).
-const VENTANA_OPERATIVA = '11:00 — 07:00';
 const OPERACION = 'TP';
 
 const rpcErrorMessage = (payload, fallback) => {
