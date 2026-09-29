@@ -162,6 +162,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   Flota (`_VENCE_EN_PERFIL`, con copia en los dos sentidos como el resto de `_ESPEJO_EN_PERFIL`). El
   servidor también la exige cuando sube el conductor (`_fechas_del_perfil`), no cuando sube Administración,
   que pone la suya en la ficha; y al aprobar a un conductor en una unidad, sus fechas pasan a ella.
+  **Subir un documento ya no manda a la cola de Accesos a un conductor activo**: solo vuelve a «Pendiente
+  Revisión» quien estaba en «Documentos Observados» (le pasó a la K-163 y la K-170 al subirles documentos
+  desde la ficha). La lista de Accesos lleva el `unidad_id` de cada cuenta —sin él, aprobar pedía un padrón en
+  blanco y subir un documento desde ahí no sabía su carpeta—, y un conductor sin unidad recibe lo que sube
+  Administración en su carpeta personal (`_carpeta_para_la_subida`). **Desplegado en producción el
+  2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
