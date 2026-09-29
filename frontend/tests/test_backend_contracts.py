@@ -2121,6 +2121,99 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         _, filas = await self._exportar("MASIVO")
         self.assertEqual(filas[0][7], "CDE-456")
 
+    async def _eliminar_documento(self, campo, borrado_en_bucket=True):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+            patch.object(
+                backend, "delete_document_from_storage", new=AsyncMock(return_value=borrado_en_bucket),
+            ) as borrar,
+        ):
+            respuesta = await backend.eliminar_documento_del_conductor(
+                backend.DocumentoEliminado(conductor="dni-K-027", campo=campo),
+            )
+        guardar.assert_awaited_once()
+        return respuesta, borrar
+
+    async def test_administration_removes_a_wrongly_uploaded_image(self):
+        # Rechazar solo le pide al conductor que lo arregle: el archivo erróneo
+        # se quedaba, y quien da de alta por él no tenía cómo quitarlo.
+        conductor = self._unidad_con_conductor()
+        perfil = conductor["perfil_conductor"]
+        perfil["dniScaneado"] = {"name": "dni.jpg", "path": "K-027/dniScaneado-aaaa1111.jpg"}
+        perfil["dniScaneadoCompleto"] = {"name": "dni.jpg", "path": "K-027/dniScaneadoCompleto-bbbb2222.jpg"}
+        perfil["revision_docs"] = {"dniScaneado": {"estado": "aprobado"}, "soat": {"estado": "aprobado"}}
+
+        respuesta, borrar = await self._eliminar_documento("dniScaneado")
+
+        nuevo = conductor["perfil_conductor"]
+        self.assertIsNone(nuevo["dniScaneado"])
+        self.assertEqual(nuevo["dniScaneadoCompleto"]["path"], "K-027/dniScaneadoCompleto-bbbb2222.jpg",
+                         "solo la cara que se quita")
+        self.assertEqual(nuevo["revision_docs"], {"soat": {"estado": "aprobado"}})
+        borrar.assert_awaited_once_with("K-027/dniScaneado-aaaa1111.jpg")
+        self.assertTrue(respuesta["archivo_borrado"])
+        self.assertEqual(respuesta["perfil_conductor"], nuevo)
+        aviso = backend.notifications_db[-1]
+        self.assertEqual((aviso["campo"], aviso["estado"]), ("dniScaneado", "faltante"))
+        self.assertEqual(backend.actividad_db[-1]["action_type"], "Documento eliminado")
+
+    async def test_removing_a_document_never_erases_someone_elses_file(self):
+        # El perfil lo escribe el conductor: podría apuntar su documento al de
+        # otra unidad, y quitarlo borraría el archivo de otro.
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["cv"] = {"path": "K-142/cv-cccc3333.pdf"}
+        otro = self._unidad_con_conductor("K-050")
+        conductor["perfil_conductor"]["recordConductor"] = {"path": "K-027/recordConductor-dddd4444.pdf"}
+        otro["perfil_conductor"]["recordConductor"] = {"path": "K-027/recordConductor-dddd4444.pdf"}
+        # Empieza por su carpeta, pero sale de ella.
+        conductor["perfil_conductor"]["soat"] = {"path": "K-027/../K-142/soat-ffff6666.pdf"}
+
+        for campo in ("cv", "recordConductor", "soat"):
+            respuesta, borrar = await self._eliminar_documento(campo)
+            self.assertIsNone(conductor["perfil_conductor"][campo], campo)
+            borrar.assert_not_awaited()
+            self.assertFalse(respuesta["archivo_borrado"])
+
+    async def test_removing_a_document_checks_what_it_is_asked(self):
+        conductor = self._unidad_con_conductor()
+        casos = [("revision_docs", 400), ("password", 400), ("dniScaneado", 404)]
+        for campo, estado in casos:
+            with self.assertRaises(HTTPException) as caught:
+                await self._eliminar_documento(campo)
+            self.assertEqual(caught.exception.status_code, estado, campo)
+        backend.usuarios_db["admin@example.com"] = {"identifier": "admin@example.com", "rol": "Administración"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            self.assertRaises(HTTPException) as caught,
+        ):
+            await backend.eliminar_documento_del_conductor(
+                backend.DocumentoEliminado(conductor="admin@example.com", campo="cv"),
+            )
+        self.assertEqual(caught.exception.status_code, 404, "solo cuentas de conductor")
+        self.assertNotIn("dniScaneado", conductor["perfil_conductor"])
+
+    async def test_a_failed_removal_leaves_the_document_where_it_was(self):
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["cv"] = {"path": "K-027/cv-eeee5555.pdf"}
+        antes = copy.deepcopy(conductor)
+        avisos = len(backend.notifications_db)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "persist_users_only",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+            patch.object(backend, "delete_document_from_storage", new=AsyncMock()) as borrar,
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.eliminar_documento_del_conductor(
+                    backend.DocumentoEliminado(conductor="dni-K-027", campo="cv"),
+                )
+        self.assertEqual(conductor, antes)
+        self.assertEqual(len(backend.notifications_db), avisos)
+        borrar.assert_not_awaited()
+
     async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
@@ -3783,6 +3876,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
             ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
             ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
+            ("POST", "/api/admin/driver/documento/eliminar",
+             {"json": {"conductor": "x@k.com", "campo": "dniScaneado"}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),

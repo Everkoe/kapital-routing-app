@@ -1265,6 +1265,10 @@ const FlotaView = ({ usuario, initialBase }) => {
                           perfil_conductor: conDocumentoNuevo(previo.usuario?.perfil_conductor, campo, documento),
                         },
                       }))}
+                      onDocumentoEliminado={(perfil) => setConductorInfo(previo => ({
+                        ...previo,
+                        usuario: { ...previo.usuario, perfil_conductor: perfil },
+                      }))}
                     />
                   </div>
 

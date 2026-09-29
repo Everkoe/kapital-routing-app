@@ -132,6 +132,8 @@ const DocumentReviewCard = ({
               // El visor recibe todas las caras y resuelve dentro cuál mostrar,
               // para no llenar la tarjeta de un botón «Ver» por cara.
               caras: caras.map((cara) => ({
+                // El campo de cada cara, para poder quitar justo la que se mira.
+                campo: cara.campo,
                 nombre: dosCaras ? cara.nombre : null,
                 src: fuenteDeArchivo(cara.archivo),
                 // Los documentos nuevos viven en Storage: el visor pide su URL

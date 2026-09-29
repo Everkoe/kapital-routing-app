@@ -141,6 +141,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   documentos de dos caras **«Completo» va primero** (la gente subía el DNI entero en «Delante») y, con
   él subido, delante y detrás quedan bloqueadas (`caraBloqueada`); pegar o arrastrar va a «Completo»
   salvo que ya se empezara por caras sueltas.
+  **Administración puede quitar un archivo mal subido** (`POST /api/admin/driver/documento/eliminar`, desde
+  el visor de la revisión, por cara): rechazar solo le pide al conductor que lo arregle y el archivo erróneo
+  se quedaba. Deja el campo en `None` —así todo lo lee como «sin subir» y el guardado por diferencias
+  escribe un valor, no un borrado—, quita su revisión y avisa al conductor. El archivo se borra del bucket
+  **solo si está en la carpeta de su unidad y nada más lo señala** (`_archivo_solo_suyo`): la ruta sale del
+  perfil, que escribe el propio conductor, y sin esa comprobación podría apuntar su documento al de otra
+  unidad para que Administración lo borrara.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

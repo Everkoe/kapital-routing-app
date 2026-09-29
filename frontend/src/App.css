@@ -1173,6 +1173,31 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   align-items: center; justify-content: center; transition: all 0.2s;
 }
 .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+/* Quitar un archivo mal subido, desde el visor (solo en la revisión de Administración). */
+.doc-viewer-acciones { display: flex; align-items: center; gap: 8px; }
+.doc-viewer-eliminar,
+.doc-viewer-eliminar-si {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.doc-viewer-eliminar {
+  background: transparent; color: var(--kapital-accent-red);
+  border: 1px solid var(--kapital-accent-red);
+}
+.doc-viewer-eliminar:hover { background: rgba(239,68,68,0.1); }
+.doc-viewer-eliminar-si {
+  background: var(--kapital-accent-red); color: var(--kapital-card-bg, var(--bg));
+  border: 1px solid var(--kapital-accent-red);
+}
+.doc-viewer-eliminar-si:disabled { opacity: 0.6; cursor: wait; }
+.doc-viewer-confirmar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 20px; border-bottom: 1px solid var(--border-color);
+  background: rgba(239,68,68,0.06);
+}
+.doc-viewer-confirmar p { margin: 0; font-size: 0.85rem; color: var(--text-primary); }
+.doc-viewer-confirmar-botones { display: flex; gap: 8px; }
 .doc-viewer-body {
   padding: 0; background: var(--kapital-bg, #e2e8f0); display: flex; align-items: center; justify-content: center;
   height: 80vh; max-height: 800px;

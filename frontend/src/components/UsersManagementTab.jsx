@@ -432,6 +432,10 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                     perfil_conductor: conDocumentoNuevo(previo.user.perfil_conductor, campo, documento),
                   },
                 }))}
+                onDocumentoEliminado={(perfil) => setDriverModal(previo => ({
+                  ...previo,
+                  user: { ...previo.user, perfil_conductor: perfil },
+                }))}
               />
             </div>
 
