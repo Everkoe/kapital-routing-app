@@ -5,6 +5,8 @@
  * modal, que es donde antes vivían mezcladas con el `onChange` de cada campo.
  */
 
+import { esDeMasivo } from '../utils/filaDeLaBase.js';
+
 export const TIPOS_DE_UNIDAD = ['AUTO', 'SUV', 'VAN', 'MINIVAN', 'CAMIONETA'];
 
 /**
@@ -60,6 +62,14 @@ export const erroresDeUnidad = (datos) => {
   if (!limpio(datos.padron)) errores.padron = 'El padrón es obligatorio.';
   if (!limpio(datos.placa)) errores.placa = 'La placa del vehículo es obligatoria.';
   if (!limpio(datos.chofer)) errores.chofer = 'El nombre del conductor es obligatorio.';
+
+  // Sin base, la unidad no salía en el Excel de ninguna; en masivo, además, el
+  // grupo dice a qué cliente sirve.
+  if (!limpio(datos.base)) {
+    errores.base = 'Elige la base de la unidad.';
+  } else if (esDeMasivo(datos.base) && !limpio(datos.grupo)) {
+    errores.grupo = 'Elige a qué cliente sirve.';
+  }
 
   if (!limpio(datos.capacidad)) {
     errores.capacidad = 'Indica cuántos pasajeros caben.';

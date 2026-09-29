@@ -13,7 +13,7 @@ import {
 
 /** Un alta mínima que debe poder registrarse. */
 const altaValida = () => ({
-  padron: 'K-500', placa: 'ABC-123', chofer: 'JUAN PEREZ',
+  padron: 'K-500', placa: 'ABC-123', chofer: 'JUAN PEREZ', base: 'MASIVO', grupo: 'TP',
   telefono: '987654321', tipo: 'AUTO', capacidad: '4',
   dni: '45757485', password: 'kapital1',
 });
@@ -24,6 +24,13 @@ test('padrón y placa son campos distintos y los dos obligatorios', () => {
   assert.deepEqual(erroresDeUnidad(altaValida()), {});
   assert.ok(erroresDeUnidad({ ...altaValida(), padron: '' }).padron);
   assert.ok(erroresDeUnidad({ ...altaValida(), placa: '' }).placa);
+});
+
+test('la base es obligatoria, y en masivo también a qué cliente sirve', () => {
+  // Sin base, una unidad dada de alta en la página no salía en ningún Excel.
+  assert.ok(erroresDeUnidad({ ...altaValida(), base: '' }).base);
+  assert.ok(erroresDeUnidad({ ...altaValida(), grupo: '' }).grupo);
+  assert.deepEqual(erroresDeUnidad({ ...altaValida(), base: 'REMISSE', grupo: '' }), {});
 });
 
 test('el padrón y la placa se guardan en mayúsculas y sin espacios', () => {

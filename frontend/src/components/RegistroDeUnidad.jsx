@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import TarjetaDocumentoUnidad from './TarjetaDocumentoUnidad';
 import { apiFetch } from '../utils/apiClient';
 import { subirDocumento } from '../utils/documentoStorage';
+import { BASES, GRUPOS_DE_MASIVO, esDeMasivo } from '../utils/filaDeLaBase';
 import {
   CAPACIDAD_SUGERIDA,
   DOCUMENTOS_DE_UNIDAD,
@@ -26,7 +27,7 @@ import {
  */
 
 const DATOS_VACIOS = {
-  padron: '', placa: '', chofer: '', dni: '', telefono: '', password: '',
+  padron: '', placa: '', chofer: '', base: '', grupo: '', dni: '', telefono: '', password: '',
   tipo: TIPOS_DE_UNIDAD[0], capacidad: '',
 };
 
@@ -103,6 +104,8 @@ const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
   const cambia = (campo) => (evento) => {
     const valor = evento.target.value;
     setDatos(previo => {
+      // El grupo se elige dentro de la base: al cambiarla deja de valer.
+      if (campo === 'base') return { ...previo, base: valor, grupo: '' };
       if (campo !== 'tipo') return { ...previo, [campo]: valor };
       // Cambiar de tipo propone su capacidad habitual, pero no pisa la que ya
       // haya escrito el administrador.
@@ -143,6 +146,9 @@ const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
           padron,
           placa: normalizarCodigo(datos.placa),
           chofer: datos.chofer.trim(),
+          base: datos.base,
+          // En Remisse y en Sharf el grupo es la propia base: lo pone el servidor.
+          grupo: esDeMasivo(datos.base) ? datos.grupo : undefined,
           telefono: datos.telefono.trim(),
           dni: datos.dni.trim(),
           password: datos.password,
@@ -210,6 +216,32 @@ const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
     );
   };
 
+  const selector = (nombre, etiqueta, opciones) => {
+    const id = `unidad-${nombre}`;
+    const idError = errores[nombre] ? `${id}-error` : undefined;
+    return (
+      <div className="unidad-campo-alta">
+        <label htmlFor={id}>
+          {etiqueta}
+          <span className="unidad-obligatorio"> (obligatorio)</span>
+        </label>
+        <select
+          id={id}
+          value={datos[nombre]}
+          onChange={cambia(nombre)}
+          disabled={guardando}
+          aria-invalid={Boolean(errores[nombre])}
+          aria-describedby={idError}
+          className={errores[nombre] ? 'campo-pendiente' : undefined}
+        >
+          <option value="">Elegir…</option>
+          {opciones.map(opcion => <option key={opcion}>{opcion}</option>)}
+        </select>
+        {errores[nombre] && <small className="campo-aviso" id={idError} role="alert">{errores[nombre]}</small>}
+      </div>
+    );
+  };
+
   return (
     <div className="unidad-alta-fondo" onClick={intentarCerrar}>
       <div
@@ -237,6 +269,9 @@ const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
               {campo('padron', 'Padrón', { placeholder: 'Ej. K-027', obligatorio: true })}
               {campo('placa', 'Placa del vehículo', { placeholder: 'Ej. BUR-628', obligatorio: true })}
               {campo('chofer', 'Nombre del conductor', { placeholder: 'Nombre completo', obligatorio: true })}
+
+              {selector('base', 'Base', BASES)}
+              {esDeMasivo(datos.base) && selector('grupo', 'Cliente (grupo)', GRUPOS_DE_MASIVO)}
 
               <div className="unidad-campo-alta">
                 <label htmlFor="unidad-tipo">Tipo de vehículo</label>

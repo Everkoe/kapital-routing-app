@@ -27,7 +27,7 @@ import os
 import io
 import threading
 import time
-from copy import copy as _copy_style
+from copy import copy as _copy_style, deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
@@ -40,6 +40,8 @@ import uuid
 from dotenv import load_dotenv
 from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
 load_dotenv()
 
@@ -2958,15 +2960,19 @@ def _formas_de_identificador(texto: Any) -> List[str]:
     """
     limpio = str(texto or "").strip().lower()
     formas = [limpio] if limpio else []
-    parece_dni = (
-        limpio.isascii() and limpio.isdigit() and len(limpio) <= LARGO_DNI
-        and len(limpio.lstrip("0")) >= MINIMO_DNI_SIN_CEROS
-    )
-    if parece_dni:
+    if _parece_dni(limpio):
         for otra in (limpio.lstrip("0"), limpio.zfill(LARGO_DNI)):
             if otra not in formas:
                 formas.append(otra)
     return formas
+
+
+def _parece_dni(texto: str) -> bool:
+    """Si son las cifras de un DNI, con sus ceros de delante o sin ellos."""
+    return (
+        texto.isascii() and texto.isdigit() and len(texto) <= LARGO_DNI
+        and len(texto.lstrip("0")) >= MINIMO_DNI_SIN_CEROS
+    )
 
 
 def _unica(candidatas: List[Any]) -> Any:
@@ -3603,6 +3609,10 @@ class FlotaRegistro(BaseModel):
     revision_doc: Optional[str] = None
     atu_doc: Optional[str] = None
     licencia_doc: Optional[str] = None
+    # A qué base pertenece y, en masivo, a qué cliente sirve. Sin base una
+    # unidad dada de alta en la página no salía en el Excel de ninguna.
+    base: Optional[str] = None
+    grupo: Optional[str] = None
 
 
 class FlotaUpdate(BaseModel):
@@ -3621,6 +3631,18 @@ class FlotaUpdate(BaseModel):
     revision: Optional[str] = None
     atu: Optional[str] = None
     licencia: Optional[str] = None
+    # El resto de columnas de la base, para que se edite todo desde la página y
+    # la exportación lo recoja. Las del vehículo son de la unidad; dirección y
+    # nacimiento, de la cuenta de su conductor. El DNI no está: es con lo que
+    # el conductor entra, y cambiarlo no es corregir un dato de la base.
+    base: Optional[str] = None
+    marca: Optional[str] = None
+    modelo: Optional[str] = None
+    ano: Optional[str] = None
+    color: Optional[str] = None
+    grupo: Optional[str] = None
+    direccion: Optional[str] = None
+    fecha_nacimiento: Optional[str] = None
 
 class ChatMessagePayload(BaseModel):
     role: str
@@ -3691,6 +3713,10 @@ def _sembrar_unidad(unidad_id: str, usuario: Dict[str, Any]) -> None:
     alta, así que quedan vacíos y la flota los muestra como pendientes, que es
     lo que son. Los campos que ya tengan valor no se tocan: la unidad puede
     existir porque Administración la creó antes a mano.
+
+    El teléfono es la excepción: es el de contacto de quien maneja la unidad, y
+    en una unidad que cambia de conductor se quedaba el del anterior, que es el
+    que manda en la ficha y en el Excel.
     """
     if not unidad_id:
         return
@@ -3711,7 +3737,7 @@ def _sembrar_unidad(unidad_id: str, usuario: Dict[str, Any]) -> None:
 
     unidad = conductores_db.setdefault(unidad_id, {})
     for campo, valor in declarado.items():
-        if not str(unidad.get(campo) or "").strip():
+        if campo == "telefono" or not str(unidad.get(campo) or "").strip():
             unidad[campo] = valor
 
 
@@ -4268,6 +4294,14 @@ _ETIQUETA_FLOTA = {
     "soat": "Vencimiento SOAT",
     "revision": "Vencimiento revisión técnica",
     "licencia": "Vencimiento licencia MTC",
+    "marca": "Marca",
+    "modelo": "Modelo",
+    "ano": "Año",
+    "color": "Color",
+    "grupo": "Grupo",
+    "base": "Base",
+    "direccion": "Dirección",
+    "fecha_nacimiento": "Fecha de nacimiento",
 }
 
 _actividad_cache_loaded_at: Optional[float] = None
@@ -5470,9 +5504,23 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
         raise HTTPException(status_code=400, detail="Solicitud no encontrada o ya resuelta")
         
     new_value = solicitudes[payload.field]["new_value"]
-    
+    unidad_actualizada = None
+    if payload.action == "approve":
+        new_value = _valor_aprobable(payload.field, new_value)
+    # Si el guardado falla, nada de lo aprobado se queda en memoria: el
+    # siguiente guardado de esta instancia lo escribiría sin que nadie lo viera.
+    unidad_id = conductor.get("unidad_id")
+    antes = (
+        deepcopy(conductor.get("perfil_conductor")), deepcopy(conductor.get("notificaciones")),
+        {k: conductor[k] for k in ("celular", "telefono") if k in conductor},
+        dict(conductores_db[unidad_id]) if unidad_id in conductores_db else None,
+    )
+
     if payload.action == "approve":
         conductor["perfil_conductor"][payload.field] = new_value
+        # El teléfono, la placa y los datos del vehículo tienen copia en la
+        # unidad, que es la que manda en la ficha y en el Excel.
+        unidad_actualizada = _llevar_a_la_unidad(conductor, payload.field, new_value)
         solicitudes[payload.field]["status"] = "aprobado"
         msg = f"Tu solicitud para actualizar '{payload.field}' ha sido aprobada."
     else:
@@ -5495,19 +5543,112 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
         conductor["notificaciones"] = []
     conductor["notificaciones"].insert(0, notif_obj)
     
+    try:
+        await persist_users_only()
+    except EscrituraSinDeshacer:
+        raise
+    except Exception:
+        perfil_antes, avisos_antes, telefonos_antes, unidad_antes = antes
+        conductor["perfil_conductor"] = perfil_antes
+        if avisos_antes is None:
+            conductor.pop("notificaciones", None)
+        else:
+            conductor["notificaciones"] = avisos_antes
+        conductor.update(telefonos_antes)
+        if unidad_antes is not None:
+            conductores_db[unidad_id] = unidad_antes
+        raise
     await ws_manager.send(payload.conductor_email, {"type": "NEW_NOTIFICATION", "notification": notif_obj})
-    await persist_users_only()
-    
-    return {"status": "ok", "action": payload.action, "conductor": conductor}
+
+    return {"status": "ok", "action": payload.action, "conductor": conductor, "unidad": unidad_actualizada}
 
 # --- Lógica de Negocio y Endpoints de Rutas ---
 
 
+# --- La fila de la base: una unidad y su conductor ---
+#
+# Cada fila de las bases (masivo, Remisse, Sharf) es una unidad y quien la
+# maneja, y la importación repartió esos datos en dos sitios: la unidad en
+# `__flota__` y la persona en su cuenta. Unos cuantos quedaron en los dos —el
+# teléfono, la placa, la marca…— y cada pantalla leía uno distinto: la ficha
+# enseñaba el teléfono de la unidad y el Excel el del perfil, así que un
+# teléfono cambiado en la página salía viejo al exportar. Ahora para esos campos
+# manda la unidad, en todas partes, y guardarlos —desde la ficha o aprobando lo
+# que pidió el conductor— escribe los dos a la vez.
+
+# Campo de la unidad → su copia en el perfil del conductor.
+_ESPEJO_EN_PERFIL = {
+    "telefono": "telefonoDirecto",
+    "placa": "placa",
+    "marca": "vehiculoMarca",
+    "modelo": "vehiculoModelo",
+    "ano": "vehiculoAnio",
+    "color": "vehiculoColor",
+}
+# Al revés, para aprobar lo que pide el conductor desde su perfil. La capacidad
+# no está a propósito: la que declara el conductor no es la que usa el ruteo.
+_ESPEJO_EN_UNIDAD = {perfil: unidad for unidad, perfil in _ESPEJO_EN_PERFIL.items()}
+
+# Lo que solo vive en la cuenta del conductor: nombre en la petición → perfil.
+_CAMPOS_PERSONALES = {"direccion": "direccion", "fecha_nacimiento": "fechaNacimiento"}
+
+
+def _conductores_por_unidad() -> Dict[str, Dict[str, Any]]:
+    """Cada unidad con la cuenta de su conductor, la misma que enseña su ficha.
+
+    Si dos cuentas dijeran la misma unidad gana la primera, como en
+    `get_conductor_info`: la ficha, la tabla y el Excel tienen que hablar de la
+    misma persona.
+    """
+    indice: Dict[str, Dict[str, Any]] = {}
+    for clave, usuario in usuarios_db.items():
+        if (isinstance(usuario, dict) and not str(clave).startswith("__")
+                and usuario.get("rol") == "Conductor" and usuario.get("unidad_id")):
+            indice.setdefault(usuario["unidad_id"], usuario)
+    return indice
+
+
+def _perfil_de(conductor: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    perfil = (conductor or {}).get("perfil_conductor")
+    return perfil if isinstance(perfil, dict) else {}
+
+
+def _texto(valor: Any) -> str:
+    return str(valor if valor is not None else "").strip()
+
+
+def _valor_de_unidad(
+    unidad: Dict[str, Any], conductor: Optional[Dict[str, Any]], campo: str, padron: str = ""
+) -> str:
+    """Un campo con copia en el perfil: el de la unidad y, si no lo tiene, el del perfil.
+
+    Una placa igual al padrón no cuenta: el formulario de alta antiguo mandaba
+    el padrón en el campo de la placa, y esas unidades tienen la de verdad en
+    el perfil de su conductor.
+    """
+    propio = _texto(unidad.get(campo))
+    if campo == "placa" and propio and propio.upper() == _texto(padron or unidad.get("unidad_id")).upper():
+        propio = ""
+    return propio or _texto(_perfil_de(conductor).get(_ESPEJO_EN_PERFIL[campo]))
+
+
+def _telefono_de_unidad(unidad: Dict[str, Any], conductor: Optional[Dict[str, Any]]) -> str:
+    """El teléfono de contacto, en el mismo orden que `telefonoDeUnidad` del frontend."""
+    return _valor_de_unidad(unidad, conductor, "telefono") or _texto((conductor or {}).get("celular"))
+
+
+def _tiene_solicitudes_pendientes(perfil: Dict[str, Any]) -> bool:
+    solicitudes = perfil.get("solicitudes_cambio")
+    return isinstance(solicitudes, dict) and any(
+        isinstance(v, dict) and v.get("status") == "pendiente" for v in solicitudes.values()
+    )
+
+
 @app.get("/api/flota")
 async def get_flota_status(session_token: SessionCookie = None):
-    # La respuesta enriquece cada unidad con datos personales del conductor
-    # —DNI, dirección, fecha de nacimiento, celular— para la exportación al
-    # formato oficial. Servía todo eso sin pedir sesión: bastaba conocer la URL.
+    # Servía a cualquier rol el DNI, la dirección y el nacimiento de cada
+    # conductor para una exportación que se hacía en el navegador. Ahora la hace
+    # el servidor (`/api/flota/export`, solo Administración) y ya no se mandan.
     await require_any_session(session_token)
     if _is_compat_storage() and not _full_cache_is_fresh():
         # Fleet is already materialized under the reserved compatibility key;
@@ -5517,45 +5658,11 @@ async def get_flota_status(session_token: SessionCookie = None):
         await _load_compat_fleet()
     else:
         await reload_db()
-    # Índice inverso: unidad_id (padrón K-027) -> usuario con perfil_conductor.
-    # Permite enriquecer cada unidad con datos personales (direccion, DNI, fecha
-    # de nacimiento, celular) necesarios para la exportación al formato oficial
-    # BASE MASIVO / BASE REMISSE.
-    perfil_por_unidad: Dict[str, Dict[str, Any]] = {}
-    for _email, u in usuarios_db.items():
-        if not isinstance(u, dict):
-            continue
-        uid = u.get("unidad_id")
-        if uid and isinstance(u.get("perfil_conductor"), dict):
-            perfil_por_unidad[uid] = u
-
+    conductores = _conductores_por_unidad()
     flota_list = []
     for unidad_id, data in conductores_db.items():
-        has_pending_requests = False
-        real_placa = data.get("placa")
-
-        user = perfil_por_unidad.get(unidad_id)
-        perfil = user.get("perfil_conductor", {}) if user else {}
-
-        if perfil:
-            if perfil.get("placa"):
-                real_placa = perfil.get("placa")
-            solicitudes = perfil.get("solicitudes_cambio", {}) or {}
-            for _k, v in solicitudes.items():
-                if isinstance(v, dict) and v.get("status") == "pendiente":
-                    has_pending_requests = True
-                    break
-
-        direccion = perfil.get("direccion", "") or ""
-        dni = perfil.get("numDoc", "") or ""
-        fecha_nacimiento = perfil.get("fechaNacimiento", "") or ""
-        celular = (
-            perfil.get("telefonoDirecto")
-            or (user.get("celular") if user else None)
-            or data.get("telefono", "")
-            or ""
-        )
-
+        user = conductores.get(unidad_id)
+        perfil = _perfil_de(user)
         flota_list.append({
             **data,
             # The app_state object key is the immutable fleet identity (padrón)
@@ -5563,155 +5670,226 @@ async def get_flota_status(session_token: SessionCookie = None):
             # overwrite it in the serialized response.
             "placa": unidad_id,
             "unidad_id": unidad_id,
-            "real_placa": real_placa or unidad_id,
-            "has_pending_requests": has_pending_requests,
-            "direccion": direccion,
-            "dni": dni,
-            "fecha_nacimiento": fecha_nacimiento,
-            "celular": celular,
+            "real_placa": _valor_de_unidad(data, user, "placa", unidad_id) or unidad_id,
+            "has_pending_requests": _tiene_solicitudes_pendientes(perfil),
+            "celular": _telefono_de_unidad(data, user),
         })
     return {"flota": flota_list}
 
 
-# --- Exportación oficial de flota (usa plantillas xlsx originales para
-# preservar cabecera, colores por GRUPO, ancho de columna y estilos) ---
+# --- Exportación de las bases: las plantillas xlsx originales, para conservar
+# cabecera, colores por GRUPO, ancho de columna y estilos, rellenas con lo que
+# hay hoy en la página ---
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-_TEMPLATE_FILES = {
-    "MASIVO": "base_masivo.xlsx",
-    "REMISSE": "base_remisse.xlsx",
+# Plantilla y nombre del archivo de cada exportación. Sharf no tiene plantilla
+# propia: su base usa las mismas quince columnas que la de masivo.
+_EXPORTACIONES = {
+    "MASIVO": ("base_masivo.xlsx", "BASE MASIVO 2026.xlsx"),
+    "REMISSE": ("base_remisse.xlsx", "BASE REMISSE 2026.xlsx"),
+    "SHARF": ("base_masivo.xlsx", "BASE SHARF MOTORIZADO 2026.xlsx"),
+    "TODAS": ("base_masivo.xlsx", "BASE FLOTA 2026.xlsx"),
 }
-_grupo_por_padron_cache: Optional[Dict[str, str]] = None
+# El orden de las bases en «Todas», el del filtro de la pantalla. Una unidad
+# sin base va al final.
+_ORDEN_DE_BASES = ("MASIVO", "REMISSE", "SHARF")
+_COLUMNA_GRUPO = 15
+# La cabecera queda fija al bajar, y el nombre del conductor al ir a la derecha.
+_CELDA_FIJA = "C2"
+# Anchos a la medida del contenido, sin que una dirección larga ocupe la pantalla.
+_ANCHO_MINIMO, _ANCHO_MAXIMO = 8, 55
+# Lo que ocupa la flecha del filtro en la cabecera, para que no tape el título.
+_HUECO_DEL_FILTRO = 4
+_rellenos_de_grupo_cache: Optional[Dict[str, Any]] = None
 
 
-def _leer_grupo_por_padron() -> Dict[str, str]:
-    """Extrae el mapa padrón -> GRUPO desde AMBAS plantillas (source of truth)."""
-    result: Dict[str, str] = {}
-    for fname in _TEMPLATE_FILES.values():
-        path = os.path.join(TEMPLATES_DIR, fname)
-        if not os.path.exists(path):
+def _rellenos_de_grupo() -> Dict[str, Any]:
+    """El color de cada GRUPO en las plantillas (TP, KONECTA… y REMISSE).
+
+    Se leen de las dos porque «Todas» usa la de masivo y el color de Remisse
+    solo está en la suya. Se copia el relleno y no el estilo: el estilo es un
+    índice dentro de su propio libro y en otro apuntaría a otra cosa.
+    """
+    global _rellenos_de_grupo_cache
+    if _rellenos_de_grupo_cache is None:
+        rellenos: Dict[str, Any] = {}
+        for plantilla in sorted({p for p, _ in _EXPORTACIONES.values()}):
+            ws = load_workbook(os.path.join(TEMPLATES_DIR, plantilla)).active
+            for r in range(2, ws.max_row + 1):
+                celda = ws.cell(r, _COLUMNA_GRUPO)
+                grupo = _texto(celda.value)
+                if grupo:
+                    rellenos.setdefault(grupo, _copy_style(celda.fill))
+        _rellenos_de_grupo_cache = rellenos
+    return _rellenos_de_grupo_cache
+
+
+def _orden_natural(texto: str) -> tuple:
+    """K-27 antes que K-142: las cifras se comparan como números."""
+    return tuple(
+        (0, int(parte), "") if parte.isdigit() else (1, 0, parte.lower())
+        for parte in re.split(r"(\d+)", str(texto)) if parte
+    )
+
+
+def _orden_de_exportacion(item: tuple) -> tuple:
+    unidad_id, unidad = item
+    base = _texto(unidad.get("base")).upper()
+    posicion = next(
+        (i for i, nombre in enumerate(_ORDEN_DE_BASES) if nombre in base), len(_ORDEN_DE_BASES)
+    )
+    return (posicion, _orden_natural(unidad_id))
+
+
+def _como_numero(valor: Any) -> Any:
+    """Un número como número, igual que en la base original; lo demás, como texto.
+
+    Guardados como texto, Excel los marca como «número almacenado como texto».
+    Con un cero delante se quedan en texto, porque `int` se lo comería.
+    """
+    if isinstance(valor, int) and not isinstance(valor, bool):
+        return valor
+    texto = _texto(valor)
+    if texto.isascii() and texto.isdigit() and (texto == "0" or not texto.startswith("0")):
+        return int(texto)
+    return texto
+
+
+def _como_fecha(valor: Any) -> Any:
+    """Una fecha de Excel (la plantilla la pinta d/m/aaaa); si no se entiende, el texto tal cual."""
+    texto = _texto(valor)
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
             continue
-        wb = load_workbook(path, data_only=True)
-        ws = wb.active
-        for r in range(2, ws.max_row + 1):
-            padron = ws.cell(r, 7).value
-            grupo = ws.cell(r, 15).value
-            if padron:
-                result[str(padron).strip()] = (str(grupo).strip() if grupo else "")
-    return result
+    return texto
 
 
-def _get_grupo_por_padron() -> Dict[str, str]:
-    global _grupo_por_padron_cache
-    if _grupo_por_padron_cache is None:
-        _grupo_por_padron_cache = _leer_grupo_por_padron()
-    return _grupo_por_padron_cache
+def _documento_completo(conductor: Optional[Dict[str, Any]]) -> str:
+    """El DNI con sus ocho cifras: la importación les quitó el cero a 25.
+
+    Las cuentas creadas con su unidad desde la página lo tienen en la cuenta, no
+    en el perfil, que no existe hasta que el conductor completa su alta.
+    """
+    perfil = _perfil_de(conductor)
+    numero = _texto(perfil.get("numDoc")) or _texto((conductor or {}).get("dni"))
+    tipo = _texto(perfil.get("tipoDoc") or "DNI").upper()
+    return numero.zfill(LARGO_DNI) if tipo == "DNI" and _parece_dni(numero) else numero
+
+
+def _fila_de_la_base(
+    unidad_id: str, unidad: Dict[str, Any], conductor: Optional[Dict[str, Any]]
+) -> List[Any]:
+    """Las quince columnas de la base, con lo mismo que enseña la ficha."""
+    perfil = _perfil_de(conductor)
+
+    def en_mayusculas(campo: str) -> str:
+        return _valor_de_unidad(unidad, conductor, campo, unidad_id).upper()
+
+    return [
+        _texto(unidad.get("base")).upper(),
+        _texto(unidad.get("chofer")) or _texto((conductor or {}).get("nombre")),
+        _texto(perfil.get("direccion")),
+        _documento_completo(conductor),
+        _como_fecha(perfil.get("fechaNacimiento")),
+        _como_numero(_telefono_de_unidad(unidad, conductor)),
+        unidad_id,
+        en_mayusculas("placa"),
+        _texto(unidad.get("tipo")).upper(),
+        _como_numero(unidad.get("capacidad")),
+        en_mayusculas("marca"),
+        en_mayusculas("modelo"),
+        _como_numero(_valor_de_unidad(unidad, conductor, "ano", unidad_id)),
+        en_mayusculas("color"),
+        _texto(unidad.get("grupo")).upper(),
+    ]
+
+
+def _ajustar_anchos(ws: Any, filas: List[List[Any]]) -> None:
+    """Cada columna tan ancha como su texto más largo, cabecera y filtro incluidos.
+
+    Los de la plantilla eran de sus datos de ejemplo, y dejaban cortados títulos
+    como «FECHA DE NACIMIENTO» o «TIPO DE VEHÍCULO».
+    """
+    for c in range(1, _COLUMNA_GRUPO + 1):
+        cabecera = len(_texto(ws.cell(1, c).value)) + _HUECO_DEL_FILTRO
+        # Una fecha se ve como 26/05/1989: diez caracteres, como su texto ISO.
+        contenido = max((len(_texto(fila[c - 1])) for fila in filas), default=0) + 2
+        ancho = min(max(cabecera, contenido, _ANCHO_MINIMO), _ANCHO_MAXIMO)
+        ws.column_dimensions[get_column_letter(c)].width = ancho
+
+
+def _rellenar_plantilla(ruta: str, filas: List[List[Any]]) -> io.BytesIO:
+    """La plantilla con sus filas de ejemplo sustituidas por `filas`, con los mismos estilos."""
+    wb = load_workbook(ruta)
+    ws = wb.active
+    estilo_de_columna = {c: _copy_style(ws.cell(2, c)._style) for c in range(1, _COLUMNA_GRUPO + 1)}
+    # El color del GRUPO depende de su valor; el que no tiene color propio
+    # (Sharf, o sin grupo) va sin relleno, no con el de TP de la fila de ejemplo.
+    rellenos = _rellenos_de_grupo()
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+    for r, valores in enumerate(filas, start=2):
+        for c, valor in enumerate(valores, start=1):
+            celda = ws.cell(r, c, value=valor)
+            # Lo escrito que empieza por «=» openpyxl lo guarda como fórmula, y
+            # buena parte de estos datos los teclea el propio conductor: va como
+            # texto para que el Excel no ejecute nada al abrirse.
+            if isinstance(valor, str) and valor.startswith("="):
+                celda.data_type = "s"
+            celda._style = _copy_style(estilo_de_columna[c])
+            if c == _COLUMNA_GRUPO:
+                relleno = rellenos.get(_texto(valor))
+                celda.fill = _copy_style(relleno) if relleno else PatternFill(fill_type=None)
+    # Filtros en la cabecera: con 126 unidades, buscar por grupo, tipo o marca
+    # sin ellos era ir fila por fila.
+    ws.auto_filter.ref = f"A1:{get_column_letter(_COLUMNA_GRUPO)}{len(filas) + 1}"
+    ws.freeze_panes = _CELDA_FIJA
+    _ajustar_anchos(ws, filas)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 
 @app.get("/api/flota/export")
 async def export_flota(base: str = "MASIVO", session_token: SessionCookie = None):
-    """Genera un .xlsx idéntico al template BASE MASIVO 2026 / BASE REMISSE 2026,
-    rellenando cada fila con los datos actuales de Supabase. Preserva encabezados,
-    colores del GRUPO (TP/KONECTA/TP-KONECTA/REMISSE) y anchos de columna.
+    """La base en su formato original, con lo que hay hoy en la página.
 
-    base = MASIVO | REMISSE | TODAS
+    Cada fila sale de lo mismo que enseña la ficha (`_fila_de_la_base`), por
+    base y, dentro de cada una, por padrón. Las fechas, el celular, la capacidad
+    y el año van como fecha y número, igual que en la base que se importó.
+
+    base = MASIVO | REMISSE | SHARF | TODAS
     """
     # Es la flota entera con los datos de cada conductor: solo Administración.
     await require_admin_session(session_token)
     base_key = (base or "MASIVO").upper().strip()
-    if base_key not in ("MASIVO", "REMISSE", "TODAS"):
-        raise HTTPException(status_code=400, detail="base debe ser MASIVO, REMISSE o TODAS")
+    if base_key not in _EXPORTACIONES:
+        raise HTTPException(status_code=400, detail="base debe ser MASIVO, REMISSE, SHARF o TODAS")
 
-    await reload_db()
+    # Lectura fresca: con la copia de hasta 45 s de otra instancia, lo recién
+    # guardado en la ficha podía no salir todavía en el Excel.
+    await reload_db(force=True)
 
-    # Índice usuario por unidad (mismo criterio que /api/flota)
-    perfil_por_unidad: Dict[str, Dict[str, Any]] = {}
-    for _email, u in usuarios_db.items():
-        if isinstance(u, dict) and u.get("unidad_id") and isinstance(u.get("perfil_conductor"), dict):
-            perfil_por_unidad[u["unidad_id"]] = u
-
-    def _incluye(unidad_base: str) -> bool:
-        b = (unidad_base or "").upper()
-        if base_key == "TODAS":
-            return True
-        return base_key in b
+    plantilla, filename = _EXPORTACIONES[base_key]
+    template_path = os.path.join(TEMPLATES_DIR, plantilla)
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=500, detail=f"Template no encontrado: {plantilla}")
 
     unidades = sorted(
-        [(uid, d) for uid, d in conductores_db.items() if _incluye(d.get("base", ""))],
-        key=lambda x: x[0],
+        (
+            (uid, d) for uid, d in conductores_db.items()
+            if isinstance(d, dict)
+            and (base_key == "TODAS" or base_key in _texto(d.get("base")).upper())
+        ),
+        key=_orden_de_exportacion,
     )
-
-    template_file = _TEMPLATE_FILES["REMISSE"] if base_key == "REMISSE" else _TEMPLATE_FILES["MASIVO"]
-    template_path = os.path.join(TEMPLATES_DIR, template_file)
-    if not os.path.exists(template_path):
-        raise HTTPException(status_code=500, detail=f"Template no encontrado: {template_file}")
-
-    wb = load_workbook(template_path)
-    ws = wb.active
-
-    # Captura estilos de la fila 2 (para nuevas unidades) y estilo por valor de GRUPO
-    base_row_styles = {c: _copy_style(ws.cell(2, c)._style) for c in range(1, 16)}
-    grupo_style_by_value: Dict[str, Any] = {}
-    for r in range(2, ws.max_row + 1):
-        g = ws.cell(r, 15).value
-        if g:
-            key = str(g).strip()
-            if key not in grupo_style_by_value:
-                grupo_style_by_value[key] = _copy_style(ws.cell(r, 15)._style)
-
-    # Limpia todas las filas de datos, conserva header
-    if ws.max_row >= 2:
-        ws.delete_rows(2, ws.max_row - 1)
-
-    grupo_map = _get_grupo_por_padron()
-
-    for i, (uid, data) in enumerate(unidades, start=2):
-        user = perfil_por_unidad.get(uid)
-        perfil = user.get("perfil_conductor", {}) if user else {}
-
-        base_val = (data.get("base") or "").upper()
-        celular = (
-            perfil.get("telefonoDirecto")
-            or (user.get("celular") if user else None)
-            or data.get("telefono")
-            or ""
-        )
-        grupo = grupo_map.get(uid, "")
-
-        values = [
-            base_val,
-            data.get("chofer") or "",
-            perfil.get("direccion") or "",
-            perfil.get("numDoc") or "",
-            perfil.get("fechaNacimiento") or "",
-            celular,
-            uid,
-            data.get("placa") or "",
-            (data.get("tipo") or "").upper(),
-            data.get("capacidad") or "",
-            (data.get("marca") or "").upper(),
-            (data.get("modelo") or "").upper(),
-            data.get("ano") or "",
-            (data.get("color") or "").upper(),
-            grupo,
-        ]
-
-        for c, val in enumerate(values, start=1):
-            cell = ws.cell(i, c, value=val)
-            cell._style = _copy_style(base_row_styles[c])
-            if c == 15 and grupo and grupo in grupo_style_by_value:
-                cell._style = _copy_style(grupo_style_by_value[grupo])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    filename_map = {
-        "MASIVO": "BASE MASIVO 2026.xlsx",
-        "REMISSE": "BASE REMISSE 2026.xlsx",
-        "TODAS": "BASE FLOTA 2026.xlsx",
-    }
-    filename = filename_map[base_key]
+    conductores = _conductores_por_unidad()
+    buf = _rellenar_plantilla(
+        template_path, [_fila_de_la_base(uid, d, conductores.get(uid)) for uid, d in unidades]
+    )
     headers = {
         "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
     }
@@ -6941,6 +7119,10 @@ async def get_conductor_info(unidad_id: str, session_token: SessionCookie = None
             "nombre": conductor_user.get("nombre") if conductor_user else flota_info.get("chofer", "Desconocido"),
             "email": conductor_user.get("email") if conductor_user else "",
             "identifier": conductor_user.get("identifier") if conductor_user else "",
+            # Las cuentas creadas con su unidad lo llevan aquí y no en el perfil.
+            "dni": conductor_user.get("dni") if conductor_user else "",
+            # El último respaldo del teléfono, el mismo que usa la exportación.
+            "celular": (conductor_user.get("celular") or conductor_user.get("telefono") or "") if conductor_user else "",
             "avatar": conductor_user.get("avatar") if conductor_user else None,
             "perfil_conductor": conductor_user.get("perfil_conductor") if conductor_user else None
         },
@@ -6963,29 +7145,168 @@ def _model_changes(model: BaseModel) -> Dict[str, Any]:
     return model.dict(exclude_unset=True)
 
 
+def _fecha_iso(value: Any, field: str) -> str:
+    """An optional canonical ISO date (``""`` when empty), or 400."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
+    candidate = value.strip()
+    try:
+        parsed = datetime.strptime(candidate, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.") from exc
+    # strptime accepts some non-zero-padded variants; require a canonical
+    # round-trip so every consumer derives status from one stable shape.
+    if parsed.strftime("%Y-%m-%d") != candidate:
+        raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
+    return candidate
+
+
 def _normalize_fleet_expiries(values: Dict[str, Any]) -> Dict[str, Any]:
     """Validate canonical optional ISO dates; status labels are never stored."""
     normalized = dict(values)
     for field in _FLEET_EXPIRY_FIELDS:
-        if field not in normalized:
-            continue
-        value = normalized[field]
-        if value is None or (isinstance(value, str) and not value.strip()):
-            normalized[field] = ""
-            continue
-        if not isinstance(value, str):
-            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
-        candidate = value.strip()
-        try:
-            parsed = datetime.strptime(candidate, "%Y-%m-%d")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.") from exc
-        # strptime accepts some non-zero-padded variants; require a canonical
-        # round-trip so every consumer derives status from one stable shape.
-        if parsed.strftime("%Y-%m-%d") != candidate:
-            raise HTTPException(status_code=400, detail=f"{field} debe usar formato AAAA-MM-DD.")
-        normalized[field] = candidate
+        if field in normalized:
+            normalized[field] = _fecha_iso(normalized[field], field)
     return normalized
+
+
+# Las demás columnas de la base, que la ficha también deja editar. Van en
+# mayúsculas porque así vienen en la base y así se exportan.
+_FLEET_BASE_FIELDS = ("base", "marca", "modelo", "ano", "color", "grupo")
+_FLEET_UPDATE_FIELDS = (*_FLEET_EDITABLE_FIELDS, *_FLEET_BASE_FIELDS)
+_EN_MAYUSCULAS = ("placa", "marca", "modelo", "color", "grupo")
+_LARGO_MAXIMO_DE_CAMPO = 200
+
+
+# Las bases, escritas como las dejó la importación: así las leen el filtro de
+# la pantalla y la exportación.
+_BASES = ("MASIVO", "REMISSE", "Sharf Motorizado")
+# En Remisse y en Sharf el grupo es la propia base; en masivo, el cliente.
+_GRUPO_DE_BASE = {"REMISSE": "REMISSE", "Sharf Motorizado": "SHARF MOTORIZADO"}
+_GRUPOS_DE_MASIVO = ("TP", "KONECTA", "TP/KONECTA")
+
+
+def _base_valida(valor: Any) -> str:
+    """La base tal como se guarda («sharf» vale por «Sharf Motorizado»), o 400."""
+    texto = _texto(valor).upper()
+    if not texto:
+        return ""
+    for base in _BASES:
+        if texto in (base.upper(), base.split()[0].upper()):
+            return base
+    raise HTTPException(status_code=400, detail="La base debe ser MASIVO, REMISSE o Sharf Motorizado.")
+
+
+def _grupo_para(base: Any, pedido: Optional[str], actual: Any) -> str:
+    """El grupo que le toca a una unidad de esa base.
+
+    En Remisse y en Sharf es el de la base, se pida lo que se pida. En masivo es
+    uno de sus clientes: pedir otro es un error, y el que traía de otra base se
+    vacía para elegirlo. Sin base, se deja como venga.
+    """
+    if base in _GRUPO_DE_BASE:
+        return _GRUPO_DE_BASE[base]
+    grupo = _texto(pedido if pedido is not None else actual).upper()
+    if base != "MASIVO" or not grupo or grupo in _GRUPOS_DE_MASIVO:
+        return grupo
+    if pedido is not None:
+        raise HTTPException(status_code=400, detail="En masivo el grupo es TP, KONECTA o TP/KONECTA.")
+    return ""
+
+
+def _normalizar_campos_de_la_base(valores: Dict[str, Any]) -> Dict[str, Any]:
+    """Sin espacios de más, en mayúsculas donde la base las usa, y el año con cuatro cifras."""
+    normalizado = dict(valores)
+    for campo in ("telefono", "ano", "direccion", *_EN_MAYUSCULAS):
+        if campo not in normalizado:
+            continue
+        texto = _texto(normalizado[campo])
+        if len(texto) > _LARGO_MAXIMO_DE_CAMPO:
+            raise HTTPException(
+                status_code=400, detail=f"{_ETIQUETA_FLOTA.get(campo, campo)}: el texto es demasiado largo."
+            )
+        normalizado[campo] = texto.upper() if campo in _EN_MAYUSCULAS else texto
+    if normalizado.get("ano") and not re.fullmatch(r"\d{4}", normalizado["ano"]):
+        raise HTTPException(status_code=400, detail="El año debe tener cuatro cifras.")
+    if "fecha_nacimiento" in normalizado:
+        normalizado["fecha_nacimiento"] = _fecha_iso(normalizado["fecha_nacimiento"], "fecha_nacimiento")
+    if "base" in normalizado:
+        normalizado["base"] = _base_valida(normalizado["base"])
+    return normalizado
+
+
+def _cambios_al_perfil(
+    conductor: Dict[str, Any], cambios_de_unidad: Dict[str, Any], personales: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Lo que hay que escribir en el perfil del conductor: las copias y lo suyo, si cambian."""
+    perfil = _perfil_de(conductor)
+    pedidos = {_ESPEJO_EN_PERFIL[c]: v for c, v in cambios_de_unidad.items() if c in _ESPEJO_EN_PERFIL}
+    pedidos.update({_CAMPOS_PERSONALES[c]: v for c, v in personales.items()})
+    cambios = {campo: v for campo, v in pedidos.items() if _texto(perfil.get(campo)) != _texto(v)}
+    telefono = pedidos.get("telefonoDirecto")
+    if telefono is not None and any(
+        clave in conductor and _texto(conductor[clave]) != _texto(telefono) for clave in ("celular", "telefono")
+    ):
+        cambios["telefonoDirecto"] = telefono
+    return cambios
+
+
+def _escribir_en_el_conductor(conductor: Dict[str, Any], cambios: Dict[str, Any]):
+    """Escribe en el perfil del conductor y devuelve con qué deshacerlo si el guardado falla.
+
+    El teléfono también está suelto en la cuenta (`celular` en las importadas,
+    `telefono` en las dadas de alta con su unidad), y la tabla lo usa si falta
+    el de la unidad: se cambia con él para que no quede ninguna copia vieja.
+    """
+    perfil_previo = conductor.get("perfil_conductor")
+    telefonos_previos = {k: conductor[k] for k in ("celular", "telefono") if k in conductor}
+    conductor["perfil_conductor"] = {**_perfil_de(conductor), **cambios}
+    if "telefonoDirecto" in cambios:
+        for clave in telefonos_previos:
+            conductor[clave] = cambios["telefonoDirecto"]
+
+    def deshacer() -> None:
+        conductor["perfil_conductor"] = perfil_previo
+        conductor.update(telefonos_previos)
+
+    return deshacer
+
+
+def _valor_aprobable(campo_del_perfil: str, valor: Any) -> Any:
+    """Lo que pidió el conductor, validado como si se escribiera desde la ficha.
+
+    Solo los campos con copia en la unidad: ahí se guarda en mayúsculas y el año
+    con cuatro cifras, y las dos copias tienen que quedar iguales. Lo que no
+    cumple da 400 antes de tocar nada, y la solicitud se puede rechazar.
+    """
+    campo = _ESPEJO_EN_UNIDAD.get(campo_del_perfil)
+    if not campo:
+        return valor
+    return _normalizar_campos_de_la_base({campo: valor})[campo]
+
+
+def _llevar_a_la_unidad(conductor: Dict[str, Any], campo_del_perfil: str, valor: Any) -> Optional[Dict[str, Any]]:
+    """Lo aprobado en el perfil del conductor, también en su unidad si allí tiene copia.
+
+    Sin esto, un teléfono nuevo que pidió el conductor y aprobó Administración
+    quedaba tapado por el de la unidad, que es el que manda en la ficha y en la
+    exportación. Solo si es el conductor que enseña la ficha de esa unidad.
+    """
+    campo = _ESPEJO_EN_UNIDAD.get(campo_del_perfil)
+    unidad_id = conductor.get("unidad_id")
+    if not campo or unidad_id not in conductores_db:
+        return None
+    if _conductores_por_unidad().get(unidad_id) is not conductor:
+        return None
+    nuevo = _texto(valor)
+    conductores_db[unidad_id] = {**conductores_db[unidad_id], campo: nuevo}
+    if campo == "telefono":
+        for clave in ("celular", "telefono"):
+            if clave in conductor:
+                conductor[clave] = nuevo
+    return conductores_db[unidad_id]
 
 
 class EscrituraSinDeshacer(HTTPException):
@@ -7101,6 +7422,11 @@ async def add_flota(flota: FlotaRegistro, session_token: SessionCookie = None):
     })
     if matricula:
         values["placa"] = matricula
+    base = _base_valida(flota.base)
+    if base:
+        values["base"] = base
+    if base or flota.grupo:
+        values["grupo"] = _grupo_para(base, flota.grupo, "")
 
     # La cuenta del conductor se crea con la unidad, no después: dar de alta una
     # unidad cuyo conductor no puede entrar deja su documentación en el aire.
@@ -7171,16 +7497,36 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     if placa not in conductores_db:
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
     previous = dict(conductores_db[placa])
+    pedidos = _normalizar_campos_de_la_base(_model_changes(flota))
     changes = _normalize_fleet_expiries({
-        key: value for key, value in _model_changes(flota).items()
-        if key in _FLEET_EDITABLE_FIELDS
+        key: value for key, value in pedidos.items() if key in _FLEET_UPDATE_FIELDS
     })
+    if "base" in changes or "grupo" in changes:
+        changes["grupo"] = _grupo_para(
+            changes.get("base", previous.get("base")), changes.get("grupo"), previous.get("grupo")
+        )
+    personales = {key: value for key, value in pedidos.items() if key in _CAMPOS_PERSONALES}
+    # La fila de la base es la unidad y su conductor: lo que tiene copia en su
+    # perfil se escribe en los dos, y dirección y nacimiento solo en el perfil.
+    conductor = _conductores_por_unidad().get(placa)
+    con_perfil = isinstance((conductor or {}).get("perfil_conductor"), dict)
+    if personales and not con_perfil:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "El conductor todavía no completó su alta en la aplicación: la dirección y el "
+                "nacimiento los registra él al entrar por primera vez."
+            ),
+        )
+    al_perfil = _cambios_al_perfil(conductor, changes, personales) if con_perfil else {}
     updated = {**previous, **changes}
-    # Preserve base/make/model/year/color, document URLs and any future
-    # metadata by merging only the explicit structured allow-list above.
-    if updated == previous:
+    # Preserve base, document URLs and any future metadata by merging only the
+    # explicit structured allow-list above.
+    if updated == previous and not al_perfil:
         return {"message": "Sin cambios", "unchanged": True, "unidad": {"unidad_id": placa, **previous}, "flota": conductores_db}
+    perfil_previo = dict(_perfil_de(conductor))
     conductores_db[placa] = updated
+    deshacer_conductor = _escribir_en_el_conductor(conductor, al_perfil) if al_perfil else None
     # Se anota antes de persistir para que el guardado lo lleve consigo, y se
     # deshace junto al resto si la escritura falla.
     actividad_previa = list(actividad_db)
@@ -7193,8 +7539,10 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
         description=f"Unidad {placa} modificada desde la ficha del conductor.",
         status="success",
         changes=[c for c in (
-            cambio(_ETIQUETA_FLOTA.get(campo, campo), previous.get(campo), valor)
-            for campo, valor in changes.items()
+            *(cambio(_ETIQUETA_FLOTA.get(campo, campo), previous.get(campo), valor)
+              for campo, valor in changes.items()),
+            *(cambio(_ETIQUETA_FLOTA[campo], perfil_previo.get(_CAMPOS_PERSONALES[campo]), valor)
+              for campo, valor in personales.items()),
         ) if c],
     )
     try:
@@ -7204,8 +7552,16 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     except Exception:
         conductores_db[placa] = previous
         actividad_db[:] = actividad_previa
+        if deshacer_conductor:
+            deshacer_conductor()
         raise
-    return {"message": "Unidad actualizada", "unchanged": False, "unidad": {"unidad_id": placa, **stored}, "flota": conductores_db}
+    return {
+        "message": "Unidad actualizada", "unchanged": False,
+        "unidad": {"unidad_id": placa, **stored},
+        # Para que la ficha abierta enseñe lo guardado sin volver a pedirla.
+        "perfil_conductor": _perfil_de(conductor) if con_perfil else None,
+        "flota": conductores_db,
+    }
 
 class FlotaRenombrar(BaseModel):
     nuevo_id: str

@@ -11,7 +11,8 @@ import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from '.
 import { apiFetch, apiRequest } from './utils/apiClient';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
-import { telefonoDeUnidad, whatsappDeUnidad } from './utils/telefonoUnidad';
+import { whatsappDeUnidad } from './utils/telefonoUnidad';
+import { BASES, GRUPOS_DE_MASIVO, esDeMasivo, fechaLegible, valorDeLaUnidad } from './utils/filaDeLaBase';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -109,6 +110,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   const EXPORT_OPTIONS = [
     { key: 'MASIVO', label: 'BASE MASIVO 2026', filename: 'BASE MASIVO 2026.xlsx' },
     { key: 'REMISSE', label: 'BASE REMISSE 2026', filename: 'BASE REMISSE 2026.xlsx' },
+    { key: 'SHARF', label: 'BASE SHARF MOTORIZADO 2026', filename: 'BASE SHARF MOTORIZADO 2026.xlsx' },
     { key: 'TODAS', label: 'Todas las bases (una hoja)', filename: 'BASE FLOTA 2026.xlsx' },
   ];
 
@@ -268,7 +270,7 @@ const FlotaView = ({ usuario, initialBase }) => {
     if (!conductorInfo || !usuario) return;
     setResolveLoading(prev => ({ ...prev, [campo]: true }));
     try {
-      await apiFetch('/api/admin/resolve-update', {
+      const respuesta = await apiFetch('/api/admin/resolve-update', {
         method: 'POST',
         json: {
           admin_email: usuario?.identifier || usuario?.email || '',
@@ -277,9 +279,14 @@ const FlotaView = ({ usuario, initialBase }) => {
           action: action,
         },
       });
-      
+
       // Update local state to reflect the change immediately
       const updatedConductorInfo = { ...conductorInfo };
+      // Lo aprobado que tiene copia en la unidad (teléfono, placa, vehículo)
+      // también se escribió allí, y es lo que la ficha enseña.
+      if (respuesta?.unidad) {
+        updatedConductorInfo.flota = { ...updatedConductorInfo.flota, ...respuesta.unidad };
+      }
       if (updatedConductorInfo.usuario?.perfil_conductor) {
         if (action === 'approve') {
           const newVal = updatedConductorInfo.usuario.perfil_conductor.solicitudes_cambio[campo].new_value;
@@ -366,12 +373,27 @@ const FlotaView = ({ usuario, initialBase }) => {
     }
 
     const valorFinal = campo === 'capacidad' ? Number.parseInt(valor, 10) || 0 : valor;
-    await apiFetch(`/api/flota/${encodeURIComponent(unidadActual)}`, {
-      method: 'PUT',
-      json: { [campo]: valorFinal },
-    });
-    setConductorInfo(previo => ({ ...previo, flota: { ...previo?.flota, [campo]: valorFinal } }));
-    toast.success('Unidad actualizada.');
+    let respuesta;
+    try {
+      respuesta = await apiFetch(`/api/flota/${encodeURIComponent(unidadActual)}`, {
+        method: 'PUT',
+        json: { [campo]: valorFinal },
+      });
+    } catch (err) {
+      // El campo se queda abierto con lo escrito; aquí se dice por qué.
+      toast.error(err.message || 'No se pudo guardar.');
+      throw err;
+    }
+    // El servidor devuelve la unidad y el perfil tal como quedaron: un mismo
+    // dato puede haberse escrito en los dos, y así la ficha no se desfasa.
+    setConductorInfo(previo => ({
+      ...previo,
+      flota: { ...previo?.flota, ...(respuesta?.unidad || { [campo]: valorFinal }) },
+      usuario: respuesta?.perfil_conductor
+        ? { ...previo?.usuario, perfil_conductor: respuesta.perfil_conductor }
+        : previo?.usuario,
+    }));
+    toast.success('Guardado. Ya sale así en el Excel.');
     fetchFlota();
   };
 
@@ -510,6 +532,13 @@ const FlotaView = ({ usuario, initialBase }) => {
         .some((cliente) => clientesFiltro.includes(cliente));
     return matchesSearch && matchesBase && matchesCliente;
   });
+
+  // La ficha abierta: lo que tiene copia en el perfil del conductor se lee
+  // de la unidad, igual que el Excel (`filaDeLaBase`).
+  const perfilFicha = conductorInfo?.usuario?.perfil_conductor || null;
+  const flotaFicha = conductorInfo?.flota || {};
+  const deLaUnidad = (campo) => valorDeLaUnidad(flotaFicha, perfilFicha, campo, conductorInfo?.unidad_id);
+  const fichaDeMasivo = esDeMasivo(flotaFicha.base);
 
   // KPIs calculations
   const totalUnits = flota.length;
@@ -980,47 +1009,116 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <div className="info-grid">
                     <div className="info-section">
                       <h4>Información del conductor</h4>
-                      <p><strong>DNI/Documento:</strong> {conductorInfo.usuario.perfil_conductor?.tipoDoc || 'DNI'} {conductorInfo.usuario.perfil_conductor?.numDoc || 'No registrado'}</p>
-                      <p><strong>Nacimiento:</strong> {conductorInfo.usuario.perfil_conductor?.fechaNacimiento || '—'}</p>
-                      <p><strong>Dirección:</strong> {conductorInfo.usuario.perfil_conductor?.direccion || '—'}</p>
-                      {/* Un solo teléfono: el que usa el botón de WhatsApp. El
-                          de la unidad manda, y si no lo tiene se muestra el que
-                          declaró el conductor, que es de donde sale el enlace.
-                          Antes aparecían los dos, repetidos y sin saber cuál
-                          mandaba. */}
+                      {/* El DNI no se edita aquí: es con lo que el conductor
+                          entra a la aplicación, y cambiarlo no es corregir un
+                          dato de la base. Nacimiento y dirección viven en su
+                          cuenta, así que sin cuenta no hay dónde guardarlos. */}
+                      <p><strong>DNI/Documento:</strong> {perfilFicha?.tipoDoc || 'DNI'} {perfilFicha?.numDoc || conductorInfo.usuario.dni || 'No registrado'}</p>
+                      <CampoEditable
+                        etiqueta="Nacimiento"
+                        valor={perfilFicha?.fechaNacimiento}
+                        tipo="date"
+                        vacio="—"
+                        editable={Boolean(perfilFicha)}
+                        onGuardar={(valor) => guardarCampoUnidad('fecha_nacimiento', valor)}
+                      >
+                        {fechaLegible(perfilFicha?.fechaNacimiento)}
+                      </CampoEditable>
+                      <CampoEditable
+                        etiqueta="Dirección"
+                        valor={perfilFicha?.direccion}
+                        vacio="—"
+                        editable={Boolean(perfilFicha)}
+                        onGuardar={(valor) => guardarCampoUnidad('direccion', valor)}
+                      />
+                      {/* Un solo teléfono: el que usa el botón de WhatsApp y el
+                          que sale en el Excel. El de la unidad manda, y si no lo
+                          tiene se muestra el que declaró el conductor. Guardarlo
+                          aquí lo cambia también en el perfil del conductor. */}
                       <CampoEditable
                         etiqueta="Teléfono"
-                        valor={telefonoDeUnidad({ ...conductorInfo.flota, celular: conductorInfo.usuario.perfil_conductor?.telefonoDirecto })}
+                        valor={deLaUnidad('telefono') || conductorInfo.usuario.celular}
                         vacio="Sin teléfono"
                         onGuardar={(valor) => guardarCampoUnidad('telefono', valor)}
                       />
-                      {conductorInfo.usuario.perfil_conductor?.telefonoEmergencia && (
-                        <p><strong>Emergencia:</strong> {conductorInfo.usuario.perfil_conductor.telefonoEmergencia}</p>
+                      {perfilFicha?.telefonoEmergencia && (
+                        <p><strong>Emergencia:</strong> {perfilFicha.telefonoEmergencia}</p>
                       )}
                     </div>
                     <div className="info-section">
                       <h4>Información del vehículo</h4>
-                      <p><strong>Marca/Modelo:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoMarca || '—'} {conductorInfo.usuario.perfil_conductor?.vehiculoModelo || ''}</p>
-                      <p><strong>Año / Color:</strong> {conductorInfo.usuario.perfil_conductor?.vehiculoAnio || '—'} / {conductorInfo.usuario.perfil_conductor?.vehiculoColor || '—'}</p>
-                      <p><strong>Placa:</strong> {conductorInfo.usuario.perfil_conductor?.placa || conductorInfo.flota?.placa || conductorInfo.unidad_id}</p>
+                      {/* Son las columnas de la base, y todas se editan aquí
+                          para que el Excel salga con lo último. La placa y los
+                          datos del vehículo también están en el perfil del
+                          conductor: se guardan en los dos a la vez. */}
+                      <CampoEditable
+                        etiqueta="Placa"
+                        valor={deLaUnidad('placa')}
+                        vacio="Sin placa"
+                        onGuardar={(valor) => guardarCampoUnidad('placa', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="Marca"
+                        valor={deLaUnidad('marca')}
+                        vacio="—"
+                        onGuardar={(valor) => guardarCampoUnidad('marca', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="Modelo"
+                        valor={deLaUnidad('modelo')}
+                        vacio="—"
+                        onGuardar={(valor) => guardarCampoUnidad('modelo', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="Año"
+                        valor={deLaUnidad('ano')}
+                        tipo="number"
+                        vacio="—"
+                        onGuardar={(valor) => guardarCampoUnidad('ano', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="Color"
+                        valor={deLaUnidad('color')}
+                        vacio="—"
+                        onGuardar={(valor) => guardarCampoUnidad('color', valor)}
+                      />
                       {/* Tipo y capacidad son los de la unidad, no los que
                           declaró el conductor: son los que usa el ruteo. */}
                       <CampoEditable
                         etiqueta="Tipo"
-                        valor={conductorInfo.flota?.tipo}
+                        valor={flotaFicha.tipo}
                         opciones={TIPOS_DE_UNIDAD}
                         vacio="Sin tipo"
                         onGuardar={(valor) => guardarCampoUnidad('tipo', valor)}
                       />
                       <CampoEditable
                         etiqueta="Capacidad"
-                        valor={conductorInfo.flota?.capacidad}
+                        valor={flotaFicha.capacidad}
                         tipo="number"
                         vacio="Sin capacidad"
                         onGuardar={(valor) => guardarCampoUnidad('capacidad', valor)}
                       >
-                        {conductorInfo.flota?.capacidad ? `${conductorInfo.flota.capacidad} pasajeros` : ''}
+                        {flotaFicha.capacidad ? `${flotaFicha.capacidad} pasajeros` : ''}
                       </CampoEditable>
+                      {/* Sin base, la unidad no sale en el Excel de ninguna. */}
+                      <CampoEditable
+                        etiqueta="Base"
+                        valor={flotaFicha.base}
+                        opciones={BASES}
+                        vacio="Sin base"
+                        onGuardar={(valor) => guardarCampoUnidad('base', valor)}
+                      />
+                      {/* Solo se elige en masivo, que sirve a dos clientes; en
+                          Remisse y en Sharf el grupo es la propia base y lo
+                          pone el servidor al cambiarla. */}
+                      <CampoEditable
+                        etiqueta="Grupo"
+                        valor={flotaFicha.grupo}
+                        opciones={GRUPOS_DE_MASIVO}
+                        vacio="No consta"
+                        editable={fichaDeMasivo}
+                        onGuardar={(valor) => guardarCampoUnidad('grupo', valor)}
+                      />
                     </div>
 
                     {(conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === 'true' || conductorInfo.usuario.perfil_conductor?.vehiculo2_habilitado === true) && (

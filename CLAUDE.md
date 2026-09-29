@@ -95,6 +95,30 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   el nombre de la propia base (40 y 16). Llegué a descartarla cuando repetía la base, dándola por
   redundante, y dejó 56 unidades como «No consta» teniendo el dato escrito: **no descartar ese valor**.
   Solo quedan sin grupo 3 unidades, una de ellas `K-TEST`, que es de prueba y no está en ningún Excel.
+- **Las bases se editan en la página y se exportan desde ella** (desde el 2026-09-29, decisión del
+  usuario: el Excel ya no es la fuente, la página sí). La importación dejó cada fila repartida: la unidad
+  en `__flota__` y la persona en su cuenta, con **seis datos en los dos sitios** —teléfono, placa, marca,
+  modelo, año y color (`_ESPEJO_EN_PERFIL`)—. Cada pantalla leía uno distinto: la ficha enseñaba el
+  teléfono de la unidad y el Excel el del perfil, así que a la K-027 se le cambió el teléfono en la
+  página y la exportación seguía sacando el viejo. Ahora **manda la unidad en todas partes** (el perfil
+  solo rellena lo que le falte: `_valor_de_unidad` en el backend y `filaDeLaBase.js` en el frontend,
+  que tienen que coincidir) y **guardar escribe los dos**: la ficha (`PUT /api/flota/{padrón}`) copia al
+  perfil del conductor, y aprobar lo que pidió el conductor (`resolve-update`) copia a la unidad, salvo
+  la capacidad, que en la unidad es la del ruteo. Todas las columnas de la base se editan desde la
+  ficha salvo el DNI —es con lo que el conductor entra— y la base. La exportación
+  (`GET /api/flota/export`, también `SHARF`) sale de `_fila_de_la_base` con lo mismo que enseña la
+  ficha, por base y padrón, con la fecha como fecha, el celular, la capacidad y el año como números y el
+  DNI con sus ocho cifras (la importación les quitó el cero a 25), igual que la base original. El
+  GRUPO sale de lo guardado, no de la plantilla, que no conocía las 16 de Sharf. Lleva filtros, la
+  cabecera fija y anchos a la medida, y **nada que empiece por «=» se escribe como fórmula**: muchos de
+  esos datos los teclea el conductor en su alta, y openpyxl los convertiría en fórmulas vivas.
+  **La base se elige** en el alta y en la ficha (`_BASES`): las unidades dadas de alta en la página
+  nacían sin ella y no salían en el Excel de ninguna. El grupo sigue a la base (`_grupo_para`): en
+  Remisse y en Sharf es la propia base; en masivo, TP, KONECTA o TP/KONECTA. Dirección y nacimiento
+  **no se crean desde la ficha** en una cuenta sin `perfil_conductor`: su existencia es lo que decide
+  que el conductor ya pasó el alta (`profileComplete`), y crearlo le saltaría el formulario. Al aprobar a
+  un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
+  Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

