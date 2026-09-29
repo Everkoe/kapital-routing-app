@@ -1738,6 +1738,13 @@ select.campo-pendiente {
   font-size: 0.75rem; color: var(--text-secondary); margin: 0;
   font-style: italic;
 }
+/* La nota del cuestionario de manejo, en la tarjeta que ocupa su sitio. */
+.cuestionario-nota {
+  font-size: 0.8rem; color: var(--text-secondary); margin: 0;
+}
+.cuestionario-nota strong {
+  font-size: 1.25rem; color: var(--text-primary); margin-right: 2px;
+}
 
 /* Notify section */
 .notify-section {
