@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown } from 'lucide-react';
+import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown, Maximize2 } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import CampoEditable from './components/CampoEditable';
@@ -548,6 +548,7 @@ const FlotaView = ({ usuario, initialBase }) => {
   // no pasó su alta en la aplicación, y llenarlo aquí la da por hecha.
   const fichaConCuenta = Boolean(conductorInfo?.usuario?.tiene_cuenta);
   const fichaSinAlta = fichaConCuenta && !perfilFicha;
+  const fotoDelVehiculo = perfilFicha?.fotoVehiculo || null;
 
   // KPIs calculations
   const totalUnits = flota.length;
@@ -966,6 +967,7 @@ const FlotaView = ({ usuario, initialBase }) => {
               <div className="profile-layout">
                 {/* LEFT: Avatar + datos de la cuenta + aviso al conductor */}
                 <div className="profile-left">
+                  <div className="profile-identidad">
                   <div className="driver-photo">
                     {conductorInfo.usuario.avatar ? (
                       <ImagenGuardada imagen={conductorInfo.usuario.avatar} alt="Conductor" />
@@ -1000,13 +1002,14 @@ const FlotaView = ({ usuario, initialBase }) => {
                       usuario: { ...previo.usuario, email },
                     }))}
                   />
+                  </div>
 
                   {/* El aviso vive aquí, a mano: al final de la columna derecha
                       había que bajar por todos los documentos para llegar. */}
                   <div className="notify-section">
                     <h4 style={{display:'flex', alignItems:'center', gap:'8px', margin:'0 0 12px 0'}}>
                       <ShieldAlert size={18} color="#f59e0b" />
-                      Enviar Aviso al Conductor
+                      Aviso al conductor
                     </h4>
                     <p style={{fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0 0 10px 0'}}>
                       El conductor recibirá esta notificación en su portal.
@@ -1016,7 +1019,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                       onChange={e => setNotifyMsg(e.target.value)}
                       placeholder={`Ej: Estimado ${conductorInfo.usuario.nombre}, por favor vuelva a enviar su licencia de conducir ya que la imagen no es legible.`}
                       className="notify-textarea"
-                      rows={3}
+                      rows={4}
                     />
                     <button
                       className="btn-primary"
@@ -1037,14 +1040,28 @@ const FlotaView = ({ usuario, initialBase }) => {
                       una franja baja en vez de un recuadro vacío que empuje la
                       información hacia abajo. La foto vive en Storage, así que
                       el perfil solo guarda su ruta y la resuelve ImagenGuardada. */}
-                  {conductorInfo.usuario.perfil_conductor?.fotoVehiculo ? (
-                    <div className="vehicle-photo vehicle-photo-banner">
-                      <ImagenGuardada
-                        imagen={conductorInfo.usuario.perfil_conductor.fotoVehiculo}
-                        alt="Vehículo"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                    </div>
+                  {fotoDelVehiculo ? (
+                    // Entera, sin recortar, sobre la misma foto desenfocada que
+                    // rellena la franja; al pulsarla se abre en grande.
+                    <button
+                      type="button"
+                      className="vehicle-photo vehicle-photo-banner"
+                      title="Ver la foto completa"
+                      onClick={() => setViendoDocumento({
+                        name: 'Foto del vehículo',
+                        caras: [{
+                          nombre: null,
+                          src: typeof fotoDelVehiculo === 'string'
+                            ? fotoDelVehiculo
+                            : (fotoDelVehiculo.base64 || fotoDelVehiculo.url || ''),
+                          path: typeof fotoDelVehiculo === 'object' ? fotoDelVehiculo.path || null : null,
+                        }],
+                      })}
+                    >
+                      <ImagenGuardada imagen={fotoDelVehiculo} alt="" className="vehicle-photo-fondo" />
+                      <ImagenGuardada imagen={fotoDelVehiculo} alt="Foto del vehículo" className="vehicle-photo-imagen" />
+                      <span className="vehicle-photo-ampliar"><Maximize2 size={13} aria-hidden="true" /> Ver completa</span>
+                    </button>
                   ) : (
                     <div className="vehicle-photo vehicle-photo-banner sin-foto">
                       <CarFront size={22} strokeWidth={1.5} aria-hidden="true" />
