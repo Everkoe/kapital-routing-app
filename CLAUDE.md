@@ -131,6 +131,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
   un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
   Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
+  **Desplegado en producción el 2026-09-29** (merge `77fc0d6`, PR #18, sin migraciones), con la tarjeta
+  del cuestionario de manejo defensivo en la revisión de documentos; comprobado que sin sesión la flota,
+  su exportación y la ficha responden 401.
 - **Cada subida de un documento va a una ruta nueva** (`_ruta_unica`, desde el 2026-09-29): la ruta era fija
   por unidad y campo, así que reemplazar sobrescribía el mismo archivo y la ficha seguía enseñando el
   anterior —la página guarda cinco minutos la URL firmada de cada ruta—. El archivo reemplazado se queda
