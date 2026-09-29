@@ -3,7 +3,9 @@ import { AlertTriangle, ArrowRight, Loader, Hourglass, ShieldCheck, FileText, Cl
 import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
-import { DOCUMENTOS_CONDUCTOR, carasDeDocumento } from '../constants/documentosConductor';
+import {
+  DOCUMENTOS_CONDUCTOR, campoDeVencimiento, carasDeDocumento, fechaValida,
+} from '../constants/documentosConductor';
 import { documentoEntregado, documentosRequeridos } from '../constants/camposOnboarding';
 import { subirDocumento } from '../utils/documentoStorage';
 import DocumentViewer from './DocumentViewer';
@@ -33,6 +35,9 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
   const [notifications, setNotifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newFiles, setNewFiles] = useState({});
+  // Hasta cuándo vale lo que sube, para el SOAT, la licencia y la revisión
+  // técnica: obligatoria, llega al panel de Gestión de Flota.
+  const [fechas, setFechas] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const markedNotificationIdsRef = useRef(new Set());
@@ -151,6 +156,17 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
       return;
     }
 
+    const fechasDeLoSubido = {};
+    for (const docKey of Object.keys(newFiles)) {
+      const vence = campoDeVencimiento(docKey);
+      if (!vence) continue;
+      if (!fechaValida(fechas[vence])) {
+        toast.error(`Escribe hasta cuándo vale: ${DOC_LABELS[docKey] || docKey}.`);
+        return;
+      }
+      fechasDeLoSubido[vence] = fechas[vence];
+    }
+
     const oversizedFile = Object.values(newFiles).find(file => file?.size > MAX_DOCUMENT_SIZE_BYTES);
     if (oversizedFile) {
       toast.error(`El archivo ${oversizedFile.name || 'seleccionado'} supera el límite de ${(MAX_DOCUMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0)} MB.`);
@@ -165,18 +181,24 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: userKey,
-          docs: newFiles
+          docs: { ...newFiles, ...fechasDeLoSubido }
         })
       });
 
-      if (!res.ok) throw new Error('Error al enviar documentos');
+      if (!res.ok) {
+        // El servidor dice qué falta (por ejemplo, una fecha de vencimiento).
+        const { detail } = await res.json().catch(() => ({}));
+        throw new Error(typeof detail === 'string' ? detail : 'Error al enviar documentos');
+      }
       
       const data = await res.json();
       toast.success('Documentos enviados correctamente.');
       if (onComplete) onComplete(data);
     } catch (error) {
       console.error(error);
-      toast.error('Ocurrió un error al enviar los documentos.');
+      toast.error(error?.message && error.message !== 'Failed to fetch'
+        ? error.message
+        : 'Ocurrió un error al enviar los documentos.');
     } finally {
       setIsSubmitting(false);
     }
@@ -290,6 +312,19 @@ const DocumentResubmission = ({ usuario, onComplete, notifications: notification
                     file={newFiles[docKey]}
                     onFileSelect={(f) => handleFileChange(docKey, f)}
                   />
+                  {campoDeVencimiento(docKey) && (
+                    <div className="documento-vence">
+                      <label htmlFor={`vence-${docKey}`}>
+                        Vence el <span className="documento-vence-obligatorio">(obligatorio)</span>
+                      </label>
+                      <input
+                        id={`vence-${docKey}`}
+                        type="date"
+                        value={fechas[campoDeVencimiento(docKey)] || ''}
+                        onChange={(e) => setFechas(prev => ({ ...prev, [campoDeVencimiento(docKey)]: e.target.value }))}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             }

@@ -84,7 +84,9 @@ const RevisionDocumentosConductor = ({
     try {
       // El archivo va a Storage y el perfil guarda solo su ruta. Guardarlo
       // dentro llevaba la fila de estado a casi diez megas.
-      const documento = await subirDocumento(file, { unidadId, campo });
+      // Sin unidad —un conductor pendiente de aprobar en Accesos— el servidor
+      // lo guarda en la carpeta personal de ese conductor.
+      const documento = await subirDocumento(file, { unidadId, campo, conductor: conductorEmail });
       await apiFetch('/api/conductor/resubmit-docs', {
         method: 'POST',
         json: { email: conductorEmail, docs: { [campo]: documento }, uploaded_by: 'admin' },

@@ -1584,6 +1584,15 @@ select.campo-pendiente {
   color: var(--primary-color);
 }
 
+/* «Vence el» bajo cada documento que vence (alta y portal del conductor). */
+.documento-vence { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.documento-vence label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
+.documento-vence input {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color);
+  background: var(--bg-secondary); color: var(--text-primary); font: inherit;
+}
+.documento-vence-obligatorio { font-weight: 500; font-size: 0.75rem; margin-left: 4px; }
+
 .documento-pista {
   font-size: 0.72rem;
   line-height: 1.35;

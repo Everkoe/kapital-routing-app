@@ -1363,7 +1363,12 @@ const FlotaView = ({ usuario, initialBase }) => {
                       componente para las dos pantallas. */}
                   <div className="docs-section">
                     <RevisionDocumentosConductor
-                      vigencias={conductorInfo.flota}
+                      vigencias={{
+                        ...conductorInfo.flota,
+                        soat: deLaUnidad('soat'),
+                        revision: deLaUnidad('revision'),
+                        licencia: deLaUnidad('licencia'),
+                      }}
                       onGuardarVigencia={guardarCampoUnidad}
                       conductor={conductorInfo.usuario}
                       unidadId={conductorInfo?.unidad_id || conductorInfo?.flota?.unidad_id || ''}

@@ -492,6 +492,125 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.usuarios_db["driver-001"]["nombre"], "Driver Baseline")
         persist.assert_awaited_once()
 
+    async def test_uploading_a_document_keeps_an_active_driver_active(self):
+        # Pasó con la K-163 y la K-170: Administración les subió documentos desde
+        # la ficha y quedaron «Pendiente Revisión», y aprobarlos pedía un padrón
+        # que ya tenían.
+        conductor = self._unidad_con_conductor()
+        conductor["estado"] = "Activo"
+        a, b, c, d = self._parches_de_envio()
+        with a, b, c, d:
+            for quien in ("admin", "conductor"):
+                respuesta = await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                    email="dni-K-027", docs={"cv": {"path": "K-027/cv-1.pdf"}}, uploaded_by=quien,
+                ))
+                self.assertEqual(respuesta["estado"], "Activo", quien)
+            # Quien corrigió lo que le observaron sí vuelve a la cola.
+            conductor["estado"] = "Documentos Observados"
+            respuesta = await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                email="dni-K-027", docs={"cv": {"path": "K-027/cv-2.pdf"}}, uploaded_by="conductor",
+            ))
+        self.assertEqual(respuesta["estado"], "Pendiente Revisión")
+
+    async def test_the_accesos_list_carries_each_drivers_padron(self):
+        self._unidad_con_conductor()
+        backend.usuarios_db["admin@example.com"] = {
+            "identifier": "admin@example.com", "rol": "Administración", "estado": "Activo",
+        }
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuesta = await backend.get_all_users("admin@example.com")
+        filas = {u["email"]: u for u in respuesta["usuarios"]}
+        self.assertEqual(filas["dni-K-027"]["unidad_id"], "K-027")
+        self.assertIsNone(filas["admin@example.com"]["unidad_id"])
+
+    def _parches_de_envio(self):
+        return (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+            patch.object(backend.ws_manager, "broadcast_to_role", new=AsyncMock()),
+        )
+
+    async def test_the_alta_requires_the_dates_of_the_documents_that_expire(self):
+        # Pedido del usuario (2026-09-29): el SOAT, la licencia y la revisión
+        # técnica van con su fecha de vencimiento, obligatoria, y pasan al panel.
+        conductor = self._unidad_con_conductor()
+        perfil = {
+            "nombres": "CHAVEZ", "soat": {"path": "K-027/soat-1.jpg"},
+            "licenciaConducirCompleto": {"path": "K-027/licenciaConducirCompleto-1.jpg"},
+        }
+        casos = [
+            ({"licenciaConducirVence": "2027-05-01"}, "del SOAT"),
+            ({"soatVence": "2027-01-31"}, "de la licencia"),
+            ({"soatVence": "31/01/2027", "licenciaConducirVence": "2027-05-01"}, "AAAA-MM-DD"),
+        ]
+        a, b, c, d = self._parches_de_envio()
+        with a, b, c, d:
+            for fechas, detalle in casos:
+                with self.assertRaises(HTTPException) as caught:
+                    await backend.driver_onboarding(
+                        backend.DriverProfilePayload(email="dni-K-027", perfilData={**perfil, **fechas}),
+                    )
+                self.assertEqual(caught.exception.status_code, 400, fechas)
+                self.assertIn(detalle, caught.exception.detail)
+            await backend.driver_onboarding(backend.DriverProfilePayload(
+                email="dni-K-027",
+                perfilData={**perfil, "soatVence": "2027-01-31", "licenciaConducirVence": "2027-05-01"},
+            ))
+
+        self.assertEqual(conductor["perfil_conductor"]["soatVence"], "2027-01-31")
+        # Llegan al panel: la unidad es de donde lee su semáforo.
+        unidad = backend.conductores_db["K-027"]
+        self.assertEqual((unidad["soat"], unidad["licencia"]), ("2027-01-31", "2027-05-01"))
+
+    async def test_uploading_an_expiring_document_from_the_portal_asks_its_date(self):
+        conductor = self._unidad_con_conductor()
+        revision = {"path": "K-027/revisionTecnica-1.pdf"}
+        a, b, c, d = self._parches_de_envio()
+        with a, b, c, d:
+            with self.assertRaises(HTTPException) as caught:
+                await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                    email="dni-K-027", docs={"revisionTecnica": revision}, uploaded_by="conductor",
+                ))
+            self.assertEqual(caught.exception.status_code, 400)
+            await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                email="dni-K-027", docs={"revisionTecnica": revision, "revisionTecnicaVence": "2027-03-15"},
+                uploaded_by="conductor",
+            ))
+            self.assertEqual(conductor["perfil_conductor"]["revisionTecnicaVence"], "2027-03-15")
+            self.assertEqual(backend.conductores_db["K-027"]["revision"], "2027-03-15")
+            # Administración sube sin fecha: la pone en la ficha, junto al documento.
+            await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                email="dni-K-027", docs={"soat": {"path": "K-027/soat-2.jpg"}}, uploaded_by="admin",
+            ))
+        self.assertEqual(conductor["perfil_conductor"]["soat"]["path"], "K-027/soat-2.jpg")
+
+    async def test_the_panel_shows_the_date_the_driver_wrote(self):
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["soatVence"] = "2027-01-31"
+        backend.conductores_db["K-027"]["licencia"] = "2026-12-01"
+        conductor["perfil_conductor"]["licenciaConducirVence"] = "2030-01-01"
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuesta = await backend.get_flota_status()
+        fila = next(f for f in respuesta["flota"] if f["unidad_id"] == "K-027")
+        self.assertEqual(fila["soat"], "2027-01-31", "si la unidad no la tiene, la del conductor")
+        self.assertEqual(fila["licencia"], "2026-12-01", "manda la unidad, como en todo")
+
+    async def test_a_date_edited_in_the_ficha_reaches_the_drivers_profile(self):
+        conductor = self._unidad_con_conductor()
+        await self._editar_unidad("K-027", soat="2027-06-30")
+        self.assertEqual(conductor["perfil_conductor"]["soatVence"], "2027-06-30")
+
+    def test_approving_a_driver_brings_their_dates_to_the_unit(self):
+        conductor = {
+            "nombre": "X",
+            "perfil_conductor": {"soatVence": "2027-01-31", "licenciaConducirVence": "2027-05-01"},
+        }
+        with mock.patch.dict(backend.conductores_db, {"KAP-011": {"soat": "2020-01-01"}}, clear=True):
+            backend._sembrar_unidad("KAP-011", conductor)
+            unidad = dict(backend.conductores_db["KAP-011"])
+        self.assertEqual((unidad["soat"], unidad["licencia"]), ("2027-01-31", "2027-05-01"))
+
     async def test_rejected_document_observes_driver_and_notifies_them(self):
         backend.usuarios_db.update({
             "admin@example.com": {
@@ -3377,6 +3496,35 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ruta.count("/"), 1)
         self.assertEqual([c.args[1] for c in subir.await_args_list], [primera["path"], segunda["path"]])
         self.assertEqual(backend._ruta_unica("K-027/cv").count("-"), 2, "sin extensión, también")
+
+    async def test_administration_uploads_for_a_driver_without_a_unit(self):
+        """En Accesos, un conductor pendiente de aprobar todavía no tiene unidad.
+
+        Subirle un documento daba «Falta la unidad de destino»; ahora va a su
+        carpeta personal, la misma en la que lo subiría él, y él lo puede ver.
+        """
+        backend.AUTH_ENFORCED = True
+        admin = {"identifier": "admin@example.com", "rol": "Administración", "estado": "Activo"}
+        conductor = {"identifier": "45757485", "dni": "45757485", "rol": "Conductor", "estado": "Pendiente Revisión"}
+        backend.usuarios_db.update({"admin@example.com": admin, "45757485": conductor})
+        token = await backend.abrir_sesion(admin)
+        datos = dict(unidad_id="", campo="licenciaConducir", nombre="lic.jpg", tipo="image/jpeg", base64="AA==")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()),
+        ):
+            respuesta = await backend.subir_documento(
+                backend.DocumentoSubida(**datos, conductor="45757485"), token,
+            )
+            carpeta = respuesta["path"].split("/", 1)[0]
+            self.assertEqual(carpeta, backend._carpetas_del_actor(conductor)[0])
+            self.assertTrue(carpeta.startswith("usuario-"))
+            # El conductor, con su sesión, alcanza esa carpeta.
+            self.assertTrue(backend._puede_ver_unidad(conductor, carpeta))
+            # Sin decir por quién, sigue sin saber dónde guardarlo.
+            with self.assertRaises(HTTPException) as caught:
+                await backend.subir_documento(backend.DocumentoSubida(**datos), token)
+            self.assertEqual(caught.exception.status_code, 400)
 
     def test_a_driver_can_only_reach_their_own_unit_documents(self):
         """Conocer una ruta no puede bastar para ver el DNI de otro."""

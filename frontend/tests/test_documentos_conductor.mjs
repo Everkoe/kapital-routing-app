@@ -8,6 +8,7 @@ import {
   TIPO_TARJETA,
   admiteReverso,
   CARA_COMPLETO,
+  campoDeVencimiento,
   caraBloqueada,
   caraDestinoParaArrastre,
   caraInicial,
@@ -190,6 +191,14 @@ test('un documento de tarjeta ofrece tres caras, completo la primera', () => {
   ]);
   assert.equal(caras[0].nombre, CARA_COMPLETO);
   assert.equal(caras[1].opcional, undefined, 'la cara de delante no es opcional');
+});
+
+test('los documentos que vencen piden su fecha, por cualquiera de sus caras', () => {
+  assert.equal(campoDeVencimiento('soat'), 'soatVence');
+  assert.equal(campoDeVencimiento('licenciaConducirReverso'), 'licenciaConducirVence');
+  assert.equal(campoDeVencimiento('revisionTecnica'), 'revisionTecnicaVence');
+  assert.equal(campoDeVencimiento('tarjetaPropiedad'), null, 'la tarjeta de propiedad no vence');
+  assert.equal(campoDeVencimiento('dniScaneadoCompleto'), null);
 });
 
 test('un documento de papel sigue teniendo una sola cara', () => {

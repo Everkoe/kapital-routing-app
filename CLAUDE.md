@@ -152,6 +152,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   ficha (`POST /api/admin/driver/foto`, por padrón): la de perfil va a la carpeta de fotos de perfil **del
   conductor**, no a la de quien la sube (`/api/documentos/subir` usa siempre la del que sube); la del
   vehículo, a la de su unidad.
+  **Desplegado en producción el 2026-09-29** (merge `198fc50`, PR #19, sin migraciones), con la ficha del
+  conductor reorganizada; comprobado que sin sesión eliminar, subir y cambiar fotos responden 401.
+- **El conductor escribe hasta cuándo vale su SOAT, su licencia y su revisión técnica** (desde el
+  2026-09-29, pedido del usuario): en el alta y en su portal, junto a la foto, **obligatoria** —la de la
+  revisión, solo si la sube, porque un vehículo nuevo no la tiene; la tarjeta de propiedad no vence—. Van
+  al perfil como `soatVence`, `licenciaConducirVence` y `revisionTecnicaVence` y a la unidad como
+  `soat`, `licencia` y `revision`, que es de donde lee el semáforo y los contadores del panel de Gestión de
+  Flota (`_VENCE_EN_PERFIL`, con copia en los dos sentidos como el resto de `_ESPEJO_EN_PERFIL`). El
+  servidor también la exige cuando sube el conductor (`_fechas_del_perfil`), no cuando sube Administración,
+  que pone la suya en la ficha; y al aprobar a un conductor en una unidad, sus fechas pasan a ella.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

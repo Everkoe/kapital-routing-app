@@ -33,7 +33,9 @@ test('el grupo solo se elige en masivo', () => {
 });
 
 test('cada campo con copia tiene la suya en el perfil', () => {
-  assert.deepEqual(Object.keys(ESPEJO_EN_PERFIL), ['chofer', 'telefono', 'placa', 'marca', 'modelo', 'ano', 'color']);
+  assert.deepEqual(Object.keys(ESPEJO_EN_PERFIL), [
+    'chofer', 'telefono', 'placa', 'marca', 'modelo', 'ano', 'color', 'soat', 'revision', 'licencia',
+  ]);
 });
 
 test('la fecha se lee como día/mes/año, y lo que no se entiende se deja', () => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Save, Send, AlertCircle, CheckCircle, Award } from 'lucide-react';
 import DocumentoMultiCara from './DocumentoMultiCara';
-import { documentoPorClave } from '../constants/documentosConductor';
+import { campoDeVencimiento, documentoPorClave } from '../constants/documentosConductor';
 import QuizManejoDefensivo from './QuizManejoDefensivo';
 import { toast } from 'react-hot-toast';
 import { subirDocumento } from '../utils/documentoStorage';
@@ -142,6 +142,10 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     tarjetaPropiedadCompleto: null,
     soat: null,
     revisionTecnica: null,
+    // Hasta cuándo vale cada documento que vence: llega al panel de Gestión de Flota.
+    soatVence: '',
+    revisionTecnicaVence: '',
+    licenciaConducirVence: '',
   });
 
   // Draft key unique per user so different users don't share drafts
@@ -297,19 +301,32 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   // `completa` la extiende a toda la fila. Se usa cuando la tarjeta cae entre
   // campos de texto: en media columna quedaba como un bloque alto y estrecho
   // que empujaba hacia abajo el campo de al lado.
-  const tarjetaDocumento = (clave, { completa = false } = {}) => (
-    <div className={`form-group${completa ? ' full-width' : ''}`} key={clave}>
-      <DocumentoMultiCara
-        documento={documentoPorClave(clave)}
-        archivos={formData}
-        onArchivo={handleFileChange}
-        opcional={!esRequerido(clave)}
-        pista={PISTAS[clave] || ''}
-        pendiente={debeAvisar(clave)}
-        aviso={ayudaDeCampo(clave, datosDelAlta)}
-      />
-    </div>
-  );
+  const tarjetaDocumento = (clave, { completa = false } = {}) => {
+    const vence = campoDeVencimiento(clave);
+    return (
+      <div className={`form-group${completa ? ' full-width' : ''}`} key={clave}>
+        <DocumentoMultiCara
+          documento={documentoPorClave(clave)}
+          archivos={formData}
+          onArchivo={handleFileChange}
+          opcional={!esRequerido(clave)}
+          pista={PISTAS[clave] || ''}
+          pendiente={debeAvisar(clave)}
+          aviso={ayudaDeCampo(clave, datosDelAlta)}
+        />
+        {/* Obligatoria: sin ella el panel de Administración no sabe si vence. */}
+        {vence && (
+          <div className="documento-vence">
+            <label htmlFor={`campo-${vence}`}>
+              Vence el {esRequerido(vence, datosDelAlta) && <span className="documento-vence-obligatorio">(obligatorio)</span>}
+            </label>
+            <input type="date" name={vence} value={formData[vence] || ''} onChange={handleChange} {...propsDeCampo(vence)} />
+            {avisoDe(vence)}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const avisoDe = (campo) => (debeAvisar(campo) ? (
     <small className="campo-aviso">
