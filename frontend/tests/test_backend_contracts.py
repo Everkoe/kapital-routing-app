@@ -3466,6 +3466,35 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.args[1] for c in subir.await_args_list], [primera["path"], segunda["path"]])
         self.assertEqual(backend._ruta_unica("K-027/cv").count("-"), 2, "sin extensión, también")
 
+    async def test_administration_uploads_for_a_driver_without_a_unit(self):
+        """En Accesos, un conductor pendiente de aprobar todavía no tiene unidad.
+
+        Subirle un documento daba «Falta la unidad de destino»; ahora va a su
+        carpeta personal, la misma en la que lo subiría él, y él lo puede ver.
+        """
+        backend.AUTH_ENFORCED = True
+        admin = {"identifier": "admin@example.com", "rol": "Administración", "estado": "Activo"}
+        conductor = {"identifier": "45757485", "dni": "45757485", "rol": "Conductor", "estado": "Pendiente Revisión"}
+        backend.usuarios_db.update({"admin@example.com": admin, "45757485": conductor})
+        token = await backend.abrir_sesion(admin)
+        datos = dict(unidad_id="", campo="licenciaConducir", nombre="lic.jpg", tipo="image/jpeg", base64="AA==")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()),
+        ):
+            respuesta = await backend.subir_documento(
+                backend.DocumentoSubida(**datos, conductor="45757485"), token,
+            )
+            carpeta = respuesta["path"].split("/", 1)[0]
+            self.assertEqual(carpeta, backend._carpetas_del_actor(conductor)[0])
+            self.assertTrue(carpeta.startswith("usuario-"))
+            # El conductor, con su sesión, alcanza esa carpeta.
+            self.assertTrue(backend._puede_ver_unidad(conductor, carpeta))
+            # Sin decir por quién, sigue sin saber dónde guardarlo.
+            with self.assertRaises(HTTPException) as caught:
+                await backend.subir_documento(backend.DocumentoSubida(**datos), token)
+            self.assertEqual(caught.exception.status_code, 400)
+
     def test_a_driver_can_only_reach_their_own_unit_documents(self):
         """Conocer una ruta no puede bastar para ver el DNI de otro."""
         conductor = {"rol": "Conductor", "unidad_id": "K-027"}

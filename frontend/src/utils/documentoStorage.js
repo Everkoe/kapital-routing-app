@@ -20,7 +20,7 @@ import { documentoABase64 } from './imageUtils.js';
  * reintroduciría el fallo que esto arregla, y encima de forma intermitente.
  * Si la subida no puede completarse, quien llama debe enterarse.
  */
-export const subirDocumento = async (file, { unidadId, campo, fotoDePerfil = false }) => {
+export const subirDocumento = async (file, { unidadId, campo, fotoDePerfil = false, conductor = '' }) => {
   const documento = await documentoABase64(file);
 
   const { path } = await apiFetch('/api/documentos/subir', {
@@ -32,6 +32,8 @@ export const subirDocumento = async (file, { unidadId, campo, fotoDePerfil = fal
       tipo: documento.type,
       base64: documento.base64,
       foto_de_perfil: fotoDePerfil,
+      // Por quién sube Administración: si aún no tiene unidad, va a su carpeta.
+      conductor: conductor || undefined,
     },
   });
 

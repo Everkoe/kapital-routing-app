@@ -5249,6 +5249,9 @@ class DocumentoSubida(BaseModel):
     # Una foto de perfil no es un documento: no se sube en nombre de nadie y no
     # se guarda en la carpeta de una unidad. Ver `CARPETA_AVATARES`.
     foto_de_perfil: bool = False
+    # La cuenta del conductor por quien sube Administración, para cuando todavía
+    # no tiene unidad (ver `_carpeta_para_la_subida`).
+    conductor: Optional[str] = None
 
 
 def _ruta_de_documento(unidad_id: str, campo: str, nombre: str) -> str:
@@ -5358,6 +5361,25 @@ def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
     return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
 
+async def _carpeta_para_la_subida(actor: Optional[Dict[str, Any]], datos: "DocumentoSubida") -> str:
+    """Dónde va un documento subido: la carpeta de su unidad, o la del conductor.
+
+    Administración sube en nombre del conductor, y un conductor recién
+    registrado —pendiente de aprobar en Accesos— todavía no tiene unidad:
+    subirle un documento daba «Falta la unidad de destino». Entonces va a su
+    carpeta personal, la misma en la que subiría él, para que también lo vea.
+    """
+    sin_unidad = not (datos.unidad_id or "").strip()
+    if actor is not None and actor.get("rol") in _ADMIN_ROLES and sin_unidad and (datos.conductor or "").strip():
+        cuenta = await _load_compat_user(datos.conductor)
+        if not cuenta or cuenta.get("rol") != "Conductor":
+            raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+        carpetas = _carpetas_del_actor(cuenta)
+        if carpetas:
+            return carpetas[0]
+    return _carpeta_destino(actor, datos.unidad_id)
+
+
 def _ruta_unica(ruta: str) -> str:
     """La ruta con una marca propia de esta subida, antes de la extensión.
 
@@ -5383,7 +5405,7 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
     if datos.foto_de_perfil:
         ruta = _ruta_de_avatar(actor, datos.nombre)
     else:
-        ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+        ruta = _ruta_de_documento(await _carpeta_para_la_subida(actor, datos), datos.campo, datos.nombre)
     ruta = _ruta_unica(ruta)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
