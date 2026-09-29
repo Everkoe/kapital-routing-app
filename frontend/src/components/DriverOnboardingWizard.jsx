@@ -58,7 +58,7 @@ const FILE_FIELDS = [
   'licenciaConducir', 'licenciaConducirReverso', 'licenciaConducirCompleto',
   'lunasPolarizadas', 'lunasPolarizadasReverso', 'lunasPolarizadasCompleto',
   'recordConductor', 'antecedentesPoliciales', 'cv',
-  'certificadosTrabajo', 'referenciasLaborales', 'cuestionarioManejoDefensivo',
+  'certificadosTrabajo', 'referenciasLaborales',
   'tarjetaPropiedad', 'tarjetaPropiedadReverso', 'tarjetaPropiedadCompleto',
   'soat', 'revisionTecnica',
 ];
@@ -129,7 +129,6 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
     cv: null,
     certificadosTrabajo: null,
     referenciasLaborales: null,
-    cuestionarioManejoDefensivo: null,
 
     // Datos Vehiculares
     vehiculoMarca: '',

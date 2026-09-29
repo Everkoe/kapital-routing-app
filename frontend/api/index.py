@@ -5357,7 +5357,7 @@ class ResolveDataRequestPayload(BaseModel):
 _CAMPOS_DOCUMENTO = frozenset({
     "dniScaneado", "licenciaConducir", "lunasPolarizadas", "comprobanteDomicilio",
     "recordConductor", "antecedentesPoliciales", "cv", "certificadosTrabajo",
-    "referenciasLaborales", "cuestionarioManejoDefensivo", "tarjetaPropiedad",
+    "referenciasLaborales", "tarjetaPropiedad",
     "soat", "revisionTecnica",
 })
 _SUFIJOS_DOCUMENTO = ("", "Reverso", "Completo")

@@ -67,7 +67,9 @@ export const DOCUMENTOS_CONDUCTOR = [
   { key: 'cv', label: 'Currículum Vitae', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'certificadosTrabajo', label: 'Certificados de Trabajo', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },
   { key: 'referenciasLaborales', label: 'Referencias Laborales', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },
-  { key: 'cuestionarioManejoDefensivo', label: 'Cuestionario de Manejo Defensivo', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
+  // El cuestionario de manejo defensivo no está: no es un papel que se suba
+  // sino el test del alta (`QuizManejoDefensivo`), y como documento salía en
+  // la ficha con «Sin archivo» y un botón de subir. Nadie subió nunca uno.
 
   // --- Del vehículo ---
   { key: 'tarjetaPropiedad', label: 'Tarjeta de Propiedad', tipo: TIPO_TARJETA, dueno: DUENO_VEHICULO },
