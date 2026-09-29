@@ -5119,6 +5119,80 @@ async def eliminar_documento_del_conductor(payload: DocumentoEliminado, session_
     return {"perfil_conductor": nuevo, "archivo_borrado": archivo_borrado}
 
 
+class FotoDelConductor(BaseModel):
+    # La unidad de la ficha: su conductor es quien recibe la foto.
+    unidad: str
+    # «avatar» (la foto de perfil) o «vehiculo».
+    tipo: str
+    nombre: str
+    tipo_archivo: str
+    base64: str
+
+
+_FOTOS_DEL_CONDUCTOR = ("avatar", "vehiculo")
+
+
+def _ruta_de_la_foto(conductor: Dict[str, Any], tipo: str, nombre: str) -> str:
+    """Dónde va la foto que sube Administración por el conductor.
+
+    La de perfil, en la carpeta de fotos de perfil del conductor —la misma que
+    usaría él—, no en la de quien la sube. La del vehículo, en la de su unidad,
+    como cuando la sube él desde su perfil.
+    """
+    if tipo == "avatar":
+        identidad = conductor.get("email") or conductor.get("identifier") or _clave_de_cuenta(conductor)
+        return _ruta_unica(_ruta_de_documento(CARPETA_AVATARES, _carpeta_personal(identidad), nombre))
+    return _ruta_unica(_ruta_de_documento(str(conductor.get("unidad_id") or ""), "fotoVehiculo", nombre))
+
+
+@app.post("/api/admin/driver/foto")
+async def cambiar_foto_del_conductor(payload: FotoDelConductor, session_token: SessionCookie = None):
+    """Administración cambia la foto de perfil o la del vehículo de un conductor.
+
+    Hasta ahora solo las cambiaba el propio conductor desde su perfil, y quien
+    da de alta a alguien que no se maneja con la aplicación tiene que poder
+    hacerlo todo por él. Como con el resto de datos personales, una cuenta sin
+    perfil recibe uno al ponerle la foto del vehículo (ver `_escribir_en_el_conductor`).
+    """
+    actor = await require_admin_session(session_token)
+    if payload.tipo not in _FOTOS_DEL_CONDUCTOR:
+        raise HTTPException(status_code=400, detail="La foto es la de perfil o la del vehículo.")
+    if not str(payload.tipo_archivo or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="La foto tiene que ser una imagen (JPG, PNG o WebP).")
+    # Toca la cuenta y la actividad: todo tiene que estar cargado.
+    await reload_db(force=True)
+    conductor = _conductores_por_unidad().get(payload.unidad)
+    if conductor is None:
+        raise HTTPException(status_code=409, detail="La unidad no tiene cuenta de conductor, y la foto se guarda en ella.")
+
+    ruta = _ruta_de_la_foto(conductor, payload.tipo, payload.nombre)
+    await upload_document_to_storage(payload.base64, ruta, payload.tipo_archivo)
+    foto = {"name": payload.nombre, "type": payload.tipo_archivo, "path": ruta}
+
+    antes = {clave: conductor[clave] for clave in ("avatar", "perfil_conductor") if clave in conductor}
+    if payload.tipo == "avatar":
+        conductor["avatar"] = foto
+    else:
+        conductor["perfil_conductor"] = {**_perfil_de(conductor), "fotoVehiculo": foto}
+    actividad_previa = list(actividad_db)
+    registrar_actividad(
+        "Foto de perfil cambiada" if payload.tipo == "avatar" else "Foto del vehículo cambiada",
+        actor=actor, entity_type="unidad", entity_id=payload.unidad, entity_label=payload.unidad,
+        description="Administración cambió la foto desde la ficha del conductor.", status="success",
+    )
+    try:
+        await persist_users_only()
+    except EscrituraSinDeshacer:
+        raise
+    except Exception:
+        for clave in ("avatar", "perfil_conductor"):
+            conductor.pop(clave, None)
+        conductor.update(antes)
+        actividad_db[:] = actividad_previa
+        raise
+    return {"foto": foto, "perfil_conductor": _perfil_de(conductor) or None}
+
+
 @app.post("/api/admin/driver/notify")
 async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCookie = None):
     """Admin envía un aviso interno al conductor."""

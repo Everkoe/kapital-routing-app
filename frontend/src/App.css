@@ -1699,6 +1699,21 @@ select.campo-pendiente {
   height: 64px; gap: 8px; font-size: 0.85rem; color: var(--text-muted);
   border-style: dashed; cursor: default;
 }
+/* Cambiar la foto del conductor o la del vehículo desde la ficha. */
+.driver-photo, .vehicle-photo-marco { position: relative; }
+.foto-cambiar {
+  position: absolute; right: 8px; bottom: 8px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); transition: border-color 0.15s ease, color 0.15s ease;
+}
+.foto-cambiar:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.foto-cambiar.ocupado { cursor: wait; opacity: 0.75; }
+/* En la foto del vehículo va abajo a la izquierda: a la derecha están «Ver
+   completa» y, arriba, la X que cierra la ficha. Sin foto, a media altura. */
+.vehicle-photo-marco .foto-cambiar { left: 10px; right: auto; bottom: 10px; }
+.vehicle-photo-marco .sin-foto + .foto-cambiar { bottom: auto; top: 50%; transform: translateY(-50%); }
 /* Los dos cuadros de información, de la misma altura. */
 .profile-right .info-grid { align-items: stretch; }
 /* El aviso al conductor, en la columna izquierda, bajo sus datos. */

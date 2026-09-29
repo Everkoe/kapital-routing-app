@@ -148,6 +148,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   **solo si está en la carpeta de su unidad y nada más lo señala** (`_archivo_solo_suyo`): la ruta sale del
   perfil, que escribe el propio conductor, y sin esa comprobación podría apuntar su documento al de otra
   unidad para que Administración lo borrara.
+  **Las fotos del conductor —la de perfil y la del vehículo— también las cambia Administración** desde la
+  ficha (`POST /api/admin/driver/foto`, por padrón): la de perfil va a la carpeta de fotos de perfil **del
+  conductor**, no a la de quien la sube (`/api/documentos/subir` usa siempre la del que sube); la del
+  vehículo, a la de su unidad.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

@@ -2214,6 +2214,64 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(backend.notifications_db), avisos)
         borrar.assert_not_awaited()
 
+    async def _cambiar_foto(self, unidad, tipo, tipo_archivo="image/jpeg"):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()) as subir,
+        ):
+            respuesta = await backend.cambiar_foto_del_conductor(backend.FotoDelConductor(
+                unidad=unidad, tipo=tipo, nombre="foto.jpg", tipo_archivo=tipo_archivo, base64="AA==",
+            ))
+        guardar.assert_awaited_once()
+        return respuesta, subir
+
+    async def test_administration_changes_the_drivers_photos(self):
+        # Solo las cambiaba el conductor desde su perfil; quien lo da de alta
+        # por él tiene que poder hacerlo todo.
+        conductor = self._unidad_con_conductor()
+        respuesta, subir = await self._cambiar_foto("K-027", "avatar")
+        ruta = conductor["avatar"]["path"]
+        # En la carpeta de fotos de perfil del conductor, no en la de quien la sube.
+        self.assertTrue(ruta.startswith(backend.CARPETA_AVATARES + "/usuario-"), ruta)
+        self.assertEqual(ruta.count("/"), 1)
+        subir.assert_awaited_once_with("AA==", ruta, "image/jpeg")
+        self.assertEqual(respuesta["foto"]["path"], ruta)
+
+        respuesta, _ = await self._cambiar_foto("K-027", "vehiculo")
+        ruta = conductor["perfil_conductor"]["fotoVehiculo"]["path"]
+        self.assertTrue(ruta.startswith("K-027/fotoVehiculo-"), ruta)
+        self.assertEqual(respuesta["perfil_conductor"]["fotoVehiculo"]["path"], ruta)
+        self.assertEqual(backend.actividad_db[-1]["action_type"], "Foto del vehículo cambiada")
+
+    async def test_a_photo_needs_an_image_and_a_driver(self):
+        self._unidad_con_conductor()
+        backend.conductores_db["K-999"] = {"chofer": "PRUEBA"}
+        casos = [("K-027", "otra", "image/jpeg", 400), ("K-027", "avatar", "application/pdf", 400),
+                 ("K-999", "avatar", "image/jpeg", 409)]
+        for unidad, tipo, tipo_archivo, estado in casos:
+            with self.assertRaises(HTTPException) as caught:
+                await self._cambiar_foto(unidad, tipo, tipo_archivo)
+            self.assertEqual(caught.exception.status_code, estado, (unidad, tipo, tipo_archivo))
+
+    async def test_a_failed_photo_change_leaves_the_account_as_it_was(self):
+        conductor = self._unidad_con_conductor()
+        antes = copy.deepcopy(conductor)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()),
+            patch.object(
+                backend, "persist_users_only",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            for tipo in ("avatar", "vehiculo"):
+                with self.assertRaises(HTTPException):
+                    await backend.cambiar_foto_del_conductor(backend.FotoDelConductor(
+                        unidad="K-027", tipo=tipo, nombre="f.jpg", tipo_archivo="image/jpeg", base64="AA==",
+                    ))
+        self.assertEqual(conductor, antes)
+
     async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
@@ -3878,6 +3936,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
             ("POST", "/api/admin/driver/documento/eliminar",
              {"json": {"conductor": "x@k.com", "campo": "dniScaneado"}}),
+            ("POST", "/api/admin/driver/foto",
+             {"json": {"unidad": "K-001", "tipo": "avatar", "nombre": "a.jpg",
+                       "tipo_archivo": "image/jpeg", "base64": "AA=="}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),

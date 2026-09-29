@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
-import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown, Maximize2 } from 'lucide-react';
+import { Paperclip, MessageCircle, Loader, Download, User, Search, AlertTriangle, FileCheck, CarFront, X, Check, Send, ShieldAlert, ChevronDown, Maximize2, Camera } from 'lucide-react';
 import { GlobalLoader } from './components/GlobalLoader';
 import CorreoEditable from './components/CorreoEditable';
 import CampoEditable from './components/CampoEditable';
@@ -9,6 +9,8 @@ import DocumentViewer from './components/DocumentViewer';
 import ImagenGuardada from './components/ImagenGuardada';
 import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from './utils/flotaDocumentStatus';
 import { apiFetch, apiRequest } from './utils/apiClient';
+import { documentoABase64 } from './utils/imageUtils';
+import { validarArchivoDocumento } from './utils/validacionDocumento';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
 import { conDocumentoNuevo } from './constants/documentosConductor';
@@ -402,6 +404,46 @@ const FlotaView = ({ usuario, initialBase }) => {
     fetchFlota();
   };
 
+  /**
+   * Cambia la foto de perfil o la del vehículo del conductor de la ficha.
+   *
+   * Solo las cambiaba el propio conductor desde su perfil; Administración las
+   * necesita para dar de alta entero a quien no se maneja con la aplicación.
+   * La imagen se comprime como cualquier documento antes de subirla.
+   */
+  const [subiendoFoto, setSubiendoFoto] = useState(null);
+  const cambiarFoto = async (tipo, archivo) => {
+    const unidad = conductorInfo?.unidad_id;
+    if (!archivo || !unidad || subiendoFoto) return;
+    const problema = archivo.type?.startsWith('image/')
+      ? validarArchivoDocumento(archivo)
+      : 'La foto tiene que ser una imagen (JPG, PNG o WebP).';
+    if (problema) {
+      toast.error(problema);
+      return;
+    }
+    setSubiendoFoto(tipo);
+    try {
+      const imagen = await documentoABase64(archivo);
+      const respuesta = await apiFetch('/api/admin/driver/foto', {
+        method: 'POST',
+        json: { unidad, tipo, nombre: imagen.name, tipo_archivo: imagen.type, base64: imagen.base64 },
+      });
+      setConductorInfo(previo => ({
+        ...previo,
+        usuario: {
+          ...previo?.usuario,
+          ...(tipo === 'avatar' ? { avatar: respuesta.foto } : { perfil_conductor: respuesta.perfil_conductor }),
+        },
+      }));
+      toast.success(tipo === 'avatar' ? 'Foto de perfil actualizada.' : 'Foto del vehículo actualizada.');
+    } catch (error) {
+      toast.error(error?.message || 'No se pudo subir la foto.');
+    } finally {
+      setSubiendoFoto(null);
+    }
+  };
+
   const handleOpenConductor = async (unidadId) => {
     if (!unidadId) return;
     setIsConductorModalOpen(true);
@@ -537,6 +579,20 @@ const FlotaView = ({ usuario, initialBase }) => {
         .some((cliente) => clientesFiltro.includes(cliente));
     return matchesSearch && matchesBase && matchesCliente;
   });
+
+  const botonDeFoto = (tipo, texto) => fichaConCuenta && (
+    <label className={`foto-cambiar${subiendoFoto === tipo ? ' ocupado' : ''}`} title={texto}>
+      {subiendoFoto === tipo ? <Loader size={13} className="animate-spin" /> : <Camera size={13} />}
+      {subiendoFoto === tipo ? 'Subiendo…' : texto}
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        style={{ display: 'none' }}
+        disabled={Boolean(subiendoFoto)}
+        onChange={(e) => { cambiarFoto(tipo, e.target.files?.[0]); e.target.value = ''; }}
+      />
+    </label>
+  );
 
   // La ficha abierta: lo que tiene copia en el perfil del conductor se lee
   // de la unidad, igual que el Excel (`filaDeLaBase`).
@@ -974,6 +1030,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                     ) : (
                       <div className="avatar-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><User size={40} strokeWidth={1.5} /></div>
                     )}
+                    {botonDeFoto('avatar', conductorInfo.usuario.avatar ? 'Cambiar foto' : 'Subir foto')}
                   </div>
                   {/* El padrón se edita en su propio rótulo: repetirlo en una
                       fila «Padrón: K-027» debajo era leer dos veces lo mismo. */}
@@ -1040,6 +1097,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                       una franja baja en vez de un recuadro vacío que empuje la
                       información hacia abajo. La foto vive en Storage, así que
                       el perfil solo guarda su ruta y la resuelve ImagenGuardada. */}
+                  <div className="vehicle-photo-marco">
                   {fotoDelVehiculo ? (
                     // Entera, sin recortar, sobre la misma foto desenfocada que
                     // rellena la franja; al pulsarla se abre en grande.
@@ -1068,6 +1126,8 @@ const FlotaView = ({ usuario, initialBase }) => {
                       <span>Sin foto de vehículo</span>
                     </div>
                   )}
+                  {botonDeFoto('vehiculo', fotoDelVehiculo ? 'Cambiar foto' : 'Subir foto')}
+                  </div>
                   <div className="info-grid">
                     <div className="info-section">
                       <h4>Información del conductor</h4>
