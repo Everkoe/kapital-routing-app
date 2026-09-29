@@ -4,6 +4,7 @@ import FileUploadZone from './FileUploadZone';
 import {
   CARA_COMPLETO,
   CARA_DETRAS,
+  caraBloqueada,
   carasDeDocumento,
   caraInicial,
 } from '../constants/documentosConductor';
@@ -55,12 +56,14 @@ const DocumentoMultiCara = ({
     tieneArchivo: tieneArchivo(archivos?.[cara.campo]),
   }));
 
-  // Se abre por la primera cara que falta: quien llega con todo a medias
-  // empieza donde toca, y quien ya subió delante ve directamente el reverso.
-  // Salvo que ya haya subido la imagen con ambas caras, en cuyo caso no falta
-  // ninguna y se abre por ella.
+  // Se abre por la imagen completa, que es lo que se sube casi siempre; quien
+  // ya empezó por caras sueltas, por la que le falta (`caraInicial`). Con la
+  // imagen completa subida, delante y detrás se bloquean: si la cara elegida
+  // queda bloqueada, se vuelve a la completa.
   const [activa, setActiva] = useState(() => caraInicial(caras));
-  const cara = caras.find((c) => c.campo === activa) || caras[0];
+  const cara = caras.find((c) => c.campo === activa && !caraBloqueada(c, caras))
+    || caras.find((c) => !caraBloqueada(c, caras))
+    || caras[0];
   const variasCaras = caras.length > 1;
 
   return (
@@ -78,19 +81,24 @@ const DocumentoMultiCara = ({
 
       {variasCaras && (
         <div className="documento-caras" role="tablist" aria-label={`Caras de ${documento.label}`}>
-          {caras.map((opcion) => (
-            <button
-              key={opcion.campo}
-              type="button"
-              role="tab"
-              aria-selected={opcion.campo === cara.campo}
-              className={`documento-cara${opcion.campo === cara.campo ? ' activa' : ''}`}
-              onClick={() => setActiva(opcion.campo)}
-            >
-              {opcion.tieneArchivo && <Check size={12} aria-hidden="true" />}
-              {opcion.nombre}
-            </button>
-          ))}
+          {caras.map((opcion) => {
+            const bloqueada = caraBloqueada(opcion, caras);
+            return (
+              <button
+                key={opcion.campo}
+                type="button"
+                role="tab"
+                aria-selected={opcion.campo === cara.campo}
+                className={`documento-cara${opcion.campo === cara.campo ? ' activa' : ''}`}
+                disabled={bloqueada}
+                title={bloqueada ? 'Ya subiste la imagen completa: no hace falta por caras.' : undefined}
+                onClick={() => setActiva(opcion.campo)}
+              >
+                {opcion.tieneArchivo && <Check size={12} aria-hidden="true" />}
+                {opcion.nombre}
+              </button>
+            );
+          })}
         </div>
       )}
 

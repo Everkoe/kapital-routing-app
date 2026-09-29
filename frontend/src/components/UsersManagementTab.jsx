@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, XCircle, MinusCircle, Truck, Shield, Searc
 import { GlobalLoader } from './GlobalLoader';
 import { apiFetch } from '../utils/apiClient';
 import RevisionDocumentosConductor from './RevisionDocumentosConductor';
+import { conDocumentoNuevo } from '../constants/documentosConductor';
 import ImagenGuardada from './ImagenGuardada';
 import ContrasenaProvisional from './ContrasenaProvisional';
 
@@ -428,7 +429,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                   ...previo,
                   user: {
                     ...previo.user,
-                    perfil_conductor: { ...previo.user.perfil_conductor, [campo]: documento },
+                    perfil_conductor: conDocumentoNuevo(previo.user.perfil_conductor, campo, documento),
                   },
                 }))}
               />

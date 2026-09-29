@@ -5162,6 +5162,20 @@ def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
     return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
 
+def _ruta_unica(ruta: str) -> str:
+    """La ruta con una marca propia de esta subida, antes de la extensión.
+
+    Con la ruta fija de cada documento, reemplazarlo sobrescribía el mismo
+    archivo y la ficha seguía enseñando el anterior: la página guarda cinco
+    minutos la URL firmada de cada ruta, y el almacenamiento puede servir su
+    copia vieja. Con una ruta nueva no hay nada viejo que reutilizar. El
+    archivo reemplazado se queda en el bucket, sin que nada lo señale.
+    """
+    carpeta, _, archivo = ruta.rpartition("/")
+    nombre, punto, extension = archivo.rpartition(".") if "." in archivo else (archivo, "", "")
+    return f"{carpeta}/{nombre}-{secrets.token_hex(4)}{punto}{extension}"
+
+
 @app.post("/api/documentos/subir")
 async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie = None):
     """Guarda un documento en Storage y devuelve su ruta.
@@ -5174,6 +5188,7 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
         ruta = _ruta_de_avatar(actor, datos.nombre)
     else:
         ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+    ruta = _ruta_unica(ruta)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
     # para el contenido de un DNI.

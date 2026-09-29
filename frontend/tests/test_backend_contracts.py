@@ -3201,6 +3201,32 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("..", ruta)
                 self.assertEqual(ruta.count("/"), 1, "siempre unidad/archivo")
 
+    async def test_replacing_a_document_uploads_it_to_a_new_path(self):
+        """Con la misma ruta, la ficha seguía enseñando la imagen anterior.
+
+        La página guarda la URL firmada de cada ruta unos minutos, y reemplazar
+        sobrescribía el mismo archivo: nada cambiaba de nombre y nada se volvía
+        a pedir.
+        """
+        datos = backend.DocumentoSubida(
+            unidad_id="K-027", campo="recordConductor", nombre="record.PDF",
+            tipo="application/pdf", base64="JVBERi0=",
+        )
+        with patch.object(backend, "upload_document_to_storage", new=AsyncMock()) as subir:
+            primera = await backend.subir_documento(datos)
+            segunda = await backend.subir_documento(datos)
+
+        self.assertNotEqual(primera["path"], segunda["path"])
+        for respuesta in (primera, segunda):
+            ruta = respuesta["path"]
+            # Sigue siendo de su unidad —el permiso para verla sale de ahí— y
+            # conserva la extensión.
+            self.assertTrue(ruta.startswith("K-027/recordConductor-"), ruta)
+            self.assertTrue(ruta.endswith(".pdf"), ruta)
+            self.assertEqual(ruta.count("/"), 1)
+        self.assertEqual([c.args[1] for c in subir.await_args_list], [primera["path"], segunda["path"]])
+        self.assertEqual(backend._ruta_unica("K-027/cv").count("-"), 2, "sin extensión, también")
+
     def test_a_driver_can_only_reach_their_own_unit_documents(self):
         """Conocer una ruta no puede bastar para ver el DNI de otro."""
         conductor = {"rol": "Conductor", "unidad_id": "K-027"}

@@ -8,9 +8,11 @@ import {
   TIPO_TARJETA,
   admiteReverso,
   CARA_COMPLETO,
+  caraBloqueada,
   caraDestinoParaArrastre,
   caraInicial,
   carasDeDocumento,
+  conDocumentoNuevo,
   claveCompleto,
   claveReverso,
   documentosPorDueno,
@@ -104,13 +106,53 @@ test('las lunas polarizadas son opcionales', () => {
   assert.equal(lunas.tipo, TIPO_TARJETA);
 });
 
-test('un archivo arrastrado cae en el primer hueco libre', () => {
+test('sin nada subido, lo arrastrado o pegado va a la imagen completa', () => {
+  // Es lo que se sube casi siempre; iba a «Delante» y ahí acababa el DNI entero.
   const caras = [
+    { campo: 'dniScaneadoCompleto', tieneArchivo: false },
     { campo: 'dniScaneado', tieneArchivo: false },
     { campo: 'dniScaneadoReverso', tieneArchivo: false },
   ];
 
-  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneado', 'con todo vacío, al anverso');
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneadoCompleto');
+});
+
+test('con la imagen completa subida, lo arrastrado la reemplaza', () => {
+  const caras = [
+    { campo: 'dniScaneadoCompleto', tieneArchivo: true },
+    { campo: 'dniScaneado', tieneArchivo: false },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+  ];
+
+  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneadoCompleto');
+});
+
+test('delante y detrás se bloquean mientras haya imagen completa', () => {
+  const vacias = [
+    { campo: 'dniScaneadoCompleto', tieneArchivo: false },
+    { campo: 'dniScaneado', tieneArchivo: false },
+    { campo: 'dniScaneadoReverso', tieneArchivo: false },
+  ];
+  assert.deepEqual(vacias.map((c) => caraBloqueada(c, vacias)), [false, false, false]);
+
+  const conCompleta = vacias.map((c) => ({ ...c, tieneArchivo: c.campo === 'dniScaneadoCompleto' }));
+  // La completa se puede reemplazar siempre; las otras, no.
+  assert.deepEqual(conCompleta.map((c) => caraBloqueada(c, conCompleta)), [false, true, true]);
+  assert.equal(caraBloqueada({ campo: 'cv' }, [{ campo: 'cv', tieneArchivo: true }]), false);
+});
+
+test('reemplazar un documento lo deja pendiente de revisar', () => {
+  const perfil = {
+    recordConductor: { path: 'K-027/recordConductor-aaaa.pdf' },
+    revision_docs: { recordConductor: { estado: 'aprobado', fecha: 'x' }, soat: { estado: 'aprobado' } },
+  };
+  const nuevo = conDocumentoNuevo(perfil, 'recordConductor', { path: 'K-027/recordConductor-bbbb.pdf' });
+
+  assert.equal(nuevo.recordConductor.path, 'K-027/recordConductor-bbbb.pdf');
+  assert.deepEqual(nuevo.revision_docs.recordConductor, { estado: 'pendiente', fecha: 'x' });
+  assert.equal(nuevo.revision_docs.soat.estado, 'aprobado', 'los demás no se tocan');
+  assert.equal(perfil.revision_docs.recordConductor.estado, 'aprobado', 'sin mutar el perfil de antes');
+  assert.equal(conDocumentoNuevo({}, 'cv', { path: 'x' }).revision_docs, undefined);
 });
 
 test('con el anverso ya subido, el archivo arrastrado va al reverso', () => {
@@ -138,17 +180,16 @@ test('un documento de una sola cara siempre recibe en ella', () => {
   assert.equal(caraDestinoParaArrastre(null), null);
 });
 
-test('un documento de tarjeta ofrece tres caras, completo la última', () => {
-  // «Completo» es la alternativa para quien escanea ambas caras en una hoja:
-  // va al final porque no se usa junto a las otras dos, sino en su lugar.
+test('un documento de tarjeta ofrece tres caras, completo la primera', () => {
+  // Iba al final, como la alternativa, y la gente subía el DNI entero en «Delante».
   const dni = DOCUMENTOS_CONDUCTOR.find((d) => d.key === 'dniScaneado');
   const caras = carasDeDocumento(dni);
 
   assert.deepEqual(caras.map((c) => c.campo), [
-    'dniScaneado', 'dniScaneadoReverso', 'dniScaneadoCompleto',
+    'dniScaneadoCompleto', 'dniScaneado', 'dniScaneadoReverso',
   ]);
-  assert.equal(caras.at(-1).nombre, CARA_COMPLETO);
-  assert.equal(caras[0].opcional, undefined, 'la cara de delante no es opcional');
+  assert.equal(caras[0].nombre, CARA_COMPLETO);
+  assert.equal(caras[1].opcional, undefined, 'la cara de delante no es opcional');
 });
 
 test('un documento de papel sigue teniendo una sola cara', () => {
@@ -173,22 +214,19 @@ test('con la imagen completa subida, la tarjeta abre por ella', () => {
   // Lo que se veía: subir «Completo» dejaba la tarjeta abierta en un anverso
   // vacío, pidiendo algo que el conductor ya había entregado.
   const caras = [
+    { campo: 'dniScaneadoCompleto', tieneArchivo: true },
     { campo: 'dniScaneado', tieneArchivo: false },
     { campo: 'dniScaneadoReverso', tieneArchivo: false },
-    { campo: 'dniScaneadoCompleto', tieneArchivo: true },
   ];
 
   assert.equal(caraInicial(caras), 'dniScaneadoCompleto');
-  // El destino de un arrastre no cambia: ahí sigue mandando el primer hueco,
-  // y de eso depende también la tarjeta del administrador.
-  assert.equal(caraDestinoParaArrastre(caras), 'dniScaneado');
 });
 
-test('sin imagen completa, la tarjeta abre por donde falta', () => {
+test('empezado por caras sueltas, la tarjeta abre por la que falta', () => {
   const caras = [
+    { campo: 'dniScaneadoCompleto', tieneArchivo: false },
     { campo: 'dniScaneado', tieneArchivo: true },
     { campo: 'dniScaneadoReverso', tieneArchivo: false },
-    { campo: 'dniScaneadoCompleto', tieneArchivo: false },
   ];
 
   assert.equal(caraInicial(caras), 'dniScaneadoReverso');

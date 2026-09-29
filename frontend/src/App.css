@@ -1258,6 +1258,12 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   padding: 6px 10px;
 }
 
+/* Delante y detrás, mientras haya una imagen completa del documento. */
+.doc-subir-label.doc-cara-bloqueada {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .doc-cara-opcional {
   font-size: 0.65rem;
   font-weight: 500;
@@ -1536,6 +1542,11 @@ select.campo-pendiente {
 
 .documento-cara:hover {
   color: var(--text-primary);
+}
+
+.documento-cara:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .documento-cara.activa {

@@ -4,6 +4,7 @@ import DocumentDropZone from './DocumentDropZone';
 import {
   CARA_COMPLETO,
   admiteReverso,
+  caraBloqueada,
   caraDestinoParaArrastre,
   carasDeDocumento,
 } from '../constants/documentosConductor';
@@ -17,9 +18,9 @@ import {
  * un botón por cara, y el resto del tiempo la tarjeta se lee igual que la de un
  * documento de una sola cara.
  *
- * Arrastrar sobre la tarjeta llena **el primer hueco libre**, anverso antes que
- * reverso. Es la regla más predecible: sin ella habría que adivinar a qué cara
- * iba un archivo soltado sobre el conjunto.
+ * Arrastrar o pegar sobre la tarjeta va a la imagen completa, salvo que ya se
+ * haya empezado por caras sueltas (`caraDestinoParaArrastre`). Con la imagen
+ * completa subida, delante y detrás quedan bloqueadas.
  */
 
 const ESTADOS = {
@@ -189,27 +190,36 @@ const DocumentReviewCard = ({
 
       {dosCaras && subiendo && (
         <div className="doc-caras-subida">
-          {caras.map((cara) => (
-            <label key={cara.campo} className="btn-view-doc doc-subir-label">
-              <Upload size={13} />
-              {cara.tieneArchivo ? `Reemplazar ${cara.nombre.toLowerCase()}` : `Subir ${cara.nombre.toLowerCase()}`}
-              {cara.nombre === CARA_COMPLETO && !cara.tieneArchivo && (
-                <span className="doc-cara-opcional">ambas caras en una</span>
-              )}
-              {cara.opcional && cara.nombre !== CARA_COMPLETO && !cara.tieneArchivo && (
-                <span className="doc-cara-opcional">opcional</span>
-              )}
-              <input
-                type="file"
-                accept={accept}
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  onUpload(cara.campo, e.target.files[0]);
-                  setSubiendo(false);
-                }}
-              />
-            </label>
-          ))}
+          {caras.map((cara) => {
+            const bloqueada = caraBloqueada(cara, caras);
+            return (
+              <label
+                key={cara.campo}
+                className={`btn-view-doc doc-subir-label${bloqueada ? ' doc-cara-bloqueada' : ''}`}
+                aria-disabled={bloqueada}
+                title={bloqueada ? 'Ya está la imagen completa: no hace falta por caras.' : undefined}
+              >
+                <Upload size={13} />
+                {cara.tieneArchivo ? `Reemplazar ${cara.nombre.toLowerCase()}` : `Subir ${cara.nombre.toLowerCase()}`}
+                {cara.nombre === CARA_COMPLETO && !cara.tieneArchivo && (
+                  <span className="doc-cara-opcional">ambas caras en una</span>
+                )}
+                {cara.opcional && cara.nombre !== CARA_COMPLETO && !cara.tieneArchivo && !bloqueada && (
+                  <span className="doc-cara-opcional">opcional</span>
+                )}
+                <input
+                  type="file"
+                  accept={accept}
+                  disabled={bloqueada}
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    onUpload(cara.campo, e.target.files[0]);
+                    setSubiendo(false);
+                  }}
+                />
+              </label>
+            );
+          })}
         </div>
       )}
 

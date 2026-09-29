@@ -16,10 +16,14 @@ import { urlFirmada } from '../utils/documentoStorage';
  */
 
 const DocumentViewer = ({ documento, onClose, pie = null }) => {
-  // El estado arranca en la primera cara y se reinicia solo: quien monta este
-  // visor le pasa un `key` por documento, así React lo remonta al abrir otro.
-  // Reiniciarlo con un efecto sería el antipatrón que la regla de hooks señala.
-  const [indice, setIndice] = useState(0);
+  // El estado arranca en la primera cara que tiene archivo —«Completo» va
+  // primera y a menudo está vacía: abrir por ella decía «no disponible» con el
+  // DNI subido en «Delante»— y se reinicia solo: quien monta este visor le pasa
+  // un `key` por documento, así React lo remonta al abrir otro. Reiniciarlo con
+  // un efecto sería el antipatrón que la regla de hooks señala.
+  const [indice, setIndice] = useState(
+    () => Math.max(0, carasDe(documento).findIndex(caraTieneDocumento)),
+  );
   // Las URLs firmadas caducan en minutos, así que se piden al abrir la cara y
   // se guardan solo mientras el visor está en pantalla.
   const [firmadas, setFirmadas] = useState({});

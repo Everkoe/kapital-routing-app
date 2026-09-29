@@ -131,6 +131,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
   un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
   Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
+- **Cada subida de un documento va a una ruta nueva** (`_ruta_unica`, desde el 2026-09-29): la ruta era fija
+  por unidad y campo, así que reemplazar sobrescribía el mismo archivo y la ficha seguía enseñando el
+  anterior —la página guarda cinco minutos la URL firmada de cada ruta—. El archivo reemplazado se queda
+  en el bucket sin nada que lo señale; si el espacio llega a importar, habrá que limpiarlos. En los
+  documentos de dos caras **«Completo» va primero** (la gente subía el DNI entero en «Delante») y, con
+  él subido, delante y detrás quedan bloqueadas (`caraBloqueada`); pegar o arrastrar va a «Completo»
+  salvo que ya se empezara por caras sueltas.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

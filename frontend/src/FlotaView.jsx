@@ -11,6 +11,7 @@ import { countFleetDocumentStatuses, getDocumentStatus, getFleetUnitId } from '.
 import { apiFetch, apiRequest } from './utils/apiClient';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
+import { conDocumentoNuevo } from './constants/documentosConductor';
 import { whatsappDeUnidad } from './utils/telefonoUnidad';
 import {
   BASES, GRUPOS_DE_MASIVO, TIPOS_DE_DOCUMENTO, esDeMasivo, fechaLegible, valorDeLaUnidad,
@@ -1261,7 +1262,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                         ...previo,
                         usuario: {
                           ...previo.usuario,
-                          perfil_conductor: { ...previo.usuario?.perfil_conductor, [campo]: documento },
+                          perfil_conductor: conDocumentoNuevo(previo.usuario?.perfil_conductor, campo, documento),
                         },
                       }))}
                     />
