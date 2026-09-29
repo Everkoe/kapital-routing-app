@@ -1672,6 +1672,13 @@ select.campo-pendiente {
   border: 1px solid var(--border-color);
 }
 .vehicle-placeholder { text-align: center; font-size: 20px; opacity: 0.5; color: var(--text-muted); }
+/* Encabeza la columna derecha de la ficha del conductor. */
+.vehicle-photo.vehicle-photo-banner { aspect-ratio: auto; height: 260px; }
+.vehicle-photo.vehicle-photo-banner.sin-foto {
+  height: 64px; gap: 8px; font-size: 0.85rem; color: var(--text-muted);
+}
+/* El aviso al conductor, en la columna izquierda, bajo sus datos. */
+.profile-left .notify-section { margin-top: 16px; padding: 16px; text-align: left; }
 
 .info-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 16px;

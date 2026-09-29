@@ -964,7 +964,7 @@ const FlotaView = ({ usuario, initialBase }) => {
               </div>
             ) : conductorInfo ? (
               <div className="profile-layout">
-                {/* LEFT: Avatar + Vehicle Photo */}
+                {/* LEFT: Avatar + datos de la cuenta + aviso al conductor */}
                 <div className="profile-left">
                   <div className="driver-photo">
                     {conductorInfo.usuario.avatar ? (
@@ -1001,23 +1001,56 @@ const FlotaView = ({ usuario, initialBase }) => {
                     }))}
                   />
 
-                  {/* La foto vive en Storage desde la migración, así que el
-                      perfil solo guarda su ruta: pasársela a `img` dejaba la
-                      imagen rota aunque el archivo siguiera en el bucket. */}
-                  <div className="vehicle-photo" style={{marginTop:'0'}}>
-                    <ImagenGuardada
-                      imagen={conductorInfo.usuario.perfil_conductor?.fotoVehiculo}
-                      alt="Vehículo"
-                      style={{width:'100%',height:'100%',objectFit:'cover'}}
+                  {/* El aviso vive aquí, a mano: al final de la columna derecha
+                      había que bajar por todos los documentos para llegar. */}
+                  <div className="notify-section">
+                    <h4 style={{display:'flex', alignItems:'center', gap:'8px', margin:'0 0 12px 0'}}>
+                      <ShieldAlert size={18} color="#f59e0b" />
+                      Enviar Aviso al Conductor
+                    </h4>
+                    <p style={{fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0 0 10px 0'}}>
+                      El conductor recibirá esta notificación en su portal.
+                    </p>
+                    <textarea
+                      value={notifyMsg}
+                      onChange={e => setNotifyMsg(e.target.value)}
+                      placeholder={`Ej: Estimado ${conductorInfo.usuario.nombre}, por favor vuelva a enviar su licencia de conducir ya que la imagen no es legible.`}
+                      className="notify-textarea"
+                      rows={3}
                     />
-                    {!conductorInfo.usuario.perfil_conductor?.fotoVehiculo && (
-                      <div className="vehicle-placeholder"><CarFront size={36} strokeWidth={1} /><p style={{fontSize:'0.75rem',marginTop:'6px'}}>Sin foto de vehículo</p></div>
-                    )}
+                    <button
+                      className="btn-primary"
+                      style={{marginTop:'10px', display:'flex', alignItems:'center', gap:'8px', padding:'10px 20px'}}
+                      onClick={handleNotifyDriver}
+                      disabled={isSendingNotify || !notifyMsg.trim()}
+                    >
+                      <Send size={15} />
+                      {isSendingNotify ? 'Enviando...' : 'Enviar Aviso'}
+                    </button>
                   </div>
                 </div>
 
-                {/* RIGHT: Info + Docs review */}
+                {/* RIGHT: Foto del vehículo + Info + Docs review */}
                 <div className="profile-right">
+                  {/* La foto del vehículo encabeza la ficha: en la columna de
+                      240 px era una tira donde no se distinguía nada. Sin foto,
+                      una franja baja en vez de un recuadro vacío que empuje la
+                      información hacia abajo. La foto vive en Storage, así que
+                      el perfil solo guarda su ruta y la resuelve ImagenGuardada. */}
+                  {conductorInfo.usuario.perfil_conductor?.fotoVehiculo ? (
+                    <div className="vehicle-photo vehicle-photo-banner">
+                      <ImagenGuardada
+                        imagen={conductorInfo.usuario.perfil_conductor.fotoVehiculo}
+                        alt="Vehículo"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="vehicle-photo vehicle-photo-banner sin-foto">
+                      <CarFront size={22} strokeWidth={1.5} aria-hidden="true" />
+                      <span>Sin foto de vehículo</span>
+                    </div>
+                  )}
                   <div className="info-grid">
                     <div className="info-section">
                       <h4>Información del conductor</h4>
@@ -1283,32 +1316,6 @@ const FlotaView = ({ usuario, initialBase }) => {
                     }}
                   /> */}
 
-                  {/* NOTIFY DRIVER */}
-                  <div className="notify-section">
-                    <h4 style={{display:'flex', alignItems:'center', gap:'8px', margin:'0 0 12px 0'}}>
-                      <ShieldAlert size={18} color="#f59e0b" />
-                      Enviar Aviso al Conductor
-                    </h4>
-                    <p style={{fontSize:'0.82rem', color:'var(--text-secondary)', margin:'0 0 10px 0'}}>
-                      El conductor recibirá esta notificación en su portal.
-                    </p>
-                    <textarea
-                      value={notifyMsg}
-                      onChange={e => setNotifyMsg(e.target.value)}
-                      placeholder={`Ej: Estimado ${conductorInfo.usuario.nombre}, por favor vuelva a enviar su licencia de conducir ya que la imagen no es legible.`}
-                      className="notify-textarea"
-                      rows={3}
-                    />
-                    <button
-                      className="btn-primary"
-                      style={{marginTop:'10px', display:'flex', alignItems:'center', gap:'8px', padding:'10px 20px'}}
-                      onClick={handleNotifyDriver}
-                      disabled={isSendingNotify || !notifyMsg.trim()}
-                    >
-                      <Send size={15} />
-                      {isSendingNotify ? 'Enviando...' : 'Enviar Aviso'}
-                    </button>
-                  </div>
                 </div>
               </div>
             ) : (
