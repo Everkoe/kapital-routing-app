@@ -1738,6 +1738,12 @@ select.campo-pendiente {
   font-size: 0.75rem; color: var(--text-secondary); margin: 0;
   font-style: italic;
 }
+/* Aviso en la ficha de un conductor que aún no pasó su alta en la aplicación. */
+.ficha-sin-alta {
+  font-size: 0.8rem; color: var(--text-secondary); margin: 0 0 8px;
+  padding: 8px 10px; border-radius: 8px; background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
 /* La nota del cuestionario de manejo, en la tarjeta que ocupa su sitio. */
 .cuestionario-nota {
   font-size: 0.8rem; color: var(--text-secondary); margin: 0;

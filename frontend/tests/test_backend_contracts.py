@@ -1919,6 +1919,21 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         await self._editar_unidad("K-027", telefono="999999999")
         self.assertEqual(conductor["celular"], "999999999")
 
+    async def test_a_driver_cannot_change_their_document_by_request(self):
+        # El documento es con lo que se entra: por solicitud se saltaría la
+        # comprobación de que no sea de otra cuenta.
+        conductor = self._unidad_con_conductor()
+        with self.assertRaises(HTTPException) as caught:
+            await self._resolver("numDoc", "45757485")
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(conductor["perfil_conductor"]["numDoc"], "8179107")
+
+    async def test_an_approved_name_changes_the_account_too(self):
+        conductor = self._unidad_con_conductor()
+        await self._resolver("nombres", "CHAVEZ CHAVEZ JUAN MANUEL")
+        self.assertEqual(backend.conductores_db["K-027"]["chofer"], "CHAVEZ CHAVEZ JUAN MANUEL")
+        self.assertEqual(conductor["nombre"], "CHAVEZ CHAVEZ JUAN MANUEL")
+
     async def test_approving_validates_before_touching_anything(self):
         conductor = self._unidad_con_conductor()
         with self.assertRaises(HTTPException) as caught:
@@ -1952,6 +1967,159 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                 ))
         self.assertEqual(conductor, antes_conductor)
         self.assertEqual(backend.conductores_db["K-027"], antes_unidad)
+
+    def _conductor_creado_en_la_pagina(self, dni="45757485", padron="KV-001"):
+        # Así deja la cuenta el alta de «+ Nueva Unidad»: la clave y el
+        # identificador son el DNI, y no hay perfil hasta que el conductor
+        # completa su alta en la aplicación.
+        backend.conductores_db[padron] = {"chofer": "NUEVO CONDUCTOR", "base": "MASIVO", "telefono": "987654321"}
+        conductor = {
+            "identifier": dni, "dni": dni, "nombre": "NUEVO CONDUCTOR", "rol": "Conductor",
+            "unidad_id": padron, "telefono": "987654321", "estado": "Activo",
+        }
+        backend.usuarios_db[dni] = conductor
+        return conductor
+
+    async def test_administration_can_change_the_drivers_document(self):
+        conductor = self._conductor_creado_en_la_pagina()
+        with patch.object(backend, "revocar_sesiones_de", new=AsyncMock(return_value=1)) as revocar:
+            respuesta, persist_state = await self._editar_unidad("KV-001", documento=" 4575 7486 ")
+        self.assertEqual(conductor["perfil_conductor"]["numDoc"], "45757486")
+        self.assertEqual((conductor["dni"], conductor["identifier"]), ("45757486", "45757486"))
+        # La cuenta tenía el DNI por clave: se muda entera. Entra con el nuevo,
+        # el viejo deja de servir y queda libre, y quien estaba dentro vuelve a
+        # entrar (las sesiones se cierran con la clave vieja, antes de mudarla).
+        self.assertIs(backend.usuarios_db.get("45757486"), conductor)
+        self.assertNotIn("45757485", backend.usuarios_db)
+        self.assertIs(backend.get_user_by_identifier("45757486"), conductor)
+        self.assertIsNone(backend.get_user_by_identifier("45757485"))
+        revocar.assert_awaited_once_with(conductor)
+        guardado = persist_state.await_args.args[0]["usuarios"]
+        self.assertIn("45757486", guardado)
+        self.assertNotIn("45757485", guardado)
+        # Accesos usa `identifier` como clave para desactivar o reiniciar: tiene
+        # que seguir siendo la clave de la cuenta.
+        self.assertEqual(conductor["identifier"], "45757486")
+        self.assertEqual(respuesta["perfil_conductor"]["numDoc"], "45757486")
+        aviso = next(e for e in backend.actividad_db if e["action_type"] == "Documento del conductor cambiado")
+        self.assertEqual(aviso["status"], "warning")
+        self.assertEqual((aviso["changes"][0]["anterior"], aviso["changes"][0]["nuevo"]), ("45757485", "45757486"))
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][3], "45757486")
+
+    async def test_an_imported_account_keeps_its_key_when_the_document_changes(self):
+        # Su clave es un correo inventado, no el DNI: no hace falta mudarla.
+        conductor = self._unidad_con_conductor()
+        with patch.object(backend, "revocar_sesiones_de", new=AsyncMock()) as revocar:
+            await self._editar_unidad("K-027", documento="45757499")
+        self.assertIs(backend.usuarios_db["dni-K-027"], conductor)
+        self.assertEqual(conductor["perfil_conductor"]["numDoc"], "45757499")
+        self.assertIs(backend.get_user_by_identifier("45757499"), conductor)
+        self.assertIsNone(backend.get_user_by_identifier("08179107"))
+        revocar.assert_not_awaited()
+
+    async def test_the_same_dni_with_other_leading_zeros_is_refused(self):
+        self._conductor_creado_en_la_pagina()
+        otro = self._unidad_con_conductor("K-027")
+        otro["perfil_conductor"]["numDoc"] = "0123456"
+        with self.assertRaises(HTTPException) as caught:
+            await self._editar_unidad("KV-001", documento="00123456")
+        self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_only_administration_changes_a_document(self):
+        self._conductor_creado_en_la_pagina()
+        backend.AUTH_ENFORCED = True
+        programador = {"identifier": "prog@example.com", "rol": "Programador de rutas", "estado": "Activo"}
+        backend.usuarios_db["prog@example.com"] = programador
+        token = await backend.abrir_sesion(programador)
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            with self.assertRaises(HTTPException) as caught:
+                await backend.update_flota("KV-001", backend.FlotaUpdate(documento="45757486"), token)
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(backend.usuarios_db["45757485"]["dni"], "45757485")
+
+    async def test_a_failed_document_change_moves_the_account_back(self):
+        conductor = self._conductor_creado_en_la_pagina()
+        antes = copy.deepcopy(conductor)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "revocar_sesiones_de", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.update_flota("KV-001", backend.FlotaUpdate(documento="45757486"))
+        self.assertIs(backend.usuarios_db.get("45757485"), conductor)
+        self.assertNotIn("45757486", backend.usuarios_db)
+        self.assertEqual(conductor, antes)
+
+    async def test_a_document_that_belongs_to_another_account_is_refused(self):
+        self._conductor_creado_en_la_pagina()
+        otro = self._unidad_con_conductor("K-027")
+        otro["nombre"] = "CHAVEZ"
+        with self.assertRaises(HTTPException) as caught:
+            # Esa cuenta lo guardó sin el cero de delante: es el mismo documento.
+            await self._editar_unidad("KV-001", documento="08179107")
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("CHAVEZ", caught.exception.detail)
+        for campos in ({"documento": "1234"}, {"tipo_documento": "Licencia"}, {"documento": ""}):
+            with self.assertRaises(HTTPException) as caught:
+                await self._editar_unidad("KV-001", **campos)
+            self.assertEqual(caught.exception.status_code, 400, campos)
+        with patch.object(backend, "revocar_sesiones_de", new=AsyncMock()):
+            await self._editar_unidad("KV-001", tipo_documento="ce", documento="ab-123456")
+        perfil = backend.usuarios_db["AB-123456"]["perfil_conductor"]
+        self.assertEqual((perfil["tipoDoc"], perfil["numDoc"]), ("CE", "AB-123456"))
+
+    async def test_administration_fills_in_a_driver_who_never_did_the_alta(self):
+        # Para quien no se maneja con la aplicación: lo que llena Administración
+        # le crea el perfil, y ya no se le pide el formulario de alta.
+        conductor = self._conductor_creado_en_la_pagina()
+        await self._editar_unidad(
+            "KV-001", direccion="CALLE 1", fecha_nacimiento="1990-01-02", telefono_emergencia="999888777",
+        )
+        perfil = conductor["perfil_conductor"]
+        self.assertEqual(
+            (perfil["direccion"], perfil["fechaNacimiento"], perfil["telefonoEmergencia"]),
+            ("CALLE 1", "1990-01-02", "999888777"),
+        )
+        self.assertIn("perfil_conductor", conductor, "profileComplete sale de que exista")
+
+    async def test_the_drivers_name_changes_everywhere(self):
+        conductor = self._unidad_con_conductor()
+        await self._editar_unidad("K-027", chofer="CHAVEZ CHAVEZ JUAN M.")
+        self.assertEqual(conductor["nombre"], "CHAVEZ CHAVEZ JUAN M.")
+        self.assertEqual(conductor["perfil_conductor"]["nombres"], "CHAVEZ CHAVEZ JUAN M.")
+        # Una cuenta sin perfil cambia el nombre de la cuenta, sin crearle uno.
+        sin_alta = self._conductor_creado_en_la_pagina()
+        await self._editar_unidad("KV-001", chofer="OTRO NOMBRE", telefono="911222333")
+        self.assertEqual((sin_alta["nombre"], sin_alta["telefono"]), ("OTRO NOMBRE", "911222333"))
+        self.assertNotIn("perfil_conductor", sin_alta)
+
+    async def test_a_failed_save_restores_the_whole_account(self):
+        conductor = self._conductor_creado_en_la_pagina()
+        antes = copy.deepcopy(conductor)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "_persist_app_state",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.update_flota("KV-001", backend.FlotaUpdate(
+                    documento="45757486", chofer="OTRO", direccion="CALLE 1",
+                ))
+        self.assertEqual(conductor, antes)
+
+    async def test_the_plate_from_the_alta_counts_as_the_drivers(self):
+        # El alta en la aplicación la guarda como `vehiculoPlaca`.
+        conductor = self._conductor_creado_en_la_pagina()
+        conductor["perfil_conductor"] = {"vehiculoPlaca": "CDE-456", "numDoc": "45757485"}
+        _, filas = await self._exportar("MASIVO")
+        self.assertEqual(filas[0][7], "CDE-456")
 
     async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
         with (

@@ -12,7 +12,9 @@ import { apiFetch, apiRequest } from './utils/apiClient';
 
 import RevisionDocumentosConductor from './components/RevisionDocumentosConductor';
 import { whatsappDeUnidad } from './utils/telefonoUnidad';
-import { BASES, GRUPOS_DE_MASIVO, esDeMasivo, fechaLegible, valorDeLaUnidad } from './utils/filaDeLaBase';
+import {
+  BASES, GRUPOS_DE_MASIVO, TIPOS_DE_DOCUMENTO, esDeMasivo, fechaLegible, valorDeLaUnidad,
+} from './utils/filaDeLaBase';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -389,9 +391,11 @@ const FlotaView = ({ usuario, initialBase }) => {
     setConductorInfo(previo => ({
       ...previo,
       flota: { ...previo?.flota, ...(respuesta?.unidad || { [campo]: valorFinal }) },
-      usuario: respuesta?.perfil_conductor
-        ? { ...previo?.usuario, perfil_conductor: respuesta.perfil_conductor }
-        : previo?.usuario,
+      usuario: {
+        ...previo?.usuario,
+        ...(respuesta?.cuenta || {}),
+        ...(respuesta?.perfil_conductor ? { perfil_conductor: respuesta.perfil_conductor } : {}),
+      },
     }));
     toast.success('Guardado. Ya sale así en el Excel.');
     fetchFlota();
@@ -539,6 +543,10 @@ const FlotaView = ({ usuario, initialBase }) => {
   const flotaFicha = conductorInfo?.flota || {};
   const deLaUnidad = (campo) => valorDeLaUnidad(flotaFicha, perfilFicha, campo, conductorInfo?.unidad_id);
   const fichaDeMasivo = esDeMasivo(flotaFicha.base);
+  // Sin cuenta no hay dónde guardar lo personal; sin perfil, el conductor aún
+  // no pasó su alta en la aplicación, y llenarlo aquí la da por hecha.
+  const fichaConCuenta = Boolean(conductorInfo?.usuario?.tiene_cuenta);
+  const fichaSinAlta = fichaConCuenta && !perfilFicha;
 
   // KPIs calculations
   const totalUnits = flota.length;
@@ -975,7 +983,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                       era el mismo dato dos veces. */}
                   <h3 className="driver-name">
                     <CampoEditable
-                      valor={conductorInfo.flota?.chofer || conductorInfo.usuario.nombre || ''}
+                      valor={deLaUnidad('chofer') || conductorInfo.usuario.nombre || ''}
                       vacio="Sin nombre"
                       onGuardar={(valor) => guardarCampoUnidad('chofer', valor)}
                     />
@@ -1009,17 +1017,40 @@ const FlotaView = ({ usuario, initialBase }) => {
                   <div className="info-grid">
                     <div className="info-section">
                       <h4>Información del conductor</h4>
-                      {/* El DNI no se edita aquí: es con lo que el conductor
-                          entra a la aplicación, y cambiarlo no es corregir un
-                          dato de la base. Nacimiento y dirección viven en su
-                          cuenta, así que sin cuenta no hay dónde guardarlos. */}
-                      <p><strong>DNI/Documento:</strong> {perfilFicha?.tipoDoc || 'DNI'} {perfilFicha?.numDoc || conductorInfo.usuario.dni || 'No registrado'}</p>
+                      {/* Administración puede dar de alta al conductor entero,
+                          para quien no se maneja con la aplicación. Todo esto
+                          vive en su cuenta: sin cuenta no hay dónde guardarlo. */}
+                      {fichaSinAlta && (
+                        <p className="ficha-sin-alta">
+                          Todavía no completó su alta en la aplicación. Lo que llenes aquí
+                          queda como su alta, y ya no se le pedirá.
+                        </p>
+                      )}
+                      {/* Tipo y número por separado: juntos se leían como
+                          «DNI 12342134». El número es con lo que el conductor
+                          entra, así que, como el padrón, solo lo cambia
+                          Administración (el backend lo exige igual). */}
+                      <CampoEditable
+                        etiqueta="Tipo de documento"
+                        valor={perfilFicha?.tipoDoc || (conductorInfo.usuario.dni ? 'DNI' : '')}
+                        opciones={TIPOS_DE_DOCUMENTO}
+                        vacio="—"
+                        editable={fichaConCuenta && puedeRenombrar}
+                        onGuardar={(valor) => guardarCampoUnidad('tipo_documento', valor)}
+                      />
+                      <CampoEditable
+                        etiqueta="N.º de documento"
+                        valor={perfilFicha?.numDoc || conductorInfo.usuario.dni}
+                        vacio="No registrado"
+                        editable={fichaConCuenta && puedeRenombrar}
+                        onGuardar={(valor) => guardarCampoUnidad('documento', valor)}
+                      />
                       <CampoEditable
                         etiqueta="Nacimiento"
                         valor={perfilFicha?.fechaNacimiento}
                         tipo="date"
                         vacio="—"
-                        editable={Boolean(perfilFicha)}
+                        editable={fichaConCuenta}
                         onGuardar={(valor) => guardarCampoUnidad('fecha_nacimiento', valor)}
                       >
                         {fechaLegible(perfilFicha?.fechaNacimiento)}
@@ -1028,7 +1059,7 @@ const FlotaView = ({ usuario, initialBase }) => {
                         etiqueta="Dirección"
                         valor={perfilFicha?.direccion}
                         vacio="—"
-                        editable={Boolean(perfilFicha)}
+                        editable={fichaConCuenta}
                         onGuardar={(valor) => guardarCampoUnidad('direccion', valor)}
                       />
                       {/* Un solo teléfono: el que usa el botón de WhatsApp y el
@@ -1041,9 +1072,13 @@ const FlotaView = ({ usuario, initialBase }) => {
                         vacio="Sin teléfono"
                         onGuardar={(valor) => guardarCampoUnidad('telefono', valor)}
                       />
-                      {perfilFicha?.telefonoEmergencia && (
-                        <p><strong>Emergencia:</strong> {perfilFicha.telefonoEmergencia}</p>
-                      )}
+                      <CampoEditable
+                        etiqueta="Emergencia"
+                        valor={perfilFicha?.telefonoEmergencia}
+                        vacio="—"
+                        editable={fichaConCuenta}
+                        onGuardar={(valor) => guardarCampoUnidad('telefono_emergencia', valor)}
+                      />
                     </div>
                     <div className="info-section">
                       <h4>Información del vehículo</h4>
@@ -1289,7 +1324,13 @@ const FlotaView = ({ usuario, initialBase }) => {
       {showModal && (
         <RegistroDeUnidad
           onCerrar={() => setShowModal(false)}
-          onRegistrada={() => fetchFlota()}
+          // Se abre su ficha para completar el resto —nacimiento, dirección,
+          // datos del vehículo, documentos— sin tener que ir a buscarla: así se
+          // da de alta entero a quien no se maneja con la aplicación.
+          onRegistrada={(unidad) => {
+            fetchFlota();
+            handleOpenConductor(unidad);
+          }}
         />
       )}
 

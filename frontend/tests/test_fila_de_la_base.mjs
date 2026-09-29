@@ -21,6 +21,11 @@ test('una placa igual al padrón no es una placa', () => {
   assert.equal(valorDeLaUnidad({ placa: 'ABC-123' }, { placa: 'BUR-628' }, 'placa', 'K-050'), 'ABC-123');
 });
 
+test('la placa que dejó el alta en la aplicación también cuenta', () => {
+  assert.equal(valorDeLaUnidad({}, { vehiculoPlaca: 'CDE-456' }, 'placa', 'KV-001'), 'CDE-456');
+  assert.equal(valorDeLaUnidad({}, { placa: 'BUR-628', vehiculoPlaca: 'CDE-456' }, 'placa'), 'BUR-628');
+});
+
 test('el grupo solo se elige en masivo', () => {
   assert.equal(esDeMasivo('MASIVO'), true);
   assert.equal(esDeMasivo('Sharf Motorizado'), false);
@@ -28,7 +33,7 @@ test('el grupo solo se elige en masivo', () => {
 });
 
 test('cada campo con copia tiene la suya en el perfil', () => {
-  assert.deepEqual(Object.keys(ESPEJO_EN_PERFIL), ['telefono', 'placa', 'marca', 'modelo', 'ano', 'color']);
+  assert.deepEqual(Object.keys(ESPEJO_EN_PERFIL), ['chofer', 'telefono', 'placa', 'marca', 'modelo', 'ano', 'color']);
 });
 
 test('la fecha se lee como día/mes/año, y lo que no se entiende se deja', () => {

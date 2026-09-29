@@ -177,7 +177,7 @@ const RegistroDeUnidad = ({ onCerrar, onRegistrada }) => {
       if (fallidos.length > 0) {
         toast.error(`Unidad ${padron} registrada, pero no se pudo subir: ${fallidos.join(', ')}. Súbelo desde su ficha.`);
       } else {
-        toast.success('Unidad registrada correctamente.');
+        toast.success('Unidad registrada. Completa sus datos en la ficha.');
       }
       onCerrar();
     } catch (error) {

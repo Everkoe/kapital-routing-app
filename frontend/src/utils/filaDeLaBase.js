@@ -11,6 +11,7 @@
 
 /** Campo de la unidad → su copia en el perfil del conductor. */
 export const ESPEJO_EN_PERFIL = {
+  chofer: 'nombres',
   telefono: 'telefonoDirecto',
   placa: 'placa',
   marca: 'vehiculoMarca',
@@ -18,6 +19,9 @@ export const ESPEJO_EN_PERFIL = {
   ano: 'vehiculoAnio',
   color: 'vehiculoColor',
 };
+
+/** El alta en la aplicación guarda la placa como `vehiculoPlaca`; se lee también. */
+const OTRA_COPIA_EN_PERFIL = { placa: 'vehiculoPlaca' };
 
 const texto = (valor) => String(valor ?? '').trim();
 
@@ -30,8 +34,11 @@ const texto = (valor) => String(valor ?? '').trim();
 export const valorDeLaUnidad = (flota, perfil, campo, padron = '') => {
   let propio = texto(flota?.[campo]);
   if (campo === 'placa' && propio.toUpperCase() === texto(padron || flota?.unidad_id).toUpperCase()) propio = '';
-  return propio || texto(perfil?.[ESPEJO_EN_PERFIL[campo]]);
+  return propio || texto(perfil?.[ESPEJO_EN_PERFIL[campo]]) || texto(perfil?.[OTRA_COPIA_EN_PERFIL[campo]]);
 };
+
+/** Los documentos con que un conductor se identifica, los mismos que en su alta. */
+export const TIPOS_DE_DOCUMENTO = ['DNI', 'CE', 'Pasaporte'];
 
 /** Las bases, escritas como se guardan (`_BASES` en el backend). */
 export const BASES = ['MASIVO', 'REMISSE', 'Sharf Motorizado'];

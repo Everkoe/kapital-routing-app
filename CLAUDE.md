@@ -104,8 +104,18 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   solo rellena lo que le falte: `_valor_de_unidad` en el backend y `filaDeLaBase.js` en el frontend,
   que tienen que coincidir) y **guardar escribe los dos**: la ficha (`PUT /api/flota/{padrón}`) copia al
   perfil del conductor, y aprobar lo que pidió el conductor (`resolve-update`) copia a la unidad, salvo
-  la capacidad, que en la unidad es la del ruteo. Todas las columnas de la base se editan desde la
-  ficha salvo el DNI —es con lo que el conductor entra— y la base. La exportación
+  la capacidad, que en la unidad es la del ruteo. **Todo lo del conductor y del vehículo se edita desde
+  la ficha** (decisión del usuario, 2026-09-29: Administración tiene que poder dar de alta entero a quien
+  no se maneja con la aplicación), y al registrar una unidad se abre su ficha para completarlo. El nombre
+  tiene tres copias —unidad, cuenta y perfil— y cambia en las tres. El **documento** también se edita,
+  aunque es con lo que el conductor entra, y **solo Administración** (`_ADMINISTRATION_ROLES`, como
+  renombrar un padrón): se valida (DNI de 8 cifras; CE o pasaporte), se rechaza con 409 si ya es de otra
+  cuenta —también con otros ceros delante: «00123456» y «0123456» son el mismo—, y queda en el historial
+  como aviso propio. Las cuentas creadas desde la página tienen el DNI por **clave**, y la clave es con lo
+  que se entra, de quién son las sesiones y lo que Accesos usa para desactivar: cambiar el DNI **muda la
+  cuenta** a la clave nueva (`_clave_tras_el_documento`) y cierra sus sesiones. Sin mudarla, el DNI viejo
+  seguía entrando y desactivarla en Accesos decía «hecho» sin hacer nada (lo encontró una revisión). Por
+  solicitud del conductor el documento no se cambia (400). La exportación
   (`GET /api/flota/export`, también `SHARF`) sale de `_fila_de_la_base` con lo mismo que enseña la
   ficha, por base y padrón, con la fecha como fecha, el celular, la capacidad y el año como números y el
   DNI con sus ocho cifras (la importación les quitó el cero a 25), igual que la base original. El
@@ -114,9 +124,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   esos datos los teclea el conductor en su alta, y openpyxl los convertiría en fórmulas vivas.
   **La base se elige** en el alta y en la ficha (`_BASES`): las unidades dadas de alta en la página
   nacían sin ella y no salían en el Excel de ninguna. El grupo sigue a la base (`_grupo_para`): en
-  Remisse y en Sharf es la propia base; en masivo, TP, KONECTA o TP/KONECTA. Dirección y nacimiento
-  **no se crean desde la ficha** en una cuenta sin `perfil_conductor`: su existencia es lo que decide
-  que el conductor ya pasó el alta (`profileComplete`), y crearlo le saltaría el formulario. Al aprobar a
+  Remisse y en Sharf es la propia base; en masivo, TP, KONECTA o TP/KONECTA. En una cuenta sin
+  `perfil_conductor` —el conductor no pasó el alta en la aplicación—, **llenar un dato personal desde la
+  ficha se lo crea**, y como su existencia es lo que decide que el alta está hecha (`profileComplete`), la
+  aplicación ya no le pide el formulario: es Administración haciéndolo por él, y la ficha lo avisa. Lo
+  del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
   un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
   Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene

@@ -3631,10 +3631,11 @@ class FlotaUpdate(BaseModel):
     revision: Optional[str] = None
     atu: Optional[str] = None
     licencia: Optional[str] = None
-    # El resto de columnas de la base, para que se edite todo desde la página y
-    # la exportación lo recoja. Las del vehículo son de la unidad; dirección y
-    # nacimiento, de la cuenta de su conductor. El DNI no está: es con lo que
-    # el conductor entra, y cambiarlo no es corregir un dato de la base.
+    # El resto de datos del conductor y del vehículo, para que Administración
+    # pueda darlo de alta entero por quien no se maneja con la aplicación. Los
+    # del vehículo son de la unidad; los personales, de la cuenta del conductor.
+    # El documento también: es con lo que entra, y se comprueba que no sea de
+    # otra cuenta.
     base: Optional[str] = None
     marca: Optional[str] = None
     modelo: Optional[str] = None
@@ -3643,6 +3644,9 @@ class FlotaUpdate(BaseModel):
     grupo: Optional[str] = None
     direccion: Optional[str] = None
     fecha_nacimiento: Optional[str] = None
+    telefono_emergencia: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    documento: Optional[str] = None
 
 class ChatMessagePayload(BaseModel):
     role: str
@@ -4302,6 +4306,9 @@ _ETIQUETA_FLOTA = {
     "base": "Base",
     "direccion": "Dirección",
     "fecha_nacimiento": "Fecha de nacimiento",
+    "telefono_emergencia": "Teléfono de emergencia",
+    "tipo_documento": "Tipo de documento",
+    "documento": "Número de documento",
 }
 
 _actividad_cache_loaded_at: Optional[float] = None
@@ -5241,10 +5248,17 @@ def _cuenta_con_documento(documento: Any, excepto: Dict[str, Any]) -> Optional[s
     formas = set(_formas_de_identificador(documento))
     if not formas:
         return None
+    # «00123456» y «0123456» son el mismo DNI aunque ninguna de sus formas
+    # coincida letra a letra: se comparan también sin los ceros de delante.
+    limpio = str(documento or "").strip()
+    sin_ceros = limpio.lstrip("0") if _parece_dni(limpio) else None
     for clave, usuario in usuarios_db.items():
         if usuario is excepto or not isinstance(usuario, dict) or clave.startswith("__"):
             continue
-        if formas.intersection(_alias_de_login(clave, usuario)):
+        alias = _alias_de_login(clave, usuario)
+        if formas.intersection(alias):
+            return clave
+        if sin_ceros and any(_parece_dni(a) and a.lstrip("0") == sin_ceros for a in alias):
             return clave
     return None
 
@@ -5512,7 +5526,7 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
     unidad_id = conductor.get("unidad_id")
     antes = (
         deepcopy(conductor.get("perfil_conductor")), deepcopy(conductor.get("notificaciones")),
-        {k: conductor[k] for k in ("celular", "telefono") if k in conductor},
+        {k: conductor[k] for k in ("celular", "telefono", "nombre") if k in conductor},
         dict(conductores_db[unidad_id]) if unidad_id in conductores_db else None,
     )
 
@@ -5578,6 +5592,7 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
 
 # Campo de la unidad → su copia en el perfil del conductor.
 _ESPEJO_EN_PERFIL = {
+    "chofer": "nombres",
     "telefono": "telefonoDirecto",
     "placa": "placa",
     "marca": "vehiculoMarca",
@@ -5590,7 +5605,16 @@ _ESPEJO_EN_PERFIL = {
 _ESPEJO_EN_UNIDAD = {perfil: unidad for unidad, perfil in _ESPEJO_EN_PERFIL.items()}
 
 # Lo que solo vive en la cuenta del conductor: nombre en la petición → perfil.
-_CAMPOS_PERSONALES = {"direccion": "direccion", "fecha_nacimiento": "fechaNacimiento"}
+_CAMPOS_PERSONALES = {
+    "direccion": "direccion",
+    "fecha_nacimiento": "fechaNacimiento",
+    "telefono_emergencia": "telefonoEmergencia",
+    "tipo_documento": "tipoDoc",
+    "documento": "numDoc",
+}
+# El alta del conductor guarda la placa como `vehiculoPlaca`; la importación y
+# su perfil, como `placa`. Se lee cualquiera de las dos.
+_OTRA_COPIA_EN_PERFIL = {"placa": "vehiculoPlaca"}
 
 
 def _conductores_por_unidad() -> Dict[str, Dict[str, Any]]:
@@ -5629,7 +5653,9 @@ def _valor_de_unidad(
     propio = _texto(unidad.get(campo))
     if campo == "placa" and propio and propio.upper() == _texto(padron or unidad.get("unidad_id")).upper():
         propio = ""
-    return propio or _texto(_perfil_de(conductor).get(_ESPEJO_EN_PERFIL[campo]))
+    perfil = _perfil_de(conductor)
+    return (propio or _texto(perfil.get(_ESPEJO_EN_PERFIL[campo]))
+            or _texto(perfil.get(_OTRA_COPIA_EN_PERFIL.get(campo, ""))))
 
 
 def _telefono_de_unidad(unidad: Dict[str, Any], conductor: Optional[Dict[str, Any]]) -> str:
@@ -7121,6 +7147,7 @@ async def get_conductor_info(unidad_id: str, session_token: SessionCookie = None
             "identifier": conductor_user.get("identifier") if conductor_user else "",
             # Las cuentas creadas con su unidad lo llevan aquí y no en el perfil.
             "dni": conductor_user.get("dni") if conductor_user else "",
+            "tiene_cuenta": conductor_user is not None,
             # El último respaldo del teléfono, el mismo que usa la exportación.
             "celular": (conductor_user.get("celular") or conductor_user.get("telefono") or "") if conductor_user else "",
             "avatar": conductor_user.get("avatar") if conductor_user else None,
@@ -7219,7 +7246,7 @@ def _grupo_para(base: Any, pedido: Optional[str], actual: Any) -> str:
 def _normalizar_campos_de_la_base(valores: Dict[str, Any]) -> Dict[str, Any]:
     """Sin espacios de más, en mayúsculas donde la base las usa, y el año con cuatro cifras."""
     normalizado = dict(valores)
-    for campo in ("telefono", "ano", "direccion", *_EN_MAYUSCULAS):
+    for campo in ("telefono", "telefono_emergencia", "ano", "direccion", *_EN_MAYUSCULAS):
         if campo not in normalizado:
             continue
         texto = _texto(normalizado[campo])
@@ -7237,6 +7264,40 @@ def _normalizar_campos_de_la_base(valores: Dict[str, Any]) -> Dict[str, Any]:
     return normalizado
 
 
+_TIPOS_DE_DOCUMENTO = ("DNI", "CE", "Pasaporte")
+
+
+def _documento_valido(conductor: Dict[str, Any], personales: Dict[str, Any]) -> Dict[str, Any]:
+    """El tipo y el número de documento, validados; el número, que no sea de otra cuenta.
+
+    Es con lo que el conductor entra a la aplicación: uno repetido haría que
+    dos personas entraran a la misma cuenta, o que ninguna entrara (`_unica`).
+    """
+    resultado = dict(personales)
+    if "tipo_documento" not in personales and "documento" not in personales:
+        return resultado
+    pedido = personales.get("tipo_documento", _perfil_de(conductor).get("tipoDoc") or "DNI")
+    tipo = next((t for t in _TIPOS_DE_DOCUMENTO if t.upper() == _texto(pedido).upper()), None)
+    if not tipo:
+        raise HTTPException(status_code=400, detail="El tipo de documento es DNI, CE o Pasaporte.")
+    if "tipo_documento" in personales:
+        resultado["tipo_documento"] = tipo
+    if "documento" in personales:
+        numero = re.sub(r"\s", "", _texto(personales["documento"])).upper()
+        if tipo == "DNI":
+            numero = re.sub(r"\D", "", numero)
+            if len(numero) != LARGO_DNI:
+                raise HTTPException(status_code=400, detail=f"El DNI tiene {LARGO_DNI} dígitos.")
+        elif not re.fullmatch(r"[A-Z0-9-]{6,20}", numero):
+            raise HTTPException(status_code=400, detail="Revisa el número de documento.")
+        otra = _cuenta_con_documento(numero, conductor)
+        if otra:
+            nombre = _texto((usuarios_db.get(otra) or {}).get("nombre")) or otra
+            raise HTTPException(status_code=409, detail=f"Ese documento ya es de otra cuenta: {nombre}.")
+        resultado["documento"] = numero
+    return resultado
+
+
 def _cambios_al_perfil(
     conductor: Dict[str, Any], cambios_de_unidad: Dict[str, Any], personales: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -7244,32 +7305,116 @@ def _cambios_al_perfil(
     perfil = _perfil_de(conductor)
     pedidos = {_ESPEJO_EN_PERFIL[c]: v for c, v in cambios_de_unidad.items() if c in _ESPEJO_EN_PERFIL}
     pedidos.update({_CAMPOS_PERSONALES[c]: v for c, v in personales.items()})
-    cambios = {campo: v for campo, v in pedidos.items() if _texto(perfil.get(campo)) != _texto(v)}
-    telefono = pedidos.get("telefonoDirecto")
-    if telefono is not None and any(
-        clave in conductor and _texto(conductor[clave]) != _texto(telefono) for clave in ("celular", "telefono")
-    ):
-        cambios["telefonoDirecto"] = telefono
+    return {campo: v for campo, v in pedidos.items() if _texto(perfil.get(campo)) != _texto(v)}
+
+
+def _cambios_a_la_cuenta(
+    conductor: Dict[str, Any], cambios_de_unidad: Dict[str, Any], personales: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Las copias sueltas en la cuenta, fuera del perfil, que tienen que cambiar con él.
+
+    El nombre es el que enseñan Accesos y el saludo; el teléfono está como
+    `celular` en las importadas y como `telefono` en las dadas de alta con su
+    unidad; el DNI, en `dni`. El `identifier` no se toca aquí: Accesos lo usa
+    como la clave de la cuenta, y si la clave es el DNI la cuenta se muda
+    entera (`_clave_tras_el_documento`).
+    """
+    cambios: Dict[str, Any] = {}
+    nombre = _texto(cambios_de_unidad.get("chofer"))
+    if nombre and _texto(conductor.get("nombre")) != nombre:
+        cambios["nombre"] = nombre
+    if "telefono" in cambios_de_unidad:
+        for clave in ("celular", "telefono"):
+            if clave in conductor and _texto(conductor[clave]) != _texto(cambios_de_unidad["telefono"]):
+                cambios[clave] = cambios_de_unidad["telefono"]
+    nuevo = personales.get("documento")
+    if nuevo and "dni" in conductor and _texto(conductor["dni"]) != nuevo:
+        cambios["dni"] = nuevo
     return cambios
 
 
-def _escribir_en_el_conductor(conductor: Dict[str, Any], cambios: Dict[str, Any]):
-    """Escribe en el perfil del conductor y devuelve con qué deshacerlo si el guardado falla.
+def _documento_de(conductor: Optional[Dict[str, Any]]) -> str:
+    """El número de documento de la cuenta: el del perfil o, sin él, el de la cuenta."""
+    return _texto(_perfil_de(conductor).get("numDoc")) or _texto((conductor or {}).get("dni"))
 
-    El teléfono también está suelto en la cuenta (`celular` en las importadas,
-    `telefono` en las dadas de alta con su unidad), y la tabla lo usa si falta
-    el de la unidad: se cambia con él para que no quede ninguna copia vieja.
+
+def _clave_tras_el_documento(conductor: Dict[str, Any], clave: Optional[str], personales: Dict[str, Any]) -> Optional[str]:
+    """La clave nueva de la cuenta si su clave era el documento viejo; si no, `None`.
+
+    Las cuentas dadas de alta desde la página tienen el DNI por clave, y la
+    clave es con lo que se entra, a quien pertenecen las sesiones y lo que
+    Accesos usa para desactivarla. Cambiar el DNI sin mudarla dejaba entrar con
+    el viejo, lo dejaba reservado para siempre y descolgaba la cuenta de
+    Accesos: desactivarla decía «hecho» sin hacer nada.
     """
-    perfil_previo = conductor.get("perfil_conductor")
-    telefonos_previos = {k: conductor[k] for k in ("celular", "telefono") if k in conductor}
-    conductor["perfil_conductor"] = {**_perfil_de(conductor), **cambios}
-    if "telefonoDirecto" in cambios:
-        for clave in telefonos_previos:
-            conductor[clave] = cambios["telefonoDirecto"]
+    nuevo = personales.get("documento")
+    viejo = _documento_de(conductor)
+    if not nuevo or not viejo or not clave or clave == nuevo:
+        return None
+    return nuevo if clave.lower() in _formas_de_identificador(viejo) else None
+
+
+def _exigir_administracion_para_el_documento(actor: Optional[Dict[str, Any]], pedidos: Dict[str, Any]) -> None:
+    """Cambiar el documento es cambiar con qué entra el conductor: solo Administración.
+
+    Como renombrar un padrón: el resto de la ficha lo edita cualquier rol
+    administrativo, pero esto mueve la identidad de una cuenta.
+    """
+    if actor is None or not ({"documento", "tipo_documento"} & pedidos.keys()):
+        return
+    if actor.get("rol") not in _ADMINISTRATION_ROLES:
+        raise HTTPException(status_code=403, detail="Solo Administración puede cambiar el documento del conductor.")
+
+
+def _anotar_edicion_de_la_ficha(
+    actor: Optional[Dict[str, Any]], placa: str, previous: Dict[str, Any], changes: Dict[str, Any],
+    personales: Dict[str, Any], perfil_previo: Dict[str, Any], documento_previo: str,
+) -> None:
+    """El historial de lo guardado desde la ficha; el documento, en su propio aviso."""
+    del_documento = {"tipo_documento", "documento"}
+    filas = [c for c in (
+        *(cambio(_ETIQUETA_FLOTA.get(campo, campo), previous.get(campo), valor)
+          for campo, valor in changes.items()),
+        *(cambio(_ETIQUETA_FLOTA[campo], perfil_previo.get(_CAMPOS_PERSONALES[campo]), valor)
+          for campo, valor in personales.items() if campo not in del_documento),
+    ) if c]
+    if filas or not (del_documento & personales.keys()):
+        registrar_actividad(
+            "Unidad actualizada", actor=actor, entity_type="unidad", entity_id=placa, entity_label=placa,
+            description=f"Unidad {placa} modificada desde la ficha del conductor.", status="success",
+            changes=filas,
+        )
+    documento = [c for c in (
+        cambio("Tipo de documento", perfil_previo.get("tipoDoc"), personales["tipo_documento"])
+        if "tipo_documento" in personales else None,
+        cambio("Número de documento", documento_previo, personales["documento"])
+        if "documento" in personales else None,
+    ) if c]
+    if documento:
+        registrar_actividad(
+            "Documento del conductor cambiado", actor=actor, entity_type="unidad", entity_id=placa,
+            entity_label=placa, status="warning",
+            description="Cambia con qué entra el conductor a la aplicación; sus sesiones abiertas se cierran.",
+            changes=documento,
+        )
+
+
+def _escribir_en_el_conductor(conductor: Dict[str, Any], al_perfil: Dict[str, Any], a_la_cuenta: Dict[str, Any]):
+    """Escribe en la cuenta del conductor y devuelve con qué deshacerlo si el guardado falla.
+
+    Si el conductor no tenía perfil —no pasó el alta en la aplicación—, esto se
+    lo crea: es Administración llenándolo por él, y a partir de ahí la
+    aplicación ya no le pide el formulario de alta.
+    """
+    antes = {clave: conductor[clave] for clave in ("perfil_conductor", *a_la_cuenta) if clave in conductor}
+    if al_perfil:
+        conductor["perfil_conductor"] = {**_perfil_de(conductor), **al_perfil}
+    conductor.update(a_la_cuenta)
 
     def deshacer() -> None:
-        conductor["perfil_conductor"] = perfil_previo
-        conductor.update(telefonos_previos)
+        for clave in ("perfil_conductor", *a_la_cuenta):
+            conductor.pop(clave, None)
+        conductor.update(antes)
 
     return deshacer
 
@@ -7281,6 +7426,12 @@ def _valor_aprobable(campo_del_perfil: str, valor: Any) -> Any:
     con cuatro cifras, y las dos copias tienen que quedar iguales. Lo que no
     cumple da 400 antes de tocar nada, y la solicitud se puede rechazar.
     """
+    if campo_del_perfil in ("numDoc", "tipoDoc"):
+        # Es con lo que el conductor entra: se cambia desde su ficha, donde se
+        # comprueba que no sea de otra cuenta y se muda la cuenta si hace falta.
+        raise HTTPException(
+            status_code=400, detail="El documento se cambia desde la ficha del conductor, no por solicitud.",
+        )
     campo = _ESPEJO_EN_UNIDAD.get(campo_del_perfil)
     if not campo:
         return valor
@@ -7306,6 +7457,8 @@ def _llevar_a_la_unidad(conductor: Dict[str, Any], campo_del_perfil: str, valor:
         for clave in ("celular", "telefono"):
             if clave in conductor:
                 conductor[clave] = nuevo
+    if campo == "chofer" and nuevo:
+        conductor["nombre"] = nuevo
     return conductores_db[unidad_id]
 
 
@@ -7498,6 +7651,7 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
         raise HTTPException(status_code=404, detail="Unidad no encontrada")
     previous = dict(conductores_db[placa])
     pedidos = _normalizar_campos_de_la_base(_model_changes(flota))
+    _exigir_administracion_para_el_documento(actor_admin, pedidos)
     changes = _normalize_fleet_expiries({
         key: value for key, value in pedidos.items() if key in _FLEET_UPDATE_FIELDS
     })
@@ -7509,42 +7663,45 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     # La fila de la base es la unidad y su conductor: lo que tiene copia en su
     # perfil se escribe en los dos, y dirección y nacimiento solo en el perfil.
     conductor = _conductores_por_unidad().get(placa)
-    con_perfil = isinstance((conductor or {}).get("perfil_conductor"), dict)
-    if personales and not con_perfil:
+    if personales and conductor is None:
         raise HTTPException(
             status_code=409,
-            detail=(
-                "El conductor todavía no completó su alta en la aplicación: la dirección y el "
-                "nacimiento los registra él al entrar por primera vez."
-            ),
+            detail="La unidad no tiene cuenta de conductor, y esos datos se guardan en ella.",
         )
-    al_perfil = _cambios_al_perfil(conductor, changes, personales) if con_perfil else {}
+    al_perfil, a_la_cuenta, clave, clave_nueva = {}, {}, None, None
+    if conductor is not None:
+        personales = _documento_valido(conductor, personales)
+        # Sin perfil, las copias del vehículo se quedan en la unidad; los datos
+        # personales sí se lo crean (ver `_escribir_en_el_conductor`).
+        if isinstance(conductor.get("perfil_conductor"), dict) or personales:
+            al_perfil = _cambios_al_perfil(conductor, changes, personales)
+        a_la_cuenta = _cambios_a_la_cuenta(conductor, changes, personales)
+        # Se toma antes de guardar: la relectura puede cambiar los objetos.
+        clave = _clave_de_cuenta(conductor)
+        clave_nueva = _clave_tras_el_documento(conductor, clave, personales)
+        if clave_nueva and _texto(conductor.get("identifier")).lower() == clave.lower():
+            a_la_cuenta["identifier"] = clave_nueva
     updated = {**previous, **changes}
     # Preserve base, document URLs and any future metadata by merging only the
     # explicit structured allow-list above.
-    if updated == previous and not al_perfil:
+    if updated == previous and not al_perfil and not a_la_cuenta:
         return {"message": "Sin cambios", "unchanged": True, "unidad": {"unidad_id": placa, **previous}, "flota": conductores_db}
-    perfil_previo = dict(_perfil_de(conductor))
+    perfil_previo, documento_previo = dict(_perfil_de(conductor)), _documento_de(conductor)
+    if clave_nueva:
+        # La cuenta se muda a su DNI nuevo, y quien estuviera dentro vuelve a
+        # entrar con él. Antes de tocar nada: si las sesiones no se pueden
+        # cerrar (503), no se cambia el documento.
+        await revocar_sesiones_de(conductor)
     conductores_db[placa] = updated
-    deshacer_conductor = _escribir_en_el_conductor(conductor, al_perfil) if al_perfil else None
+    deshacer_conductor = (
+        _escribir_en_el_conductor(conductor, al_perfil, a_la_cuenta) if (al_perfil or a_la_cuenta) else None
+    )
+    if clave_nueva:
+        usuarios_db[clave_nueva] = usuarios_db.pop(clave)
     # Se anota antes de persistir para que el guardado lo lleve consigo, y se
     # deshace junto al resto si la escritura falla.
     actividad_previa = list(actividad_db)
-    registrar_actividad(
-        "Unidad actualizada",
-        actor=actor_admin,
-        entity_type="unidad",
-        entity_id=placa,
-        entity_label=placa,
-        description=f"Unidad {placa} modificada desde la ficha del conductor.",
-        status="success",
-        changes=[c for c in (
-            *(cambio(_ETIQUETA_FLOTA.get(campo, campo), previous.get(campo), valor)
-              for campo, valor in changes.items()),
-            *(cambio(_ETIQUETA_FLOTA[campo], perfil_previo.get(_CAMPOS_PERSONALES[campo]), valor)
-              for campo, valor in personales.items()),
-        ) if c],
-    )
+    _anotar_edicion_de_la_ficha(actor_admin, placa, previous, changes, personales, perfil_previo, documento_previo)
     try:
         stored = await _persist_and_verify_fleet(placa, changes)
     except EscrituraSinDeshacer:
@@ -7552,14 +7709,21 @@ async def update_flota(placa: str, flota: FlotaUpdate, session_token: SessionCoo
     except Exception:
         conductores_db[placa] = previous
         actividad_db[:] = actividad_previa
+        if clave_nueva:
+            usuarios_db[clave] = usuarios_db.pop(clave_nueva)
         if deshacer_conductor:
             deshacer_conductor()
         raise
+    # El nombre y el documento van en la instantánea de la sesión abierta (si
+    # la cuenta se mudó, sus sesiones ya se cerraron).
+    if not clave_nueva and a_la_cuenta.keys() & {"nombre", "dni"}:
+        await refrescar_sesiones_de(usuarios_db.get(clave) or conductor)
     return {
         "message": "Unidad actualizada", "unchanged": False,
         "unidad": {"unidad_id": placa, **stored},
         # Para que la ficha abierta enseñe lo guardado sin volver a pedirla.
-        "perfil_conductor": _perfil_de(conductor) if con_perfil else None,
+        "perfil_conductor": _perfil_de(conductor) or None,
+        "cuenta": {campo: (conductor or {}).get(campo) for campo in ("nombre", "dni", "identifier")},
         "flota": conductores_db,
     }
 
