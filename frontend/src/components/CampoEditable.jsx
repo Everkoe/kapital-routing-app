@@ -74,6 +74,9 @@ const CampoEditable = ({
       {etiqueta && <strong>{etiqueta}:</strong>}
       {opciones ? (
         <select value={borrador} disabled={guardando} onChange={(e) => setBorrador(e.target.value)}>
+          {/* Sin valor, el desplegable enseñaba la primera opción sin haberla
+              elegido, y guardarla no hacía nada porque no había cambiado. */}
+          {!borrador && <option value="">Elegir…</option>}
           {opciones.map((opcion) => <option key={opcion}>{opcion}</option>)}
           {borrador && !opciones.includes(borrador) && <option>{borrador}</option>}
         </select>

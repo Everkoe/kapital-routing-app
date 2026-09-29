@@ -3,11 +3,14 @@ import { ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import DocumentReviewCard from './DocumentReviewCard';
 import DocumentViewer from './DocumentViewer';
+import ResultadoCuestionario from './ResultadoCuestionario';
 import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import { subirDocumento } from '../utils/documentoStorage';
 import { validarArchivoDocumento } from '../utils/validacionDocumento';
-import { DOCUMENTOS_CONDUCTOR, vigenciaDeDocumento } from '../constants/documentosConductor';
+import {
+  DUENO_CONDUCTOR, DUENO_VEHICULO, documentosPorDueno, vigenciaDeDocumento,
+} from '../constants/documentosConductor';
 import { getDocumentStatus } from '../utils/flotaDocumentStatus';
 import CampoEditable from './CampoEditable';
 
@@ -128,6 +131,20 @@ const RevisionDocumentosConductor = ({
     );
   };
 
+  const tarjetaDe = (documento) => (
+    <DocumentReviewCard
+      key={documento.key}
+      documento={documento}
+      perfil={perfil}
+      revisiones={revisiones}
+      cargando={cargando}
+      accept={ACCEPT}
+      onUpload={subirEnNombreDelConductor}
+      onReview={revisarDocumento}
+      onView={(abierto) => setViendo({ ...abierto, clave: documento.key })}
+    />
+  );
+
   return (
     <>
       <div className="review-docs-section">
@@ -135,19 +152,10 @@ const RevisionDocumentosConductor = ({
           <ShieldCheck size={18} /> {titulo}
         </h4>
         <div className="review-docs-grid">
-          {DOCUMENTOS_CONDUCTOR.map((documento) => (
-            <DocumentReviewCard
-              key={documento.key}
-              documento={documento}
-              perfil={perfil}
-              revisiones={revisiones}
-              cargando={cargando}
-              accept={ACCEPT}
-              onUpload={subirEnNombreDelConductor}
-              onReview={revisarDocumento}
-              onView={(abierto) => setViendo({ ...abierto, clave: documento.key })}
-            />
-          ))}
+          {documentosPorDueno(DUENO_CONDUCTOR).map(tarjetaDe)}
+          {/* No es un documento: es el test del alta, y enseña su resultado. */}
+          <ResultadoCuestionario resultado={perfil?.quizManejoDefensivo} />
+          {documentosPorDueno(DUENO_VEHICULO).map(tarjetaDe)}
         </div>
       </div>
 

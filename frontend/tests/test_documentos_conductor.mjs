@@ -49,19 +49,21 @@ test('solo los documentos de tarjeta admiten segunda cara', () => {
   }
 });
 
-test('conserva los doce campos que el wizard ya manejaba', () => {
-  // La revisión del administrador mostraba nueve de estos doce. El catálogo
-  // existe para que ninguna pantalla vuelva a quedarse corta.
+test('conserva los campos que el wizard ya manejaba', () => {
+  // La revisión del administrador mostraba nueve de estos. El catálogo existe
+  // para que ninguna pantalla vuelva a quedarse corta. El cuestionario de
+  // manejo defensivo salió a propósito: es el test del alta, no un papel.
   const previos = [
     'comprobanteDomicilio', 'dniScaneado', 'licenciaConducir', 'recordConductor',
     'antecedentesPoliciales', 'cv', 'certificadosTrabajo', 'referenciasLaborales',
-    'cuestionarioManejoDefensivo', 'tarjetaPropiedad', 'soat', 'revisionTecnica',
+    'tarjetaPropiedad', 'soat', 'revisionTecnica',
   ];
   const claves = new Set(DOCUMENTOS_CONDUCTOR.map((d) => d.key));
 
   for (const key of previos) {
     assert.ok(claves.has(key), `falta ${key}, que ya existía`);
   }
+  assert.equal(claves.has('cuestionarioManejoDefensivo'), false);
 });
 
 test('cada documento declara tipo y dueño válidos', () => {

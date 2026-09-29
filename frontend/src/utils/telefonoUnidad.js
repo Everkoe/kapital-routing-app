@@ -1,11 +1,10 @@
 /**
  * Teléfono de contacto de una unidad y su enlace de WhatsApp.
  *
- * Existe porque el número vive en dos sitios y cada pantalla miraba uno
- * distinto: `telefono` lo tiene 1 de 109 unidades, mientras `celular` —traído
- * del perfil del conductor— lo tienen 108. El icono de WhatsApp comprobaba solo
- * el primero, así que no aparecía casi nunca aunque el número estuviera a la
- * vista en la ficha del conductor.
+ * El número vive en dos sitios —la unidad (`telefono`) y el perfil del
+ * conductor, que `/api/flota` entrega como `celular`— y cada pantalla llegó a
+ * mirar uno distinto. Manda el de la unidad, como en la ficha y en el Excel
+ * (`filaDeLaBase.js`), y desde la ficha se guardan los dos a la vez.
  */
 
 /** Código de país que se asume cuando el número no lo trae. */

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, XCircle, AlertTriangle, ChevronRight, RotateCcw, Award } from 'lucide-react';
+import { NOTA_APROBADO, NOTA_OBSERVADO } from '../utils/cuestionarioManejo';
 
 const PREGUNTAS = [
   {
@@ -187,8 +188,9 @@ const QuizManejoDefensivo = ({ onComplete, initialData }) => {
   };
 
   const getEstado = (puntaje) => {
-    if (puntaje >= 18) return { label: 'APROBADO', color: '#22c55e', icon: CheckCircle };
-    if (puntaje >= 15) return { label: 'OBSERVADO', color: '#f59e0b', icon: AlertTriangle };
+    // Los umbrales son los mismos con los que la ficha enseña el resultado.
+    if (puntaje >= NOTA_APROBADO) return { label: 'APROBADO', color: '#22c55e', icon: CheckCircle };
+    if (puntaje >= NOTA_OBSERVADO) return { label: 'OBSERVADO', color: '#f59e0b', icon: AlertTriangle };
     return { label: 'DESAPROBADO', color: '#ef4444', icon: XCircle };
   };
 

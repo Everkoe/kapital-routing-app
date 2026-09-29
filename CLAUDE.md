@@ -95,6 +95,42 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   el nombre de la propia base (40 y 16). Llegué a descartarla cuando repetía la base, dándola por
   redundante, y dejó 56 unidades como «No consta» teniendo el dato escrito: **no descartar ese valor**.
   Solo quedan sin grupo 3 unidades, una de ellas `K-TEST`, que es de prueba y no está en ningún Excel.
+- **Las bases se editan en la página y se exportan desde ella** (desde el 2026-09-29, decisión del
+  usuario: el Excel ya no es la fuente, la página sí). La importación dejó cada fila repartida: la unidad
+  en `__flota__` y la persona en su cuenta, con **seis datos en los dos sitios** —teléfono, placa, marca,
+  modelo, año y color (`_ESPEJO_EN_PERFIL`)—. Cada pantalla leía uno distinto: la ficha enseñaba el
+  teléfono de la unidad y el Excel el del perfil, así que a la K-027 se le cambió el teléfono en la
+  página y la exportación seguía sacando el viejo. Ahora **manda la unidad en todas partes** (el perfil
+  solo rellena lo que le falte: `_valor_de_unidad` en el backend y `filaDeLaBase.js` en el frontend,
+  que tienen que coincidir) y **guardar escribe los dos**: la ficha (`PUT /api/flota/{padrón}`) copia al
+  perfil del conductor, y aprobar lo que pidió el conductor (`resolve-update`) copia a la unidad, salvo
+  la capacidad, que en la unidad es la del ruteo. **Todo lo del conductor y del vehículo se edita desde
+  la ficha** (decisión del usuario, 2026-09-29: Administración tiene que poder dar de alta entero a quien
+  no se maneja con la aplicación), y al registrar una unidad se abre su ficha para completarlo. El nombre
+  tiene tres copias —unidad, cuenta y perfil— y cambia en las tres. El **documento** también se edita,
+  aunque es con lo que el conductor entra, y **solo Administración** (`_ADMINISTRATION_ROLES`, como
+  renombrar un padrón): se valida (DNI de 8 cifras; CE o pasaporte), se rechaza con 409 si ya es de otra
+  cuenta —también con otros ceros delante: «00123456» y «0123456» son el mismo—, y queda en el historial
+  como aviso propio. Las cuentas creadas desde la página tienen el DNI por **clave**, y la clave es con lo
+  que se entra, de quién son las sesiones y lo que Accesos usa para desactivar: cambiar el DNI **muda la
+  cuenta** a la clave nueva (`_clave_tras_el_documento`) y cierra sus sesiones. Sin mudarla, el DNI viejo
+  seguía entrando y desactivarla en Accesos decía «hecho» sin hacer nada (lo encontró una revisión). Por
+  solicitud del conductor el documento no se cambia (400). La exportación
+  (`GET /api/flota/export`, también `SHARF`) sale de `_fila_de_la_base` con lo mismo que enseña la
+  ficha, por base y padrón, con la fecha como fecha, el celular, la capacidad y el año como números y el
+  DNI con sus ocho cifras (la importación les quitó el cero a 25), igual que la base original. El
+  GRUPO sale de lo guardado, no de la plantilla, que no conocía las 16 de Sharf. Lleva filtros, la
+  cabecera fija y anchos a la medida, y **nada que empiece por «=» se escribe como fórmula**: muchos de
+  esos datos los teclea el conductor en su alta, y openpyxl los convertiría en fórmulas vivas.
+  **La base se elige** en el alta y en la ficha (`_BASES`): las unidades dadas de alta en la página
+  nacían sin ella y no salían en el Excel de ninguna. El grupo sigue a la base (`_grupo_para`): en
+  Remisse y en Sharf es la propia base; en masivo, TP, KONECTA o TP/KONECTA. En una cuenta sin
+  `perfil_conductor` —el conductor no pasó el alta en la aplicación—, **llenar un dato personal desde la
+  ficha se lo crea**, y como su existencia es lo que decide que el alta está hecha (`profileComplete`), la
+  aplicación ya no le pide el formulario: es Administración haciéndolo por él, y la ficha lo avisa. Lo
+  del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
+  un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
+  Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -117,6 +153,16 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   alguien cierra la pestaña a medias, y ese «¿guardé?» es lo que no debe tener quien programa de
   madrugada. Por lo mismo se retiró el botón «Guardar» del encabezado: anunciaba como
   pendiente algo que ya ocurre solo.
+  **Una programación se puede borrar** (desde el 2026-09-28, `POST /api/programador/plan/borrar`,
+  [supabase/013_borrar_y_rehacer_programacion.sql](supabase/013_borrar_y_rehacer_programacion.sql)): solo
+  un día de hoy en adelante y sin viajes marcados por los conductores —la base lo rechaza con 409 si no—, y
+  empezar de cero es borrar y volver a crear. Hizo falta porque **la aplicación local trabaja contra la base
+  real**: un plan de prueba de mañana les llega como real a los conductores de esas unidades. Hubo un
+  «Rehacer» aparte y se quitó: era borrar y crear en un paso, y confundía. Queda abierto (decisión de
+  producto) si hay que bloquear el borrado de un día cuyo primer servicio ya empezó aunque nadie haya
+  marcado todavía: marcar es nuevo y «sin marcas» dice poco.
+  **Desplegado en producción el 2026-09-28** (merge `6988f58`, PR #17), junto con el mapa de Google, la
+  ventana 10:00 y el aviso de lo ya cargado en la carga del histórico; la 013 y la 014 ya estaban aplicadas.
   **El eje de días no sale del histórico, y ese fue el fallo que dejó la función inalcanzable**: el
   selector solo ofrecía días ya ejecutados, y el día que un programador necesita —mañana— no está en
   `servicios_historicos` por definición. El plan del 26 existía en la base y no había manera de abrirlo
