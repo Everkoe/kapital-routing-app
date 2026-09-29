@@ -492,6 +492,37 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.usuarios_db["driver-001"]["nombre"], "Driver Baseline")
         persist.assert_awaited_once()
 
+    async def test_uploading_a_document_keeps_an_active_driver_active(self):
+        # Pasó con la K-163 y la K-170: Administración les subió documentos desde
+        # la ficha y quedaron «Pendiente Revisión», y aprobarlos pedía un padrón
+        # que ya tenían.
+        conductor = self._unidad_con_conductor()
+        conductor["estado"] = "Activo"
+        a, b, c, d = self._parches_de_envio()
+        with a, b, c, d:
+            for quien in ("admin", "conductor"):
+                respuesta = await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                    email="dni-K-027", docs={"cv": {"path": "K-027/cv-1.pdf"}}, uploaded_by=quien,
+                ))
+                self.assertEqual(respuesta["estado"], "Activo", quien)
+            # Quien corrigió lo que le observaron sí vuelve a la cola.
+            conductor["estado"] = "Documentos Observados"
+            respuesta = await backend.resubmit_driver_docs(backend.ResubmitDocsPayload(
+                email="dni-K-027", docs={"cv": {"path": "K-027/cv-2.pdf"}}, uploaded_by="conductor",
+            ))
+        self.assertEqual(respuesta["estado"], "Pendiente Revisión")
+
+    async def test_the_accesos_list_carries_each_drivers_padron(self):
+        self._unidad_con_conductor()
+        backend.usuarios_db["admin@example.com"] = {
+            "identifier": "admin@example.com", "rol": "Administración", "estado": "Activo",
+        }
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuesta = await backend.get_all_users("admin@example.com")
+        filas = {u["email"]: u for u in respuesta["usuarios"]}
+        self.assertEqual(filas["dni-K-027"]["unidad_id"], "K-027")
+        self.assertIsNone(filas["admin@example.com"]["unidad_id"])
+
     def _parches_de_envio(self):
         return (
             patch.object(backend, "reload_db", new=AsyncMock()),

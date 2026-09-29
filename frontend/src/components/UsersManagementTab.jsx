@@ -349,7 +349,10 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
     closeDriverModal();
     const targetUser = users.find(u => u.email === email);
     if (targetUser?.rol === 'Conductor' && action === 'approve') {
-      setPadronModal({ isOpen: true, email: email, padron: '' });
+      // Si ya tiene padrón, se propone el suyo: pedirlo de nuevo en blanco
+      // hacía creer que lo había perdido.
+      const actual = targetUser.unidad_id || '';
+      setPadronModal({ isOpen: true, email, padron: actual, actual });
       return;
     }
     executeReview(email, action, '');
@@ -456,9 +459,13 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
                 <Truck size={34} color="#10b981" />
               </div>
             </div>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.4rem', fontWeight: 'bold' }}>Asignar Padrón</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '1.4rem', fontWeight: 'bold' }}>
+              {padronModal.actual ? 'Confirmar padrón' : 'Asignar Padrón'}
+            </h3>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.4' }}>
-              Asigna un número de Padrón o ID de Unidad definitivo para autorizar a este conductor.
+              {padronModal.actual
+                ? `Este conductor ya tiene el padrón ${padronModal.actual}. Confirma para aprobarlo, o cámbialo si corresponde.`
+                : 'Asigna un número de Padrón o ID de Unidad definitivo para autorizar a este conductor.'}
             </p>
             <input
               type="text"

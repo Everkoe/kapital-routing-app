@@ -4608,6 +4608,9 @@ async def get_all_users(email: str, session_token: SessionCookie = None):
             "rol": v.get("rol", "Usuario"),
             "estado": v.get("estado", "Activo"),
             "perfil_conductor": v.get("perfil_conductor", None),
+            # Su padrón: sin él, aprobar pedía uno aunque ya lo tuviera, y subirle
+            # un documento desde aquí no sabía en qué carpeta guardarlo.
+            "unidad_id": v.get("unidad_id") or None,
             "last_login": accesos.get(v.get("identifier", k)),
             "avatar": v.get("avatar", None)
         })
@@ -5668,7 +5671,11 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
     # Check if there are any remaining rejected documents
     has_rejected = any(rev.get("estado", "").lower() == "rechazado" for rev in revision_docs.values())
     
-    if not has_rejected:
+    # Vuelve a la cola de Accesos quien corrigió lo que le observaron, y nadie
+    # más: subir un documento pasaba a «Pendiente Revisión» también a un
+    # conductor activo —o cuando lo subía Administración por él—, y aprobarlo
+    # pedía un padrón que ya tenía. El documento nuevo queda pendiente igual.
+    if not has_rejected and user.get("estado") == "Documentos Observados":
         user["estado"] = "Pendiente Revisión"
 
     if fechas and str(user.get("unidad_id") or "").strip():
@@ -5701,7 +5708,7 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
         for role in ["Administración", "Administrador", "Gerente de Operaciones"]:
             await ws_manager.broadcast_to_role(role, notif_obj)
 
-    return {"message": "Documentos actualizados exitosamente", "estado": user["estado"], "user": user}
+    return {"message": "Documentos actualizados exitosamente", "estado": user.get("estado"), "user": user}
 
 @app.post("/api/conductor/request-update")
 async def request_data_update(payload: UpdateDataRequestPayload, session_token: SessionCookie = None):
