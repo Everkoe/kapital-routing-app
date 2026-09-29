@@ -3760,9 +3760,14 @@ def _sembrar_unidad(unidad_id: str, usuario: Dict[str, Any]) -> None:
     if capacidad is not None:
         declarado["capacidad"] = capacidad
 
+    # Las fechas de vencimiento también: las dio quien tiene el documento.
+    for campo, fecha in _VENCE_EN_PERFIL.items():
+        if _texto(perfil.get(fecha)):
+            declarado[campo] = _texto(perfil[fecha])
+
     unidad = conductores_db.setdefault(unidad_id, {})
     for campo, valor in declarado.items():
-        if campo == "telefono" or not str(unidad.get(campo) or "").strip():
+        if campo in ("telefono", *_VENCE_EN_PERFIL) or not str(unidad.get(campo) or "").strip():
             unidad[campo] = valor
 
 
@@ -5501,8 +5506,13 @@ async def driver_onboarding(payload: DriverProfilePayload, session_token: Sessio
     if cambia and _cuenta_con_documento(documento, excepto=user):
         raise HTTPException(status_code=409, detail="Ese documento ya está registrado en otra cuenta.")
 
-    user["perfil_conductor"] = conservar_documentos(user.get("perfil_conductor"), payload.perfilData)
+    fechas = _fechas_del_perfil(payload.perfilData, payload.perfilData)
+    user["perfil_conductor"] = {**conservar_documentos(user.get("perfil_conductor"), payload.perfilData), **fechas}
     user["estado"] = "Pendiente Revisión"
+    # Si ya tiene unidad, sus fechas llegan al panel sin esperar a la aprobación.
+    if str(user.get("unidad_id") or "").strip():
+        await _cargar_flota()
+        _llevar_vencimientos_a_la_unidad(user)
     
     if payload.perfilData.get("nombres"):
         user["nombre"] = payload.perfilData.get("nombres")
@@ -5599,7 +5609,10 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
         resource="los documentos de ese conductor",
     )
     clave_actor = _clave_de_cuenta(actor) if actor else None
-    ajenos = sorted(campo for campo in payload.docs if not _es_campo_documento(str(campo)))
+    ajenos = sorted(
+        campo for campo in payload.docs
+        if not _es_campo_documento(str(campo)) and campo not in _DOCUMENTO_DE_LA_FECHA
+    )
     if ajenos:
         # Sin esto se podía mandar `revision_docs` o `estado` como si fueran un
         # documento y aprobarse la revisión uno mismo.
@@ -5616,8 +5629,15 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
 
     revision_docs = perfil.get("revision_docs", {})
 
+    # Con el SOAT, la licencia o la revisión técnica va su fecha de vencimiento:
+    # obligatoria cuando los sube el conductor. Administración pone la suya en
+    # la ficha, junto al documento.
+    de_admin = getattr(payload, 'uploaded_by', 'conductor') == 'admin'
+    fechas = _fechas_del_perfil(payload.docs, {} if de_admin else payload.docs)
+    documentos = {k: v for k, v in payload.docs.items() if k not in _DOCUMENTO_DE_LA_FECHA}
+
     # Update only the provided documents
-    for k, v in payload.docs.items():
+    for k, v in {**documentos, **fechas}.items():
         perfil[k] = v
         # Reset the status of this specific document back to pending
         if k in revision_docs:
@@ -5628,6 +5648,10 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
     
     if not has_rejected:
         user["estado"] = "Pendiente Revisión"
+
+    if fechas and str(user.get("unidad_id") or "").strip():
+        await _cargar_flota()
+        _llevar_vencimientos_a_la_unidad(user)
 
     # Notify admins only if the driver uploaded the documents
     notif_obj = None
@@ -5796,6 +5820,21 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
 # manda la unidad, en todas partes, y guardarlos —desde la ficha o aprobando lo
 # que pidió el conductor— escribe los dos a la vez.
 
+# Vencimiento en la unidad —de donde lee el panel de Gestión de Flota— → la fecha
+# que escribe el conductor al subir el documento (desde el 2026-09-29 se la pide,
+# obligatoria, en el alta y en su portal).
+_VENCE_EN_PERFIL = {
+    "soat": "soatVence",
+    "revision": "revisionTecnicaVence",
+    "licencia": "licenciaConducirVence",
+}
+# El documento del perfil al que pertenece cada fecha, y cómo se nombra al pedirla.
+_DOCUMENTO_DE_LA_FECHA = {
+    "soatVence": ("soat", "del SOAT"),
+    "revisionTecnicaVence": ("revisionTecnica", "de la revisión técnica"),
+    "licenciaConducirVence": ("licenciaConducir", "de la licencia de conducir"),
+}
+
 # Campo de la unidad → su copia en el perfil del conductor.
 _ESPEJO_EN_PERFIL = {
     "chofer": "nombres",
@@ -5805,6 +5844,7 @@ _ESPEJO_EN_PERFIL = {
     "modelo": "vehiculoModelo",
     "ano": "vehiculoAnio",
     "color": "vehiculoColor",
+    **_VENCE_EN_PERFIL,
 }
 # Al revés, para aprobar lo que pide el conductor desde su perfil. La capacidad
 # no está a propósito: la que declara el conductor no es la que usa el ruteo.
@@ -5903,6 +5943,9 @@ async def get_flota_status(session_token: SessionCookie = None):
             "placa": unidad_id,
             "unidad_id": unidad_id,
             "real_placa": _valor_de_unidad(data, user, "placa", unidad_id) or unidad_id,
+            # El semáforo del panel: la fecha de la unidad o, si no la tiene, la
+            # que escribió el conductor al subir el documento.
+            **{campo: _valor_de_unidad(data, user, campo) for campo in _VENCE_EN_PERFIL},
             "has_pending_requests": _tiene_solicitudes_pendientes(perfil),
             "celular": _telefono_de_unidad(data, user),
         })
@@ -7641,7 +7684,52 @@ def _valor_aprobable(campo_del_perfil: str, valor: Any) -> Any:
     campo = _ESPEJO_EN_UNIDAD.get(campo_del_perfil)
     if not campo:
         return valor
+    if campo in _VENCE_EN_PERFIL:
+        return _fecha_iso(valor, campo)
     return _normalizar_campos_de_la_base({campo: valor})[campo]
+
+
+def _fechas_del_perfil(perfil: Dict[str, Any], exigidas: Dict[str, Any]) -> Dict[str, str]:
+    """Las fechas de vencimiento que trae un envío del conductor, validadas.
+
+    `exigidas` es lo que se sube en ese envío: una fecha es obligatoria para
+    cada documento que vence y viene con archivo (el SOAT, la licencia o la
+    revisión técnica, por cualquiera de sus caras). Sin ella, 400: la pantalla
+    ya la pide, y así tampoco se la salta un navegador con la versión anterior.
+    """
+    fechas: Dict[str, str] = {}
+    for campo_fecha, (documento, nombre) in _DOCUMENTO_DE_LA_FECHA.items():
+        subido = any(_tiene_contenido(exigidas.get(documento + sufijo)) for sufijo in _SUFIJOS_DOCUMENTO)
+        valor = _texto(perfil.get(campo_fecha))
+        if not valor:
+            if subido:
+                raise HTTPException(status_code=400, detail=f"Falta la fecha de vencimiento {nombre}.")
+            continue
+        fechas[campo_fecha] = _fecha_iso(valor, f"La fecha de vencimiento {nombre}")
+    return fechas
+
+
+def _llevar_vencimientos_a_la_unidad(conductor: Dict[str, Any]) -> None:
+    """Las fechas que escribió el conductor, a su unidad: el panel lee de ahí.
+
+    Solo si es el conductor de esa unidad (el de su ficha), y pisando la que
+    hubiera: la acaba de dar quien tiene el documento en la mano.
+    """
+    unidad_id = conductor.get("unidad_id")
+    if unidad_id not in conductores_db or _conductores_por_unidad().get(unidad_id) is not conductor:
+        return
+    perfil = _perfil_de(conductor)
+    nuevas = {campo: perfil[fecha] for campo, fecha in _VENCE_EN_PERFIL.items() if _texto(perfil.get(fecha))}
+    if nuevas and any(conductores_db[unidad_id].get(c) != v for c, v in nuevas.items()):
+        conductores_db[unidad_id] = {**conductores_db[unidad_id], **nuevas}
+
+
+async def _cargar_flota() -> None:
+    """La flota en memoria antes de escribir en ella: lo que no se leyó no se escribe."""
+    if _is_compat_storage():
+        await _load_compat_fleet()
+    else:
+        await reload_db()
 
 
 def _llevar_a_la_unidad(conductor: Dict[str, Any], campo_del_perfil: str, valor: Any) -> Optional[Dict[str, Any]]:

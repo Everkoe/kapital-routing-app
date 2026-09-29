@@ -102,6 +102,22 @@ export const VIGENCIA_POR_DOCUMENTO = {
 
 export const vigenciaDeDocumento = (key) => VIGENCIA_POR_DOCUMENTO[key] || null;
 
+/** El documento al que pertenece una cara (`licenciaConducirReverso` → `licenciaConducir`). */
+export const documentoDeCampo = (campo) => String(campo || '').replace(/(Reverso|Completo)$/, '');
+
+/**
+ * Dónde escribe el conductor hasta cuándo vale un documento que vence, o
+ * `null` si no vence. Es la fecha que llega al panel de Gestión de Flota
+ * (`_VENCE_EN_PERFIL` en el backend).
+ */
+export const campoDeVencimiento = (key) => (VIGENCIA_POR_DOCUMENTO[documentoDeCampo(key)]
+  ? `${documentoDeCampo(key)}Vence`
+  : null);
+
+/** Una fecha AAAA-MM-DD que existe. */
+export const fechaValida = (valor) => /^\d{4}-\d{2}-\d{2}$/.test(String(valor ?? ''))
+  && !Number.isNaN(Date.parse(`${valor}T00:00:00Z`));
+
 export const documentoPorClave = (key) =>
   DOCUMENTOS_CONDUCTOR.find((documento) => documento.key === key) || null;
 

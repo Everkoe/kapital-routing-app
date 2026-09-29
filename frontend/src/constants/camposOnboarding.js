@@ -14,7 +14,7 @@
  * problema: eso todavía no está listo.
  */
 
-import { admiteReverso, claveCompleto, documentoPorClave } from './documentosConductor.js';
+import { admiteReverso, claveCompleto, documentoPorClave, fechaValida } from './documentosConductor.js';
 
 export const ESTADO_OK = 'ok';
 export const ESTADO_FALTA = 'falta';
@@ -27,6 +27,8 @@ const LARGO_MINIMO_TELEFONO = 6;
 const FORMATO_CORREO = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const conTexto = (valor) => String(valor ?? '').trim().length > 0;
+
+const AYUDA_FECHA = 'Escribe la fecha de vencimiento que figura en el documento.';
 const digitos = (valor) => String(valor ?? '').replace(/\D/g, '');
 
 /**
@@ -95,6 +97,15 @@ export const CAMPOS_ONBOARDING = [
   { campo: 'comprobanteDomicilio', seccion: 'personales', etiqueta: 'Comprobante de domicilio', archivo: true },
   { campo: 'dniScaneado', seccion: 'personales', etiqueta: 'DNI escaneado', archivo: true },
   { campo: 'licenciaConducir', seccion: 'personales', etiqueta: 'Licencia de conducir', archivo: true },
+  // Las fechas de lo que vence van con su documento y llegan al panel de
+  // Gestión de Flota (pedido del usuario, 2026-09-29).
+  {
+    campo: 'licenciaConducirVence',
+    seccion: 'personales',
+    etiqueta: 'Vencimiento de la licencia',
+    valido: fechaValida,
+    ayuda: AYUDA_FECHA,
+  },
   { campo: 'recordConductor', seccion: 'personales', etiqueta: 'Récord del conductor', archivo: true },
   { campo: 'antecedentesPoliciales', seccion: 'personales', etiqueta: 'Antecedentes policiales', archivo: true },
 
@@ -109,6 +120,17 @@ export const CAMPOS_ONBOARDING = [
   },
   { campo: 'tarjetaPropiedad', seccion: 'vehiculares', etiqueta: 'Tarjeta de propiedad', archivo: true },
   { campo: 'soat', seccion: 'vehiculares', etiqueta: 'SOAT', archivo: true },
+  { campo: 'soatVence', seccion: 'vehiculares', etiqueta: 'Vencimiento del SOAT', valido: fechaValida, ayuda: AYUDA_FECHA },
+  // La revisión técnica no se exige —un vehículo nuevo no la tiene—, pero si se
+  // sube, con su fecha.
+  {
+    campo: 'revisionTecnicaVence',
+    seccion: 'vehiculares',
+    etiqueta: 'Vencimiento de la revisión técnica',
+    requerido: (datos) => documentoEntregado('revisionTecnica', datos),
+    valido: fechaValida,
+    ayuda: AYUDA_FECHA,
+  },
 
   // El cuestionario no es un archivo ni un texto: es el resultado que deja
   // `QuizManejoDefensivo` al terminarlo.
@@ -120,8 +142,16 @@ export const CAMPOS_ONBOARDING = [
   },
 ];
 
+/**
+ * Si una regla obliga con estos datos. `requerido` puede ser una función: la
+ * fecha de la revisión técnica solo se pide si se sube la revisión.
+ */
+const obliga = (regla, datos) => (typeof regla.requerido === 'function'
+  ? Boolean(regla.requerido(datos))
+  : regla.requerido !== false);
+
 /** Reglas que cuentan para el porcentaje: solo las obligatorias. */
-const obligatorias = () => CAMPOS_ONBOARDING.filter((regla) => regla.requerido !== false);
+const obligatorias = (datos) => CAMPOS_ONBOARDING.filter((regla) => obliga(regla, datos));
 
 /**
  * Si el alta exige este campo.
@@ -130,9 +160,9 @@ const obligatorias = () => CAMPOS_ONBOARDING.filter((regla) => regla.requerido !
  * documento en general, y aquí qué hace falta para enviar el perfil. El CV, por
  * ejemplo, no se pide en el alta aunque sea un documento con su propia ficha.
  */
-export const esRequerido = (campo) => {
+export const esRequerido = (campo, datos) => {
   const regla = CAMPOS_ONBOARDING.find((r) => r.campo === campo);
-  return Boolean(regla) && regla.requerido !== false;
+  return Boolean(regla) && obliga(regla, datos);
 };
 
 /**
@@ -158,7 +188,7 @@ export const estadoDeCampo = (campo, datos) => {
   const lleno = regla.presente
     ? regla.presente(valor)
     : (regla.archivo ? documentoEntregado(regla.campo, datos) : conTexto(valor));
-  if (!lleno) return regla.requerido === false ? ESTADO_OK : ESTADO_FALTA;
+  if (!lleno) return obliga(regla, datos) ? ESTADO_FALTA : ESTADO_OK;
   if (regla.valido && !regla.valido(valor, datos)) return ESTADO_INVALIDO;
   return ESTADO_OK;
 };
@@ -178,7 +208,7 @@ export const camposPendientes = (datos) =>
   CAMPOS_ONBOARDING.filter((regla) => estadoDeCampo(regla, datos) !== ESTADO_OK);
 
 export const progresoDe = (datos) => {
-  const reglas = obligatorias();
+  const reglas = obligatorias(datos);
   const listas = reglas.filter((regla) => estadoDeCampo(regla, datos) === ESTADO_OK).length;
   return Math.round((listas / reglas.length) * 100);
 };
@@ -186,5 +216,5 @@ export const progresoDe = (datos) => {
 /** Estado de una sección del acordeón, para su icono de cabecera. */
 export const seccionCompleta = (seccion, datos) =>
   CAMPOS_ONBOARDING
-    .filter((regla) => regla.seccion === seccion && regla.requerido !== false)
+    .filter((regla) => regla.seccion === seccion && obliga(regla, datos))
     .every((regla) => estadoDeCampo(regla, datos) === ESTADO_OK);

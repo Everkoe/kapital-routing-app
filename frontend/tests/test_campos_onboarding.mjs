@@ -24,6 +24,7 @@ const altaCompleta = () => ({
   comprobanteDomicilio: { name: 'recibo.pdf', path: 'K-500/comprobanteDomicilio.pdf' },
   dniScaneado: { name: 'dni.jpg', path: 'K-500/dniScaneado.jpg' },
   licenciaConducir: { name: 'lic.jpg', path: 'K-500/licenciaConducir.jpg' },
+  licenciaConducirVence: '2028-04-30',
   recordConductor: { name: 'record.pdf', path: 'K-500/recordConductor.pdf' },
   antecedentesPoliciales: { name: 'ant.pdf', path: 'K-500/antecedentesPoliciales.pdf' },
   vehiculoMarca: 'MERCEDES',
@@ -31,6 +32,7 @@ const altaCompleta = () => ({
   vehiculoCapacidad: '15',
   tarjetaPropiedad: { name: 'tp.jpg', path: 'K-500/tarjetaPropiedad.jpg' },
   soat: { name: 'soat.pdf', path: 'K-500/soat.pdf' },
+  soatVence: '2027-01-31',
   quizManejoDefensivo: { puntaje: 18, total: 20, estado: 'Aprobado' },
 });
 
@@ -38,6 +40,23 @@ test('un alta resuelta llega al 100% y no deja nada pendiente', () => {
   const datos = altaCompleta();
   assert.equal(progresoDe(datos), 100);
   assert.deepEqual(camposPendientes(datos), []);
+});
+
+test('el SOAT y la licencia van con su fecha de vencimiento, obligatoria', () => {
+  // Pedido del usuario: la fecha pasa al panel de Gestión de Flota.
+  for (const campo of ['soatVence', 'licenciaConducirVence']) {
+    const sinFecha = { ...altaCompleta(), [campo]: '' };
+    assert.equal(estadoDeCampo(campo, sinFecha), ESTADO_FALTA, campo);
+    assert.ok(progresoDe(sinFecha) < 100);
+    assert.equal(estadoDeCampo(campo, { ...altaCompleta(), [campo]: '31/01/2027' }), ESTADO_INVALIDO);
+  }
+});
+
+test('la fecha de la revisión técnica solo se pide si se sube la revisión', () => {
+  assert.equal(estadoDeCampo('revisionTecnicaVence', altaCompleta()), ESTADO_OK);
+  const conRevision = { ...altaCompleta(), revisionTecnica: { name: 'rt.pdf', path: 'K-500/rt.pdf' } };
+  assert.equal(estadoDeCampo('revisionTecnicaVence', conRevision), ESTADO_FALTA);
+  assert.equal(progresoDe({ ...conRevision, revisionTecnicaVence: '2027-03-15' }), 100);
 });
 
 test('un DNI de siete dígitos no cuenta como completo', () => {

@@ -18,6 +18,10 @@ export const ESPEJO_EN_PERFIL = {
   modelo: 'vehiculoModelo',
   ano: 'vehiculoAnio',
   color: 'vehiculoColor',
+  // Las fechas de vencimiento: las escribe el conductor al subir el documento.
+  soat: 'soatVence',
+  revision: 'revisionTecnicaVence',
+  licencia: 'licenciaConducirVence',
 };
 
 /** El alta en la aplicación guarda la placa como `vehiculoPlaca`; se lee también. */
