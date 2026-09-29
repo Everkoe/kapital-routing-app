@@ -631,7 +631,10 @@ const FlotaView = ({ usuario, initialBase }) => {
                   </div>
                 )}
               </div>
-              <button className="btn-secondary" onClick={fetchFlota} style={{ padding: '8px 14px', fontSize: '0.85rem', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}>Actualizar</button>
+              {/* Aquí había un botón «Actualizar». Volvía a pedir la lista sin
+                  enseñar nada mientras tanto, así que parecía no hacer nada, y
+                  sobraba: la lista se carga al entrar y se recarga sola tras
+                  cada cambio guardado en la ficha o en el alta. */}
               {!isCliente && <button className="btn-primary" onClick={handleCreate} style={{ padding: '8px 14px', fontSize: '0.85rem' }}>+ Nueva Unidad</button>}
             </div>
             
