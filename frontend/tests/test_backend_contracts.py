@@ -2121,6 +2121,157 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         _, filas = await self._exportar("MASIVO")
         self.assertEqual(filas[0][7], "CDE-456")
 
+    async def _eliminar_documento(self, campo, borrado_en_bucket=True):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+            patch.object(
+                backend, "delete_document_from_storage", new=AsyncMock(return_value=borrado_en_bucket),
+            ) as borrar,
+        ):
+            respuesta = await backend.eliminar_documento_del_conductor(
+                backend.DocumentoEliminado(conductor="dni-K-027", campo=campo),
+            )
+        guardar.assert_awaited_once()
+        return respuesta, borrar
+
+    async def test_administration_removes_a_wrongly_uploaded_image(self):
+        # Rechazar solo le pide al conductor que lo arregle: el archivo erróneo
+        # se quedaba, y quien da de alta por él no tenía cómo quitarlo.
+        conductor = self._unidad_con_conductor()
+        perfil = conductor["perfil_conductor"]
+        perfil["dniScaneado"] = {"name": "dni.jpg", "path": "K-027/dniScaneado-aaaa1111.jpg"}
+        perfil["dniScaneadoCompleto"] = {"name": "dni.jpg", "path": "K-027/dniScaneadoCompleto-bbbb2222.jpg"}
+        perfil["revision_docs"] = {"dniScaneado": {"estado": "aprobado"}, "soat": {"estado": "aprobado"}}
+
+        respuesta, borrar = await self._eliminar_documento("dniScaneado")
+
+        nuevo = conductor["perfil_conductor"]
+        self.assertIsNone(nuevo["dniScaneado"])
+        self.assertEqual(nuevo["dniScaneadoCompleto"]["path"], "K-027/dniScaneadoCompleto-bbbb2222.jpg",
+                         "solo la cara que se quita")
+        self.assertEqual(nuevo["revision_docs"], {"soat": {"estado": "aprobado"}})
+        borrar.assert_awaited_once_with("K-027/dniScaneado-aaaa1111.jpg")
+        self.assertTrue(respuesta["archivo_borrado"])
+        self.assertEqual(respuesta["perfil_conductor"], nuevo)
+        aviso = backend.notifications_db[-1]
+        self.assertEqual((aviso["campo"], aviso["estado"]), ("dniScaneado", "faltante"))
+        self.assertEqual(backend.actividad_db[-1]["action_type"], "Documento eliminado")
+
+    async def test_removing_a_document_never_erases_someone_elses_file(self):
+        # El perfil lo escribe el conductor: podría apuntar su documento al de
+        # otra unidad, y quitarlo borraría el archivo de otro.
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["cv"] = {"path": "K-142/cv-cccc3333.pdf"}
+        otro = self._unidad_con_conductor("K-050")
+        conductor["perfil_conductor"]["recordConductor"] = {"path": "K-027/recordConductor-dddd4444.pdf"}
+        otro["perfil_conductor"]["recordConductor"] = {"path": "K-027/recordConductor-dddd4444.pdf"}
+        # Empieza por su carpeta, pero sale de ella.
+        conductor["perfil_conductor"]["soat"] = {"path": "K-027/../K-142/soat-ffff6666.pdf"}
+
+        for campo in ("cv", "recordConductor", "soat"):
+            respuesta, borrar = await self._eliminar_documento(campo)
+            self.assertIsNone(conductor["perfil_conductor"][campo], campo)
+            borrar.assert_not_awaited()
+            self.assertFalse(respuesta["archivo_borrado"])
+
+    async def test_removing_a_document_checks_what_it_is_asked(self):
+        conductor = self._unidad_con_conductor()
+        casos = [("revision_docs", 400), ("password", 400), ("dniScaneado", 404)]
+        for campo, estado in casos:
+            with self.assertRaises(HTTPException) as caught:
+                await self._eliminar_documento(campo)
+            self.assertEqual(caught.exception.status_code, estado, campo)
+        backend.usuarios_db["admin@example.com"] = {"identifier": "admin@example.com", "rol": "Administración"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            self.assertRaises(HTTPException) as caught,
+        ):
+            await backend.eliminar_documento_del_conductor(
+                backend.DocumentoEliminado(conductor="admin@example.com", campo="cv"),
+            )
+        self.assertEqual(caught.exception.status_code, 404, "solo cuentas de conductor")
+        self.assertNotIn("dniScaneado", conductor["perfil_conductor"])
+
+    async def test_a_failed_removal_leaves_the_document_where_it_was(self):
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["cv"] = {"path": "K-027/cv-eeee5555.pdf"}
+        antes = copy.deepcopy(conductor)
+        avisos = len(backend.notifications_db)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(
+                backend, "persist_users_only",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+            patch.object(backend, "delete_document_from_storage", new=AsyncMock()) as borrar,
+        ):
+            with self.assertRaises(HTTPException):
+                await backend.eliminar_documento_del_conductor(
+                    backend.DocumentoEliminado(conductor="dni-K-027", campo="cv"),
+                )
+        self.assertEqual(conductor, antes)
+        self.assertEqual(len(backend.notifications_db), avisos)
+        borrar.assert_not_awaited()
+
+    async def _cambiar_foto(self, unidad, tipo, tipo_archivo="image/jpeg"):
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()) as subir,
+        ):
+            respuesta = await backend.cambiar_foto_del_conductor(backend.FotoDelConductor(
+                unidad=unidad, tipo=tipo, nombre="foto.jpg", tipo_archivo=tipo_archivo, base64="AA==",
+            ))
+        guardar.assert_awaited_once()
+        return respuesta, subir
+
+    async def test_administration_changes_the_drivers_photos(self):
+        # Solo las cambiaba el conductor desde su perfil; quien lo da de alta
+        # por él tiene que poder hacerlo todo.
+        conductor = self._unidad_con_conductor()
+        respuesta, subir = await self._cambiar_foto("K-027", "avatar")
+        ruta = conductor["avatar"]["path"]
+        # En la carpeta de fotos de perfil del conductor, no en la de quien la sube.
+        self.assertTrue(ruta.startswith(backend.CARPETA_AVATARES + "/usuario-"), ruta)
+        self.assertEqual(ruta.count("/"), 1)
+        subir.assert_awaited_once_with("AA==", ruta, "image/jpeg")
+        self.assertEqual(respuesta["foto"]["path"], ruta)
+
+        respuesta, _ = await self._cambiar_foto("K-027", "vehiculo")
+        ruta = conductor["perfil_conductor"]["fotoVehiculo"]["path"]
+        self.assertTrue(ruta.startswith("K-027/fotoVehiculo-"), ruta)
+        self.assertEqual(respuesta["perfil_conductor"]["fotoVehiculo"]["path"], ruta)
+        self.assertEqual(backend.actividad_db[-1]["action_type"], "Foto del vehículo cambiada")
+
+    async def test_a_photo_needs_an_image_and_a_driver(self):
+        self._unidad_con_conductor()
+        backend.conductores_db["K-999"] = {"chofer": "PRUEBA"}
+        casos = [("K-027", "otra", "image/jpeg", 400), ("K-027", "avatar", "application/pdf", 400),
+                 ("K-999", "avatar", "image/jpeg", 409)]
+        for unidad, tipo, tipo_archivo, estado in casos:
+            with self.assertRaises(HTTPException) as caught:
+                await self._cambiar_foto(unidad, tipo, tipo_archivo)
+            self.assertEqual(caught.exception.status_code, estado, (unidad, tipo, tipo_archivo))
+
+    async def test_a_failed_photo_change_leaves_the_account_as_it_was(self):
+        conductor = self._unidad_con_conductor()
+        antes = copy.deepcopy(conductor)
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "upload_document_to_storage", new=AsyncMock()),
+            patch.object(
+                backend, "persist_users_only",
+                new=AsyncMock(side_effect=HTTPException(status_code=503, detail="unavailable")),
+            ),
+        ):
+            for tipo in ("avatar", "vehiculo"):
+                with self.assertRaises(HTTPException):
+                    await backend.cambiar_foto_del_conductor(backend.FotoDelConductor(
+                        unidad="K-027", tipo=tipo, nombre="f.jpg", tipo_archivo="image/jpeg", base64="AA==",
+                    ))
+        self.assertEqual(conductor, antes)
+
     async def test_fleet_create_accepts_empty_dates_and_verifies_persistence(self):
         with (
             patch.object(backend, "reload_db", new=AsyncMock()),
@@ -3201,6 +3352,32 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("..", ruta)
                 self.assertEqual(ruta.count("/"), 1, "siempre unidad/archivo")
 
+    async def test_replacing_a_document_uploads_it_to_a_new_path(self):
+        """Con la misma ruta, la ficha seguía enseñando la imagen anterior.
+
+        La página guarda la URL firmada de cada ruta unos minutos, y reemplazar
+        sobrescribía el mismo archivo: nada cambiaba de nombre y nada se volvía
+        a pedir.
+        """
+        datos = backend.DocumentoSubida(
+            unidad_id="K-027", campo="recordConductor", nombre="record.PDF",
+            tipo="application/pdf", base64="JVBERi0=",
+        )
+        with patch.object(backend, "upload_document_to_storage", new=AsyncMock()) as subir:
+            primera = await backend.subir_documento(datos)
+            segunda = await backend.subir_documento(datos)
+
+        self.assertNotEqual(primera["path"], segunda["path"])
+        for respuesta in (primera, segunda):
+            ruta = respuesta["path"]
+            # Sigue siendo de su unidad —el permiso para verla sale de ahí— y
+            # conserva la extensión.
+            self.assertTrue(ruta.startswith("K-027/recordConductor-"), ruta)
+            self.assertTrue(ruta.endswith(".pdf"), ruta)
+            self.assertEqual(ruta.count("/"), 1)
+        self.assertEqual([c.args[1] for c in subir.await_args_list], [primera["path"], segunda["path"]])
+        self.assertEqual(backend._ruta_unica("K-027/cv").count("-"), 2, "sin extensión, también")
+
     def test_a_driver_can_only_reach_their_own_unit_documents(self):
         """Conocer una ruta no puede bastar para ver el DNI de otro."""
         conductor = {"rol": "Conductor", "unidad_id": "K-027"}
@@ -3757,6 +3934,11 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
             ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
             ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
+            ("POST", "/api/admin/driver/documento/eliminar",
+             {"json": {"conductor": "x@k.com", "campo": "dniScaneado"}}),
+            ("POST", "/api/admin/driver/foto",
+             {"json": {"unidad": "K-001", "tipo": "avatar", "nombre": "a.jpg",
+                       "tipo_archivo": "image/jpeg", "base64": "AA=="}}),
             ("GET", "/api/flota/export", {}),
             ("GET", "/api/routes", {}),
             ("GET", "/api/routes/summary", {}),

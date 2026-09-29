@@ -1173,6 +1173,31 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   align-items: center; justify-content: center; transition: all 0.2s;
 }
 .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+/* Quitar un archivo mal subido, desde el visor (solo en la revisión de Administración). */
+.doc-viewer-acciones { display: flex; align-items: center; gap: 8px; }
+.doc-viewer-eliminar,
+.doc-viewer-eliminar-si {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.doc-viewer-eliminar {
+  background: transparent; color: var(--kapital-accent-red);
+  border: 1px solid var(--kapital-accent-red);
+}
+.doc-viewer-eliminar:hover { background: rgba(239,68,68,0.1); }
+.doc-viewer-eliminar-si {
+  background: var(--kapital-accent-red); color: var(--kapital-card-bg, var(--bg));
+  border: 1px solid var(--kapital-accent-red);
+}
+.doc-viewer-eliminar-si:disabled { opacity: 0.6; cursor: wait; }
+.doc-viewer-confirmar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 20px; border-bottom: 1px solid var(--border-color);
+  background: rgba(239,68,68,0.06);
+}
+.doc-viewer-confirmar p { margin: 0; font-size: 0.85rem; color: var(--text-primary); }
+.doc-viewer-confirmar-botones { display: flex; gap: 8px; }
 .doc-viewer-body {
   padding: 0; background: var(--kapital-bg, #e2e8f0); display: flex; align-items: center; justify-content: center;
   height: 80vh; max-height: 800px;
@@ -1256,6 +1281,12 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   align-items: center;
   gap: 5px;
   padding: 6px 10px;
+}
+
+/* Delante y detrás, mientras haya una imagen completa del documento. */
+.doc-subir-label.doc-cara-bloqueada {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .doc-cara-opcional {
@@ -1538,6 +1569,11 @@ select.campo-pendiente {
   color: var(--text-primary);
 }
 
+.documento-cara:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .documento-cara.activa {
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -1636,6 +1672,60 @@ select.campo-pendiente {
   border: 1px solid var(--border-color);
 }
 .vehicle-placeholder { text-align: center; font-size: 20px; opacity: 0.5; color: var(--text-muted); }
+/* Encabeza la columna derecha de la ficha del conductor, a la altura de la foto
+   del conductor (240 px) para que las dos acaben en la misma línea. */
+.vehicle-photo.vehicle-photo-banner {
+  position: relative; aspect-ratio: auto; width: 100%; height: 240px;
+  padding: 0; font: inherit; color: inherit; cursor: zoom-in;
+}
+/* La misma foto, desenfocada, rellena la franja: la de delante va entera. */
+.vehicle-photo-banner .vehicle-photo-fondo {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  filter: blur(18px) brightness(0.6); transform: scale(1.15);
+}
+.vehicle-photo-banner .vehicle-photo-imagen {
+  position: relative; height: 100%; max-width: 100%; object-fit: contain;
+}
+.vehicle-photo-ampliar {
+  position: absolute; right: 10px; bottom: 10px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.vehicle-photo-banner:hover .vehicle-photo-ampliar,
+.vehicle-photo-banner:focus-visible .vehicle-photo-ampliar { opacity: 1; }
+.vehicle-photo.vehicle-photo-banner.sin-foto {
+  height: 64px; gap: 8px; font-size: 0.85rem; color: var(--text-muted);
+  border-style: dashed; cursor: default;
+}
+/* Cambiar la foto del conductor o la del vehículo desde la ficha. */
+.driver-photo, .vehicle-photo-marco { position: relative; }
+.foto-cambiar {
+  position: absolute; right: 8px; bottom: 8px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); transition: border-color 0.15s ease, color 0.15s ease;
+}
+.foto-cambiar:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.foto-cambiar.ocupado { cursor: wait; opacity: 0.75; }
+/* En la foto del vehículo va abajo a la izquierda: a la derecha están «Ver
+   completa» y, arriba, la X que cierra la ficha. Sin foto, a media altura. */
+.vehicle-photo-marco .foto-cambiar { left: 10px; right: auto; bottom: 10px; }
+.vehicle-photo-marco .sin-foto + .foto-cambiar { bottom: auto; top: 50%; transform: translateY(-50%); }
+/* Los dos cuadros de información, de la misma altura. */
+.profile-right .info-grid { align-items: stretch; }
+/* El aviso al conductor, en la columna izquierda, bajo sus datos. */
+.profile-left .notify-section { margin-top: 16px; padding: 16px; text-align: left; }
+/* En el teléfono las columnas se apilan: la izquierda se deshace para que el
+   aviso quede al final, tras la información y los documentos. */
+@media (max-width: 768px) {
+  .profile-left { display: contents; }
+  .profile-right { order: 1; }
+  .profile-left .notify-section { order: 2; margin-top: 0; }
+  .vehicle-photo.vehicle-photo-banner { height: 180px; }
+}
 
 .info-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 16px;

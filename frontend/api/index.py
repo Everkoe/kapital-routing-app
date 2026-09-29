@@ -3371,6 +3371,27 @@ async def upload_document_to_storage(base64_str: str, path: str, content_type: s
     return path
 
 
+async def delete_document_from_storage(path: str) -> bool:
+    """Borra un archivo del bucket y dice si se borró. Nunca lanza.
+
+    Se llama después de haber quitado el documento de la cuenta: si el bucket
+    no responde, el archivo se queda sin nada que lo señale, que es lo mismo
+    que ya pasa con uno reemplazado, y no hay que deshacer lo que sí se hizo.
+    """
+    try:
+        _ensure_storage_ready("document_delete", write=True, detail=DATABASE_WRITE_UNAVAILABLE_DETAIL)
+        hdrs = _build_supabase_headers(STORAGE_CONFIG.key)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            res = await client.delete(f"{_storage_base_url()}/object/{DOCUMENTS_BUCKET}/{path}", headers=hdrs)
+    except Exception as exc:
+        print(f"[Supabase] document delete failed error={type(exc).__name__}")
+        return False
+    if res.status_code not in (200, 204):
+        print(f"[Supabase] document delete failed status={res.status_code}")
+        return False
+    return True
+
+
 async def signed_document_url(path: str, ttl: int = DOCUMENT_URL_TTL_SECONDS) -> Optional[str]:
     """URL temporal para ver un documento. `None` si la ruta ya no existe."""
     _ensure_storage_ready("document_sign", write=False)
@@ -5002,6 +5023,176 @@ async def review_driver_doc(payload: DriverDocReviewPayload, session_token: Sess
         "revision_docs": conductor["perfil_conductor"]["revision_docs"]
     }
 
+class DocumentoEliminado(BaseModel):
+    # La cuenta del conductor, como la manda la revisión (identificador o clave).
+    conductor: str
+    # El campo exacto: una cara concreta de un documento de dos (`dniScaneadoCompleto`).
+    campo: str
+
+
+def _archivo_solo_suyo(conductor: Dict[str, Any], ruta: str) -> bool:
+    """Si el archivo es solo de este conductor: de la carpeta de su unidad y sin otro uso.
+
+    La ruta sale de su perfil, y el perfil lo escribe el propio conductor: sin
+    esto podría apuntar su documento al de otra unidad y conseguir que
+    Administración, al quitarlo, borrara el archivo de otro. Se mira después de
+    quitarlo, así que cualquier referencia que quede —de otra cuenta, de otra
+    cara suya o de una unidad— lo deja en el bucket.
+    """
+    propia = re.sub(r"[^A-Za-z0-9_-]", "", str(conductor.get("unidad_id") or ""))
+    # Solo la forma que dejan las subidas, «unidad/archivo»: un «..» o una
+    # barra de más podrían salir de su carpeta aunque empiece por ella.
+    if not propia or ".." in ruta or "\\" in ruta or ruta.count("/") != 1 or ruta.split("/", 1)[0] != propia:
+        return False
+
+    def usa_la_ruta(valores: Any) -> bool:
+        return isinstance(valores, dict) and any(
+            isinstance(valor, dict) and valor.get("path") == ruta for valor in valores.values()
+        )
+
+    for usuario in usuarios_db.values():
+        if isinstance(usuario, dict) and usa_la_ruta(usuario.get("perfil_conductor")):
+            return False
+    return not any(usa_la_ruta(unidad) for unidad in conductores_db.values())
+
+
+@app.post("/api/admin/driver/documento/eliminar")
+async def eliminar_documento_del_conductor(payload: DocumentoEliminado, session_token: SessionCookie = None):
+    """Administración quita un archivo mal subido de la cuenta del conductor, y del bucket.
+
+    Rechazar solo le pide al conductor que lo arregle desde su cuenta, y el
+    archivo erróneo sigue ahí; quien da de alta a un conductor que no se maneja
+    con la aplicación necesita poder quitarlo. El documento queda por entregar
+    y se le avisa al conductor.
+    """
+    actor = await require_admin_session(session_token)
+    if not _es_campo_documento(payload.campo):
+        raise HTTPException(status_code=400, detail="Eso no es un documento del conductor.")
+    # Toca la cuenta, sus avisos y la actividad: todo tiene que estar cargado.
+    await reload_db(force=True)
+    conductor = get_user_by_identifier(payload.conductor)
+    if not conductor or conductor.get("rol") != "Conductor":
+        raise HTTPException(status_code=404, detail="Conductor no encontrado.")
+    perfil = conductor.get("perfil_conductor")
+    valor = perfil.get(payload.campo) if isinstance(perfil, dict) else None
+    if not _tiene_contenido(valor):
+        raise HTTPException(status_code=404, detail="Ese documento no está subido.")
+
+    ruta = valor.get("path") if isinstance(valor, dict) else None
+    # Se deja en `None` y no se borra la clave: así lo lee todo como «sin
+    # subir», y el guardado por diferencias escribe un valor, no un borrado.
+    revisiones = {k: v for k, v in (perfil.get("revision_docs") or {}).items() if k != payload.campo}
+    nuevo = {**perfil, payload.campo: None, **({"revision_docs": revisiones} if "revision_docs" in perfil else {})}
+    conductor_key = conductor.get("identifier") or payload.conductor
+    aviso = {
+        "id": _next_notification_id(),
+        "tipo": "documento_revisado",
+        "campo": payload.campo,
+        "estado": "faltante",
+        "titulo": f"Documento {payload.campo} eliminado",
+        "mensaje": f"Administración quitó tu documento '{payload.campo}' porque no era el correcto. Vuelve a subirlo.",
+        "para": conductor_key,
+        "de": (actor or {}).get("nombre", "Administración"),
+        "fecha": datetime.now().isoformat(),
+        "leido": False,
+    }
+    conductor["perfil_conductor"] = nuevo
+    notifications_db.append(aviso)
+    actividad_previa = list(actividad_db)
+    registrar_actividad(
+        "Documento eliminado", actor=actor, entity_type="documento", entity_id=payload.campo,
+        entity_label=f"{payload.campo} · {conductor.get('unidad_id') or conductor_key}",
+        description="Administración quitó un archivo mal subido; el conductor tendrá que volver a entregarlo.",
+        status="warning",
+    )
+    try:
+        await persist_users_only()
+    except EscrituraSinDeshacer:
+        raise
+    except Exception:
+        conductor["perfil_conductor"] = perfil
+        notifications_db[:] = [n for n in notifications_db if n is not aviso]
+        actividad_db[:] = actividad_previa
+        raise
+    # El archivo, solo cuando la cuenta ya no lo señala.
+    archivo_borrado = bool(ruta) and _archivo_solo_suyo(conductor, ruta) and await delete_document_from_storage(ruta)
+    return {"perfil_conductor": nuevo, "archivo_borrado": archivo_borrado}
+
+
+class FotoDelConductor(BaseModel):
+    # La unidad de la ficha: su conductor es quien recibe la foto.
+    unidad: str
+    # «avatar» (la foto de perfil) o «vehiculo».
+    tipo: str
+    nombre: str
+    tipo_archivo: str
+    base64: str
+
+
+_FOTOS_DEL_CONDUCTOR = ("avatar", "vehiculo")
+
+
+def _ruta_de_la_foto(conductor: Dict[str, Any], tipo: str, nombre: str) -> str:
+    """Dónde va la foto que sube Administración por el conductor.
+
+    La de perfil, en la carpeta de fotos de perfil del conductor —la misma que
+    usaría él—, no en la de quien la sube. La del vehículo, en la de su unidad,
+    como cuando la sube él desde su perfil.
+    """
+    if tipo == "avatar":
+        identidad = conductor.get("email") or conductor.get("identifier") or _clave_de_cuenta(conductor)
+        return _ruta_unica(_ruta_de_documento(CARPETA_AVATARES, _carpeta_personal(identidad), nombre))
+    return _ruta_unica(_ruta_de_documento(str(conductor.get("unidad_id") or ""), "fotoVehiculo", nombre))
+
+
+@app.post("/api/admin/driver/foto")
+async def cambiar_foto_del_conductor(payload: FotoDelConductor, session_token: SessionCookie = None):
+    """Administración cambia la foto de perfil o la del vehículo de un conductor.
+
+    Hasta ahora solo las cambiaba el propio conductor desde su perfil, y quien
+    da de alta a alguien que no se maneja con la aplicación tiene que poder
+    hacerlo todo por él. Como con el resto de datos personales, una cuenta sin
+    perfil recibe uno al ponerle la foto del vehículo (ver `_escribir_en_el_conductor`).
+    """
+    actor = await require_admin_session(session_token)
+    if payload.tipo not in _FOTOS_DEL_CONDUCTOR:
+        raise HTTPException(status_code=400, detail="La foto es la de perfil o la del vehículo.")
+    if not str(payload.tipo_archivo or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="La foto tiene que ser una imagen (JPG, PNG o WebP).")
+    # Toca la cuenta y la actividad: todo tiene que estar cargado.
+    await reload_db(force=True)
+    conductor = _conductores_por_unidad().get(payload.unidad)
+    if conductor is None:
+        raise HTTPException(status_code=409, detail="La unidad no tiene cuenta de conductor, y la foto se guarda en ella.")
+
+    ruta = _ruta_de_la_foto(conductor, payload.tipo, payload.nombre)
+    await upload_document_to_storage(payload.base64, ruta, payload.tipo_archivo)
+    foto = {"name": payload.nombre, "type": payload.tipo_archivo, "path": ruta}
+
+    antes = {clave: conductor[clave] for clave in ("avatar", "perfil_conductor") if clave in conductor}
+    if payload.tipo == "avatar":
+        conductor["avatar"] = foto
+    else:
+        conductor["perfil_conductor"] = {**_perfil_de(conductor), "fotoVehiculo": foto}
+    actividad_previa = list(actividad_db)
+    registrar_actividad(
+        "Foto de perfil cambiada" if payload.tipo == "avatar" else "Foto del vehículo cambiada",
+        actor=actor, entity_type="unidad", entity_id=payload.unidad, entity_label=payload.unidad,
+        description="Administración cambió la foto desde la ficha del conductor.", status="success",
+    )
+    try:
+        await persist_users_only()
+    except EscrituraSinDeshacer:
+        raise
+    except Exception:
+        for clave in ("avatar", "perfil_conductor"):
+            conductor.pop(clave, None)
+        conductor.update(antes)
+        actividad_db[:] = actividad_previa
+        raise
+    return {"foto": foto, "perfil_conductor": _perfil_de(conductor) or None}
+
+
 @app.post("/api/admin/driver/notify")
 async def notify_driver(payload: DriverNotifyPayload, session_token: SessionCookie = None):
     """Admin envía un aviso interno al conductor."""
@@ -5162,6 +5353,20 @@ def _puede_ver_unidad(actor: Optional[Dict[str, Any]], unidad_id: str) -> bool:
     return any(_owner_key(propia) == pedida for propia in _carpetas_del_actor(actor))
 
 
+def _ruta_unica(ruta: str) -> str:
+    """La ruta con una marca propia de esta subida, antes de la extensión.
+
+    Con la ruta fija de cada documento, reemplazarlo sobrescribía el mismo
+    archivo y la ficha seguía enseñando el anterior: la página guarda cinco
+    minutos la URL firmada de cada ruta, y el almacenamiento puede servir su
+    copia vieja. Con una ruta nueva no hay nada viejo que reutilizar. El
+    archivo reemplazado se queda en el bucket, sin que nada lo señale.
+    """
+    carpeta, _, archivo = ruta.rpartition("/")
+    nombre, punto, extension = archivo.rpartition(".") if "." in archivo else (archivo, "", "")
+    return f"{carpeta}/{nombre}-{secrets.token_hex(4)}{punto}{extension}"
+
+
 @app.post("/api/documentos/subir")
 async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie = None):
     """Guarda un documento en Storage y devuelve su ruta.
@@ -5174,6 +5379,7 @@ async def subir_documento(datos: DocumentoSubida, session_token: SessionCookie =
         ruta = _ruta_de_avatar(actor, datos.nombre)
     else:
         ruta = _ruta_de_documento(_carpeta_destino(actor, datos.unidad_id), datos.campo, datos.nombre)
+    ruta = _ruta_unica(ruta)
     await upload_document_to_storage(datos.base64, ruta, datos.tipo)
     # Se anota el hecho y su destino, nunca el archivo: el historial no es sitio
     # para el contenido de un DNI.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText, Loader, X } from 'lucide-react';
+import { Download, FileText, Loader, Trash2, X } from 'lucide-react';
 import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../utils/documentoArchivo';
 import { urlFirmada } from '../utils/documentoStorage';
 
@@ -15,14 +15,28 @@ import { urlFirmada } from '../utils/documentoStorage';
  * `data:application/pdf`, así que el visor ofrece la descarga en su lugar.
  */
 
-const DocumentViewer = ({ documento, onClose, pie = null }) => {
-  // El estado arranca en la primera cara y se reinicia solo: quien monta este
-  // visor le pasa un `key` por documento, así React lo remonta al abrir otro.
-  // Reiniciarlo con un efecto sería el antipatrón que la regla de hooks señala.
-  const [indice, setIndice] = useState(0);
+const DocumentViewer = ({
+  documento,
+  onClose,
+  pie = null,
+  // Quitar el archivo de la cara que se mira. Solo lo pasa la revisión de
+  // Administración: sin él, el visor no ofrece borrar nada.
+  onEliminar = null,
+}) => {
+  // El estado arranca en la primera cara que tiene archivo —«Completo» va
+  // primera y a menudo está vacía: abrir por ella decía «no disponible» con el
+  // DNI subido en «Delante»— y se reinicia solo: quien monta este visor le pasa
+  // un `key` por documento, así React lo remonta al abrir otro. Reiniciarlo con
+  // un efecto sería el antipatrón que la regla de hooks señala.
+  const [indice, setIndice] = useState(
+    () => Math.max(0, carasDe(documento).findIndex(caraTieneDocumento)),
+  );
   // Las URLs firmadas caducan en minutos, así que se piden al abrir la cara y
   // se guardan solo mientras el visor está en pantalla.
   const [firmadas, setFirmadas] = useState({});
+  // Borrar pide confirmación en el propio visor: es lo único que no se deshace.
+  const [confirmando, setConfirmando] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
 
   const caraActiva = carasDe(documento)[indice];
   const rutaActiva = caraActiva?.path;
@@ -50,6 +64,19 @@ const DocumentViewer = ({ documento, onClose, pie = null }) => {
   const esperandoFirma = Boolean(cara?.path) && !firmadas[cara.path];
   const titulo = cara?.nombre ? `${documento.name} · ${cara.nombre}` : documento.name;
 
+  const puedeEliminar = Boolean(onEliminar && cara?.campo && caraTieneDocumento(cara));
+
+  const eliminar = async () => {
+    setEliminando(true);
+    try {
+      await onEliminar(cara);
+    } catch {
+      // Quien elimina anuncia el error; aquí basta con volver a ofrecerlo.
+      setEliminando(false);
+      setConfirmando(false);
+    }
+  };
+
   const descargar = () => {
     if (!disponible) return;
     const a = document.createElement('a');
@@ -72,10 +99,39 @@ const DocumentViewer = ({ documento, onClose, pie = null }) => {
       >
         <div className="doc-viewer-header">
           <h3>{titulo}</h3>
-          <button type="button" className="close-btn-inline" onClick={onClose} title="Cerrar">
-            <X size={20} />
-          </button>
+          <div className="doc-viewer-acciones">
+            {puedeEliminar && !confirmando && (
+              <button
+                type="button"
+                className="doc-viewer-eliminar"
+                onClick={() => setConfirmando(true)}
+                title="Quitar este archivo, por ejemplo si se subió por error"
+              >
+                <Trash2 size={15} /> Eliminar
+              </button>
+            )}
+            <button type="button" className="close-btn-inline" onClick={onClose} title="Cerrar">
+              <X size={20} />
+            </button>
+          </div>
         </div>
+
+        {confirmando && (
+          <div className="doc-viewer-confirmar" role="alertdialog" aria-label="Confirmar la eliminación">
+            <p>
+              ¿Eliminar <strong>{titulo}</strong>? Se borra el archivo, y el conductor tendrá que volver
+              a entregarlo.
+            </p>
+            <div className="doc-viewer-confirmar-botones">
+              <button type="button" className="btn-secondary" onClick={() => setConfirmando(false)} disabled={eliminando}>
+                Cancelar
+              </button>
+              <button type="button" className="doc-viewer-eliminar-si" onClick={eliminar} disabled={eliminando}>
+                {eliminando ? <Loader size={14} className="animate-spin" /> : <Trash2 size={14} />} Sí, eliminar
+              </button>
+            </div>
+          </div>
+        )}
 
         {caras.length > 1 && (
           <div className="doc-viewer-caras" role="tablist" aria-label="Caras del documento">
@@ -86,7 +142,7 @@ const DocumentViewer = ({ documento, onClose, pie = null }) => {
                 role="tab"
                 aria-selected={i === indice}
                 className={`doc-viewer-cara${i === indice ? ' activa' : ''}`}
-                onClick={() => setIndice(i)}
+                onClick={() => { setIndice(i); setConfirmando(false); }}
                 disabled={!caraTieneDocumento(opcion)}
               >
                 {opcion.nombre}

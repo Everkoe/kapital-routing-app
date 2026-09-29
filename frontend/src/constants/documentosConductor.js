@@ -133,30 +133,65 @@ export const etiquetaCara = (documento, cara) => {
 /**
  * Caras posibles de un documento, en el orden en que se ofrecen.
  *
- * «Completo» va al final porque es la alternativa: quien tiene las dos caras
- * por separado usa las dos primeras, y quien las tiene en una sola hoja usa
- * esta y no necesita las otras.
+ * «Completo» va primero porque es lo que se sube casi siempre: una sola imagen
+ * con las dos caras. Iba al final, como la alternativa, y la gente subía la
+ * imagen completa en «Delante». Las caras por separado quedan para quien las
+ * tiene en dos fotos.
  */
 export const carasDeDocumento = (documento) =>
   admiteReverso(documento)
     ? [
+        { campo: claveCompleto(documento.key), nombre: CARA_COMPLETO, opcional: true },
         { campo: documento.key, nombre: CARA_DELANTE },
         { campo: claveReverso(documento.key), nombre: CARA_DETRAS, opcional: true },
-        { campo: claveCompleto(documento.key), nombre: CARA_COMPLETO, opcional: true },
       ]
     : [{ campo: documento.key, nombre: documento.label }];
 
+const esCompleto = (cara) => String(cara?.campo || '').endsWith(SUFIJO_COMPLETO);
+
 /**
- * Cara a la que va un archivo soltado sobre la tarjeta del documento.
+ * Si una cara no se puede subir: delante y detrás, mientras haya una imagen
+ * completa. Con ella el documento está entregado, y otra foto suelta al lado
+ * solo haría dudar de cuál vale. «Completo» se puede reemplazar siempre.
+ */
+export const caraBloqueada = (cara, caras) =>
+  !esCompleto(cara) && (Array.isArray(caras) ? caras : []).some((otra) => esCompleto(otra) && otra.tieneArchivo);
+
+/**
+ * Cara a la que va un archivo soltado o pegado sobre la tarjeta del documento.
  *
- * El primer hueco libre, anverso antes que reverso. Si ya están todas llenas,
- * reemplaza la primera: es lo que se reemplaza casi siempre, y cualquier otra
- * regla obligaría al usuario a adivinar dónde cae lo que suelta.
+ * Con la imagen completa subida, se reemplaza esa: las otras están
+ * bloqueadas. Si ya se empezó por caras sueltas, el primer hueco de esas
+ * (delante antes que detrás), y con las dos llenas se reemplaza delante. Sin
+ * nada subido, a «Completo», que es lo habitual.
  */
 export const caraDestinoParaArrastre = (caras) => {
   const lista = Array.isArray(caras) ? caras.filter(Boolean) : [];
   if (lista.length === 0) return null;
-  return (lista.find((cara) => !cara.tieneArchivo) || lista[0]).campo;
+  const completo = lista.find(esCompleto);
+  const sueltas = lista.filter((cara) => !esCompleto(cara));
+  if (completo?.tieneArchivo) return completo.campo;
+  if (sueltas.some((cara) => cara.tieneArchivo)) {
+    return (sueltas.find((cara) => !cara.tieneArchivo) || sueltas[0]).campo;
+  }
+  return (completo || lista[0]).campo;
+};
+
+/**
+ * El perfil tras subir un documento nuevo: con él y con su revisión otra vez
+ * pendiente, que es lo que hace el servidor (`resubmit-docs`). Sin esto, un
+ * documento aprobado que se reemplazaba seguía diciendo «Aprobado» en la ficha
+ * abierta, aunque nadie hubiera visto el archivo nuevo.
+ */
+export const conDocumentoNuevo = (perfil, campo, documento) => {
+  const revisiones = perfil?.revision_docs || {};
+  return {
+    ...perfil,
+    [campo]: documento,
+    ...(revisiones[campo]
+      ? { revision_docs: { ...revisiones, [campo]: { ...revisiones[campo], estado: 'pendiente' } } }
+      : {}),
+  };
 };
 
 /**
@@ -167,11 +202,4 @@ export const caraDestinoParaArrastre = (caras) => {
  * ambas caras el documento está resuelto, así que se abre por ella. Abrir por
  * el anverso vacío pedía subir algo que el conductor ya había entregado.
  */
-export const caraInicial = (caras) => {
-  const lista = Array.isArray(caras) ? caras.filter(Boolean) : [];
-  if (lista.length === 0) return null;
-  const completo = lista.find(
-    (cara) => String(cara.campo).endsWith(SUFIJO_COMPLETO) && cara.tieneArchivo,
-  );
-  return completo ? completo.campo : caraDestinoParaArrastre(lista);
-};
+export const caraInicial = (caras) => caraDestinoParaArrastre(caras);

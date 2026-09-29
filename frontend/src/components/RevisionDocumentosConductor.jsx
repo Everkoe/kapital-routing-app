@@ -36,6 +36,8 @@ const RevisionDocumentosConductor = ({
   adminEmail = '',
   titulo = 'Revisión de Documentos del Conductor',
   onDocumentoSubido,
+  // Recibe el perfil tal como quedó en el servidor tras quitar un archivo.
+  onDocumentoEliminado,
   // Vencimientos de la unidad y cómo guardarlos. Solo los tiene Gestión de
   // Flota: en Accesos el conductor todavía no tiene unidad, así que la barra
   // no aparece en vez de mostrar una fecha que no existe.
@@ -93,6 +95,28 @@ const RevisionDocumentosConductor = ({
       toast.error(error?.message || 'No se pudo subir el documento.');
     } finally {
       setCargando(previo => ({ ...previo, [campo]: false }));
+    }
+  };
+
+  /**
+   * Quita el archivo de una cara, por ejemplo uno subido por error.
+   *
+   * Rechazar solo le pide al conductor que lo arregle, y el archivo erróneo se
+   * queda; esto lo borra y deja el documento por entregar. Lanza si falla,
+   * para que el visor vuelva a ofrecerlo.
+   */
+  const eliminarDocumento = async (cara) => {
+    try {
+      const respuesta = await apiFetch('/api/admin/driver/documento/eliminar', {
+        method: 'POST',
+        json: { conductor: conductorEmail, campo: cara.campo },
+      });
+      onDocumentoEliminado?.(respuesta.perfil_conductor);
+      setViendo(null);
+      toast.success('Archivo eliminado. El conductor tendrá que volver a entregarlo.');
+    } catch (error) {
+      toast.error(error?.message || 'No se pudo eliminar el archivo.');
+      throw error;
     }
   };
 
@@ -164,6 +188,7 @@ const RevisionDocumentosConductor = ({
         documento={viendo}
         onClose={() => setViendo(null)}
         pie={barraDeVigencia(viendo?.clave)}
+        onEliminar={conductorEmail ? eliminarDocumento : null}
       />
     </>
   );

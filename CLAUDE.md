@@ -131,6 +131,27 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
   un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).
   Y `GET /api/flota`, que lee cualquier rol con sesión, **ya no manda** DNI, dirección ni nacimiento.
+  **Desplegado en producción el 2026-09-29** (merge `77fc0d6`, PR #18, sin migraciones), con la tarjeta
+  del cuestionario de manejo defensivo en la revisión de documentos; comprobado que sin sesión la flota,
+  su exportación y la ficha responden 401.
+- **Cada subida de un documento va a una ruta nueva** (`_ruta_unica`, desde el 2026-09-29): la ruta era fija
+  por unidad y campo, así que reemplazar sobrescribía el mismo archivo y la ficha seguía enseñando el
+  anterior —la página guarda cinco minutos la URL firmada de cada ruta—. El archivo reemplazado se queda
+  en el bucket sin nada que lo señale; si el espacio llega a importar, habrá que limpiarlos. En los
+  documentos de dos caras **«Completo» va primero** (la gente subía el DNI entero en «Delante») y, con
+  él subido, delante y detrás quedan bloqueadas (`caraBloqueada`); pegar o arrastrar va a «Completo»
+  salvo que ya se empezara por caras sueltas.
+  **Administración puede quitar un archivo mal subido** (`POST /api/admin/driver/documento/eliminar`, desde
+  el visor de la revisión, por cara): rechazar solo le pide al conductor que lo arregle y el archivo erróneo
+  se quedaba. Deja el campo en `None` —así todo lo lee como «sin subir» y el guardado por diferencias
+  escribe un valor, no un borrado—, quita su revisión y avisa al conductor. El archivo se borra del bucket
+  **solo si está en la carpeta de su unidad y nada más lo señala** (`_archivo_solo_suyo`): la ruta sale del
+  perfil, que escribe el propio conductor, y sin esa comprobación podría apuntar su documento al de otra
+  unidad para que Administración lo borrara.
+  **Las fotos del conductor —la de perfil y la del vehículo— también las cambia Administración** desde la
+  ficha (`POST /api/admin/driver/foto`, por padrón): la de perfil va a la carpeta de fotos de perfil **del
+  conductor**, no a la de quien la sube (`/api/documentos/subir` usa siempre la del que sube); la del
+  vehículo, a la de su unidad.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
