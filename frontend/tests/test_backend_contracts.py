@@ -5165,6 +5165,12 @@ class EstimadorDuracionTestCase(unittest.TestCase):
         self.assertLessEqual(minutos, hasta)
         self.assertEqual(self.est.banda_calibrada(1.0, 0.0, 2.0, 0.0)[0], self.est.DURACION_MINIMA)
 
+    def test_the_health_check_says_whether_the_model_shipped(self):
+        """Sin esto, un despliegue sin el paquete del modelo no lo señalaría nada."""
+        self.assertEqual(backend.read_root()["estimacion_duracion"], self.est.disponible())
+        with patch.object(self.est.importlib.util, "find_spec", return_value=None):
+            self.assertFalse(self.est.disponible())
+
     def test_the_exported_model_loads_and_gives_plausible_minutes(self):
         """El modelo que va a producción, no uno falso."""
         paquete = self.est._modelo()

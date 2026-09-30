@@ -3546,7 +3546,8 @@ async def request_metrics_middleware(request: Request, call_next):
 # --- Ruta de Prueba ---
 @app.get("/api")
 def read_root():
-    return {"status": "Kapital Routing API is running!"}
+    return {"status": "Kapital Routing API is running!",
+            "estimacion_duracion": estimador_duracion.disponible()}
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/{user_id}")

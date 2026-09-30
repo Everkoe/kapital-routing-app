@@ -33,6 +33,7 @@ Qué se mide
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import math
 import struct
@@ -234,6 +235,21 @@ def ajustar_cortes(modulo: Any) -> Any:
     clase.float_feature_borders = [[_en_float32(b) for b in fila]
                                    for fila in clase.float_feature_borders]
     return modulo
+
+
+def disponible() -> bool:
+    """Si el modelo exportado viajó con la función, sin cargarlo (pesa ~3,6 MB).
+
+    Lo enseña `GET /api` para comprobarlo tras un despliegue: si el paquete
+    faltara, `estimar` devolvería `None` sin que nada lo señalara.
+    """
+    for nombre in ("api.modelo_duracion", "modelo_duracion"):
+        try:
+            if importlib.util.find_spec(nombre) is not None:
+                return True
+        except (ImportError, ValueError):
+            continue
+    return False
 
 
 @lru_cache(maxsize=1)
