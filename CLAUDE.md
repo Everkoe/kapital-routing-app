@@ -382,6 +382,28 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
 - **«Crear programación» deja elegir de qué día copiar** («Copiar de», desde el 2026-09-30): el servidor
   ya aceptaba `desde` y la pantalla siempre copiaba el último ejecutado. Se marcan los días que caen en el
   mismo día de la semana, porque un domingo lleva ~390 servicios y un laborable ~800.
+  **Desplegado en producción el 2026-09-30** (merge `28e83d9`, PR #23), con la 016 aplicada antes por el
+  usuario y `probar_funciones_plan.py` en verde contra la base (30/30); comprobado que sin sesión editar,
+  proponer, aplicar y cargar el histórico responden 401.
+- **Lo que encontró la revisión independiente de la 016, arreglado en la 017**
+  ([supabase/017_arrastre_sin_perder_pendientes.sql](supabase/017_arrastre_sin_perder_pendientes.sql)):
+  - **Un pendiente solo se quita de la vuelta que se resuelve.** `agregar`, `mover` y `reponer` borraban
+    todos los pendientes de la persona ese día. Así, dejar pendiente la SALIDA de alguien y mover después su
+    RECOJO la hacía desaparecer: sin coche y fuera de pendientes. Ya pasaba con dos novedades de la misma
+    persona. Ahora `agregar` manda el pendiente que resuelve (`pendiente`: turno y sentido guardados) y
+    los demás quitan los de su sentido y turno. El turno cuenta con un minuto de tolerancia
+    (`_mismo_turno`), porque 14 de 15.626 vueltas del histórico son una segunda del mismo sentido el
+    mismo día.
+  - **Cada cambio dice si se aplicó** (`resultados`) y el `ordenar` de un arrastre exige que el
+    movimiento entrara (`requiere_anterior`). Con el `mover` ignorado, el `ordenar` tocaba filas igual
+    y la pantalla anunciaba «va en K027» sin haberlo movido. La pantalla lo lee con
+    [model/resultadoEdicion.js](frontend/src/programador/model/resultadoEdicion.js).
+  - `agregar` tampoco pone a nadie en dos coches del mismo turno y sentido. Una fila que vuelve pierde la
+    nota vieja. Al reemplazar un día, entre filas repetidas se queda la más completa. Y no se arrastra
+    mientras se guarda, porque la relectura podía desmontar la fila arrastrada.
+  - Probado contra la base en una transacción deshecha: `probar_funciones_plan.py --con-migracion`, 35/35.
+    La 017 es compatible en los dos sentidos: el código anterior ignora `resultados` y el nuevo, sin la
+    017, se juzga por el total como antes.
 - **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
   `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
   Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier

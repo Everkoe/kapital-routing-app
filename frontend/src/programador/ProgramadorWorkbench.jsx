@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { apiFetch } from '../utils/apiClient';
 import { buildPendingAgents } from './model/serviceModel.js';
+import { resultadoDeLaEdicion } from './model/resultadoEdicion.js';
 import { useBoardData } from './data/useBoardData.js';
 import {
   cambiosDeLaTanda, cambiosParaAsignar, proponer, proponerTodas,
@@ -306,14 +307,21 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       });
       requireRpcSuccess(respuesta, 'El plan no aceptó el cambio.');
       // La base ignora un cambio que ya no encaja —alguien movió a esa persona
-      // desde otra pestaña, o ya va en otro coche del mismo turno— y lo cuenta
-      // en `ignorados`. Anunciarlo como hecho sería mentir.
-      if (Number(respuesta?.aplicados) === 0 && Number(respuesta?.ignorados) > 0) {
-        toast.error('No se aplicó: el plan ya había cambiado. Se actualiza la vista.');
+      // desde otra pestaña, o ya va en otro coche del mismo turno—. Anunciarlo
+      // como hecho sería mentir (ver `resultadoDeLaEdicion`).
+      const resultado = resultadoDeLaEdicion(cambios, respuesta);
+      if (resultado.estado === 'nada') {
+        toast.error('No se aplicó: el plan ya había cambiado, o esa persona ya va en otro '
+          + 'coche de ese turno. Se actualiza la vista.');
         await refresh();
         return false;
       }
-      toast.success(mensaje);
+      if (resultado.estado === 'parcial') {
+        toast.error(`Se aplicaron ${resultado.hechos} de ${resultado.total}: el resto ya no `
+          + 'encajaba con el plan. Se actualiza la vista.');
+      } else {
+        toast.success(mensaje);
+      }
       await refresh();
       return true;
     } catch (fallo) {
@@ -664,7 +672,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   onOrdenar={modo === 'plan' ? ordenar : null}
                   onReponer={modo === 'plan' ? reponer : null}
                   arrastre={arrastrePlan.arrastre}
-                  onArrastrar={modo === 'plan' ? arrastrePlan.empezarDesdeServicio : null}
+                  // No se arrastra mientras se guarda: la relectura puede
+                  // desmontar la fila arrastrada y su `dragend` se perdería.
+                  onArrastrar={modo === 'plan' && !guardando ? arrastrePlan.empezarDesdeServicio : null}
                   onSoltar={modo === 'plan' ? arrastrePlan.soltarEn : null}
                   onMover={modo === 'plan' ? arrastrePlan.abrirMover : null}
                 />
@@ -714,7 +724,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           onAsignar={asignar}
           onAsignarTodas={asignarTodas}
           arrastre={arrastrePlan.arrastre}
-          onArrastrarPendiente={modo === 'plan' ? arrastrePlan.empezarDesdePendiente : null}
+          onArrastrarPendiente={modo === 'plan' && !guardando ? arrastrePlan.empezarDesdePendiente : null}
           onTerminarArrastre={arrastrePlan.terminar}
           onDejarPendiente={modo === 'plan' ? arrastrePlan.soltarEnPendientes : null}
         />

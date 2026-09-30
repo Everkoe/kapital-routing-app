@@ -149,10 +149,21 @@ test('asignar es agregar y dejar el orden con la persona en su sitio', () => {
 
   assert.deepEqual(cambios, [
     { accion: 'agregar', dni: 'P1', vehiculo: 'V700', turno: '05:00',
-      modalidad: 'RECOJO', cobertura: 'CLL1', origen: 'novedad' },
+      modalidad: 'RECOJO', cobertura: 'CLL1', origen: 'novedad',
+      pendiente: { turno: '05:00', modalidad: 'RECOJO' } },
     { accion: 'ordenar', vehiculo: 'V700', turno: '05:00', modalidad: 'RECOJO',
-      dnis: ['A', 'P1', 'B'] },
+      dnis: ['A', 'P1', 'B'], requiere_anterior: true },
   ]);
+});
+
+test('asignar dice qué pendiente resuelve, con su turno aunque el servicio sea el de :01', () => {
+  // La base quitaba todos los pendientes de la persona ese día: asignar su
+  // RECOJO borraba también su SALIDA pendiente. Ahora solo el que se resuelve.
+  const [service] = servicios([ruta('V700', { turno: '22:01', modalidad: 'SALIDA' })]);
+  const persona = pendiente({ turno: '22:00', modalidad: 'SALIDA' });
+  const [agregar] = cambiosParaAsignar(persona, { service, posicion: 0 });
+  assert.equal(agregar.turno, '22:01');
+  assert.deepEqual(agregar.pendiente, { turno: '22:00', modalidad: 'SALIDA' });
 });
 
 test('en tanda, el último sitio es para quien no tiene otro', () => {
