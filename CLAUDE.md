@@ -269,6 +269,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
     —mediana y cuantiles 10 y 90—, ~1,2 MB cada uno, generados: no editar) y lo lee
     [frontend/api/estimador_duracion.py](frontend/api/estimador_duracion.py), que construye las
     características **igual** al entrenar y al estimar. Reentrenar es repetir `--escribir` y desplegar.
+    Si el paquete no viajara con la función, `estimar` daría `None` sin avisar: **`GET /api` (público)
+    dice `estimacion_duracion: true|false`**, comprobado sin cargar el modelo, y es lo que se mira tras
+    desplegar.
   - **Lo medido** (última semana cargada, que el modelo no vio): en RECOJO, error medio **17,2 min
     frente a 20,5** de la tabla de medianas; en SALIDA casi empata (18,2 frente a 19,2). La SALIDA se
     mide desde que sale de la sede: medida desde el arranque metía la espera y todo predecía peor. La
@@ -286,6 +289,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
     El script lo **comprueba servicio a servicio** tras exportar y se para si difieren.
   - El distrito no entra: sin él predice igual, y el plan no lo trae. La unidad es lo que más pesa,
     después el turno y la cobertura.
+  - **Desplegado en producción el 2026-09-30** (merge `a8b3577`, PR #21, con la 015 ya aplicada):
+    `GET /api` dio `estimacion_duracion: true` —el paquete viajó con la función— y el plan sin
+    sesión responde 401.
   - **Siguiente pieza**: VROOM, que cabe en Vercel como `pyvroom` (4,7 MB, sin servidor aparte). Le
     falta decidir de dónde salen los tiempos entre domicilios —la línea recta explica poco (R² 0,11)—
     y las reglas que el usuario no ha dado (tiempo máximo a bordo, antelación, margen entre turnos).
