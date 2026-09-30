@@ -5,7 +5,7 @@ Cómo se usa (desde la raíz, con el entorno de `frontend/` y `pip install -r sc
     python scripts/probar_vroom.py 2026-08-05 2026-08-19
     MAX_A_BORDO=70 python scripts/probar_vroom.py 2026-08-19     # la variante más cómoda
 
-Solo lee. Resultados del 2026-09-30 en CLAUDE.md («La prueba de VROOM»).
+Solo lee. Resultados del 2026-09-30 en CLAUDE.md («La IA que organiza el día»).
 
 Los datos personales no salen de la base: la consulta devuelve paradas con un
 número opaco y la matriz de kilómetros entre ellas, calculada dentro de
@@ -13,9 +13,14 @@ Postgres. Nada se guarda en disco. Solo se imprimen totales.
 
 Reglas (confirmadas por el usuario el 2026-09-30): a bordo como mucho 90 min;
 en RECOJO, en la sede al menos 10 min antes del turno y recogido como mucho
-1 h 45 antes; sin margen fijo entre servicios.
+1 h 45 antes; sin margen fijo entre servicios. Más una práctica medida: en la
+sede **como mucho 45 min antes** (el 99% llega ≤ 42). Sin ella VROOM entregaba
+a la vez gente de turnos distintos (8-11% de sus llegadas a la sede), cosa que
+hoy no se hace: cada viaje es de un turno.
 
-Para no engañarse, VROOM planifica con **más exigencia que la realidad**:
+La lógica es la de la aplicación (`frontend/api/ruteo_vroom.py`): turno por
+turno, sin mezclar turnos en un viaje. Para no engañarse, VROOM planifica con
+**más exigencia que la realidad**:
 - 10 min de colchón en cada regla (a bordo ≤ 80, en la sede ≥ 20 min antes),
   porque el modelo de tiempos se equivoca ~8 min por servicio;
 - cada unidad solo trabaja en el horario en que trabajó ese día;
@@ -27,23 +32,19 @@ recojo, 5,5 min por entrega de SALIDA y 8 min al llegar a la sede.
 import os
 import statistics
 import sys
-import time
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+AQUI = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, AQUI)
+sys.path.insert(0, os.path.join(os.path.dirname(AQUI), "frontend"))
 import aplicar_sql  # noqa: E402
-import numpy  # noqa: E402
-import vroom  # noqa: E402
-from vroom import _vroom  # noqa: E402
+
+from api import ruteo_vroom as rv  # noqa: E402
 
 # La sede, ajustada con los datos: el punto que mejor explica el último tramo de
 # sus RECOJO (R² 0,69 sobre 2.999 servicios, a 1,63 min/km; no hay dirección pública).
 SEDE = ("TELEPERFORMANCE BELLAVISTA", -12.055, -77.1075)
-MIN_POR_KM = 1.7
-SETUP_RECOJO, SETUP_ENTREGA, SETUP_SEDE = 4.9, 5.5, 8.0
-MAX_A_BORDO, MARGEN_LLEGADA, ESPERA_SALIDA = int(os.getenv("MAX_A_BORDO", "90")), 10, 15
-COLCHON = 10
 ORIGEN_MIN = 8 * 60  # los minutos cuentan desde el día D a las 08:00
 HOLGURA_HORARIO = 15  # la unidad puede empezar/terminar 15 min antes/después que ese día
 
@@ -102,148 +103,68 @@ select jsonb_build_object(
 ) as datos"""
 
 
-def viaje(km: float) -> float:
-    return km * MIN_POR_KM
-
-
-def real(datos):
-    """Lo que se hizo, medido con el mismo modelo de tiempos que VROOM."""
-    km = datos["km"]
+def servicios_reales(datos):
+    """Lo que se hizo, servicio a servicio y en el orden en que ocurrió."""
     servicios = defaultdict(list)
     for p in datos["paradas"]:
         servicios[(p["v"], p["t"], p["modalidad"])].append(p)
-    rutas, a_bordo, errores = defaultdict(list), [], []
+    resultado = []
     for (v, t, modalidad), ps in servicios.items():
-        if modalidad == "RECOJO":
-            ps.sort(key=lambda p: p["pto"])
-            reloj = inicio = t + ps[0]["pto"]
-            subidas = []
-            for k, p in enumerate(ps):
-                if k:
-                    reloj += viaje(km[ps[k - 1]["i"]][p["i"]])
-                if p["subio"]:
-                    subidas.append(reloj)
-                reloj += SETUP_RECOJO
-            reloj += viaje(km[ps[-1]["i"]][0])
-            a_bordo += [reloj - x for x in subidas]
-            reloj += SETUP_SEDE
-            real_min = max(p["lle"] for p in ps) - ps[0]["pto"]
-            rutas[v].append((inicio, reloj, ps[0]["i"], 0))
+        ps.sort(key=lambda p: p["pto"] if modalidad == rv.RECOJO else p["lle"])
+        resultado.append((rv.ServicioActual(v, modalidad, t, [p["i"] for p in ps]), ps))
+    return resultado
+
+
+def error_del_modelo(km, servicios):
+    """Duración según el modelo menos la real, por servicio: cuánto se equivoca."""
+    reglas, errores = rv.Reglas(), []
+    for s, ps in servicios:
+        if s.modalidad == rv.RECOJO:
+            modelo = sum(km[a][b] for a, b in zip(s.puntos, s.puntos[1:])) * reglas.min_por_km
+            modelo += (len(s.puntos) * reglas.parada_recojo + km[s.puntos[-1]][0] * reglas.min_por_km
+                       + reglas.entrada_sede)
+            real = max(p["lle"] for p in ps) - ps[0]["pto"]
         else:
-            ps.sort(key=lambda p: p["lle"])
-            reloj = inicio = t
-            anterior = 0
-            for p in ps:
-                reloj += viaje(km[anterior][p["i"]])
-                a_bordo.append(reloj - t)
-                reloj += SETUP_ENTREGA
-                anterior = p["i"]
-            real_min = max(p["lle"] for p in ps)
-            rutas[v].append((inicio, reloj, 0, ps[-1]["i"]))
-        errores.append((reloj - inicio) - real_min)
-    trabajo = 0.0
-    for tramos in rutas.values():
-        tramos.sort()
-        trabajo += sum(fin - ini for ini, fin, _, _ in tramos)
-        trabajo += sum(viaje(km[a[3]][b[2]]) for a, b in zip(tramos, tramos[1:]))
-    return {"unidades": len(rutas), "servicios": len(servicios), "minutos": trabajo,
-            "a_bordo": a_bordo, "errores": errores}
-
-
-def bloques(intervalos, desde):
-    """Los servicios en otras sedes, ordenados y sin solapes (VROOM los exige así)."""
-    fusion = []
-    for a, b in sorted((max(a, desde, 0), b) for a, b in intervalos):
-        if b <= a:
-            continue
-        if fusion and a <= fusion[-1][1]:
-            fusion[-1][1] = max(fusion[-1][1], b)
-        else:
-            fusion.append([a, b])
-    return fusion
-
-
-def problema(datos, costo_fijo: int) -> vroom.Input:
-    km = datos["km"]
-    entrada = vroom.Input()
-    # Un punto virtual a distancia cero de todo, como salida y llegada: las rutas
-    # quedan abiertas, como en la realidad (nadie sale ni vuelve a una cochera).
-    libre = len(km)
-    segundos = [[round(viaje(x) * 60) for x in fila] + [0] for fila in km] + [[0] * (libre + 1)]
-    # En Windows, pyvroom solo acepta el entero de C (`uintc`); en Linux da igual.
-    entrada.set_durations_matrix("car", _vroom.Matrix(numpy.asarray(segundos, dtype=numpy.uintc)))
-    for n, u in enumerate(datos["unidades"], start=1):
-        if u["desde"] is None:
-            continue
-        cap = u["cap"] or u["llevado"] or 4
-        horario = vroom.TimeWindow(max(0, (u["desde"] - HOLGURA_HORARIO) * 60), (u["hasta"] + HOLGURA_HORARIO) * 60)
-        # Lo que hizo en otras sedes le ocupa ese tiempo, y va vacía para esta.
-        ocupado = [vroom.Break(k, time_windows=[vroom.TimeWindow(a * 60, a * 60)],
-                               service=(b - a) * 60, max_load=[0])
-                   for k, (a, b) in enumerate(bloques(u["fuera"], u["desde"] - HOLGURA_HORARIO), start=n * 100)]
-        entrada.add_vehicle(vroom.Vehicle(n, capacity=[cap], start=libre, end=libre, time_window=horario,
-                                          breaks=ocupado, costs=vroom.VehicleCosts(fixed=costo_fijo)))
-    a_bordo_plan, margen_plan = MAX_A_BORDO - COLCHON, MARGEN_LLEGADA + COLCHON
-    for p in datos["paradas"]:
-        T = p["t"] * 60
-        if p["modalidad"] == "RECOJO":
-            ventana = vroom.TimeWindow(T - (a_bordo_plan + margen_plan) * 60, T - margen_plan * 60)
-            recogida = vroom.ShipmentStep(p["i"], location=p["i"], default_setup=round(SETUP_RECOJO * 60),
-                                          time_windows=[ventana])
-            entrega = vroom.ShipmentStep(p["i"], location=0, default_setup=round(SETUP_SEDE * 60),
-                                         time_windows=[ventana])
-        else:
-            recogida = vroom.ShipmentStep(p["i"], location=0,
-                                          time_windows=[vroom.TimeWindow(T, T + ESPERA_SALIDA * 60)])
-            entrega = vroom.ShipmentStep(p["i"], location=p["i"], default_setup=round(SETUP_ENTREGA * 60),
-                                         time_windows=[vroom.TimeWindow(T, T + a_bordo_plan * 60)])
-        entrada.add_shipment(recogida, entrega, amount=vroom.Amount([1]))
-    return entrada
-
-
-def resolver(datos, costo_fijo: int):
-    t0 = time.time()
-    solucion = problema(datos, costo_fijo).solve(exploration_level=5, nb_threads=4,
-                                                 timeout=timedelta(seconds=120))
-    rutas = solucion.routes
-    tareas = rutas[rutas["type"].isin(["pickup", "delivery"])]
-    subio = {p["i"]: p["subio"] for p in datos["paradas"]}
-    # A bordo desde que la persona sube (tras la espera, si la unidad llegó antes)
-    # hasta que la unidad llega a destino: lo mismo que se mide en lo real.
-    subida = {int(r.id): (r.arrival + r.waiting_time) / 60 for r in tareas.itertuples() if r.type == "pickup"}
-    bajada = {int(r.id): r.arrival / 60 for r in tareas.itertuples() if r.type == "delivery"}
-    a_bordo = [bajada[i] - subida[i] for i in subida if i in bajada and subio[i]]
-    fin = rutas[rutas["type"] == "end"]
-    tareas_y_paradas = rutas[rutas["type"] != "break"]
-    trabajo = (fin["duration"].sum() + tareas_y_paradas["setup"].sum() + tareas_y_paradas["service"].sum()) / 60
-    return {"unidades": tareas["vehicle_id"].nunique(), "minutos": trabajo, "a_bordo": a_bordo,
-            "sin_asignar": len(solucion.unassigned), "segundos": time.time() - t0}
+            camino = [0] + s.puntos
+            modelo = sum(km[a][b] for a, b in zip(camino, camino[1:])) * reglas.min_por_km
+            modelo += (len(s.puntos) - 1) * reglas.parada_entrega
+            real = max(p["lle"] for p in ps)
+        errores.append(modelo - real)
+    return errores
 
 
 def p90(valores):
     return round(statistics.quantiles(valores, n=10)[-1]) if len(valores) > 2 else None
 
 
-def informe(dia, datos, r, soluciones):
-    e = r["errores"]
+def linea(nombre, unidades, minutos, a_bordo, extra=""):
+    return (f"  {nombre:<15}{unidades:3d} unidades · {minutos / 60:5.1f} h · a bordo med "
+            f"{statistics.median(a_bordo):.0f} p90 {p90(a_bordo)} máx {max(a_bordo):.0f}{extra}")
+
+
+def probar(dia: date, reglas: rv.Reglas) -> None:
+    datos = aplicar_sql.ejecutar(consulta(dia))[0]["datos"]
+    km = datos["km"]
+    servicios = servicios_reales(datos)
+    errores = error_del_modelo(km, servicios)
+    actual = rv.evaluar(km, [s for s, _ in servicios], reglas)
+    paradas = [rv.Parada(str(p["i"]), p["modalidad"], p["t"], p["i"]) for p in datos["paradas"]]
+    unidades = [rv.Unidad(u["v"], u["cap"] or u["llevado"] or 4, u["desde"] - HOLGURA_HORARIO,
+                          u["hasta"] + HOLGURA_HORARIO, [tuple(x) for x in u["fuera"]])
+                for u in datos["unidades"] if u["desde"] is not None]
     print(f"\n=== {dia} ({dia:%a}) · jornada 10:00 → 10:00 · {SEDE[0]} ===")
     print(f"visitas: {datos['visitas_total']} ({datos['a_bordo_total']} subieron); sin domicilio resuelto, "
-          f"fuera: {datos['sin_ubicar']}; en la prueba: {len(datos['paradas'])}")
-    print(f"modelo de tiempos contra lo real: error mediano {statistics.median(abs(x) for x in e):.1f} min, "
-          f"sesgo mediano {statistics.median(e):+.1f} min ({len(e)} servicios)")
-    print(f"  REAL           {r['unidades']:3d} unidades · {r['minutos'] / 60:5.1f} h · a bordo med "
-          f"{statistics.median(r['a_bordo']):.0f} p90 {p90(r['a_bordo'])} máx {max(r['a_bordo']):.0f}")
-    for nombre, s in soluciones.items():
-        print(f"  VROOM {nombre:<9}{s['unidades']:3d} unidades · {s['minutos'] / 60:5.1f} h · a bordo med "
-              f"{statistics.median(s['a_bordo']):.0f} p90 {p90(s['a_bordo'])} máx {max(s['a_bordo']):.0f}"
-              f" · sin asignar {s['sin_asignar']} · {s['segundos']:.0f} s")
+          f"fuera: {datos['sin_ubicar']}; en la prueba: {len(paradas)}")
+    print(f"modelo de tiempos contra lo real: error mediano {statistics.median(abs(x) for x in errores):.1f} min, "
+          f"sesgo mediano {statistics.median(errores):+.1f} min ({len(errores)} servicios)")
+    print(linea("REAL", actual["unidades"], actual["minutos_trabajo"], actual["a_bordo"]))
+    for objetivo in ("unidades", "tiempo"):
+        p = rv.proponer(km, paradas, unidades, objetivo, reglas)
+        print(linea(f"VROOM {objetivo}", p.unidades, p.minutos_trabajo, p.a_bordo,
+                    f" · sin asignar {len(p.sin_asignar)} · {p.segundos:.0f} s"))
 
 
 if __name__ == "__main__":
+    reglas = rv.Reglas(max_a_bordo=int(os.getenv("MAX_A_BORDO", "90")))
     for texto in sys.argv[1:]:
-        dia = date.fromisoformat(texto)
-        datos = aplicar_sql.ejecutar(consulta(dia))[0]["datos"]
-        r = real(datos)
-        soluciones = {nombre: resolver(datos, fijo)
-                      for nombre, fijo in (("unidades", 4 * 3600), ("tiempo", 0))}
-        informe(dia, datos, r, soluciones)
+        probar(date.fromisoformat(texto), reglas)

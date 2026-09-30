@@ -292,43 +292,55 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **Desplegado en producción el 2026-09-30** (merge `a8b3577`, PR #21, con la 015 ya aplicada):
     `GET /api` dio `estimacion_duracion: true` —el paquete viajó con la función— y el plan sin
     sesión responde 401.
-  - **Siguiente pieza**: VROOM, que cabe en Vercel como `pyvroom` (4,7 MB, sin servidor aparte). Ver
-    «La prueba de VROOM».
-- **La prueba de VROOM** (2026-09-30, `scripts/probar_vroom.py`, solo lee y no guarda nada): replanifica
-  una jornada ejecutada de Bellavista (10:00 → 10:00, RECOJO y SALIDA) y la compara con lo real, **las
-  dos medidas con el mismo modelo de tiempos**. Todavía no está en la aplicación.
-  - **Las reglas las confirmó el usuario el 2026-09-30**, sacadas de lo que ya se hace: a bordo como
+  - **Siguiente pieza**: VROOM, hecha: ver «La IA que organiza el día».
+- **La IA que organiza el día: VROOM, «Proponer con IA»** (desde el 2026-09-30, pedido del usuario). En
+  la programación, el botón **Proponer con IA** reorganiza unidades y orden de recogida del día y lo
+  compara con el plan actual; **no cambia nada hasta «Aplicar»**, que pide confirmación, y después se
+  deshace con un botón. La lógica está en [frontend/api/ruteo_vroom.py](frontend/api/ruteo_vroom.py)
+  (VROOM con `pyvroom`, que va en `requirements.txt`: 4,7 MB y sin servidor aparte) y
+  [frontend/api/propuesta_ia.py](frontend/api/propuesta_ia.py) (qué del plan se toca y qué no); los
+  endpoints son `POST /api/programador/plan/proponer` (solo lee) y `.../plan/aplicar-propuesta` (solo
+  admite `mover` y `ordenar`, queda en el historial). `scripts/probar_vroom.py` usa la misma lógica
+  sobre días ya ejecutados.
+  - **Reglas, confirmadas por el usuario el 2026-09-30** a partir de lo que ya se hace: a bordo como
     mucho **90 min** (hoy el 99% de los RECOJO va ≤ 80 y el 94% de las SALIDA ≤ 90); en RECOJO, en la
-    sede **al menos 10 min antes** del turno (el 99% ya llega así) y recogido **como mucho 1 h 45 antes**;
-    **sin margen fijo** entre servicios de una unidad (hoy la mediana es 6 min y el 82% de las unidades
-    hace dos o más al día). En Postgres, la fecha de un servicio es **la de su turno**: con la de la
+    sede **al menos 10 min antes** del turno y recogido **como mucho 1 h 45 antes**; **sin margen fijo**
+    entre servicios (hoy la mediana es 6 min y el 82% de las unidades hace dos o más al día). Más una
+    práctica medida: **en la sede como mucho 45 min antes** (el 99% llega ≤ 42). Se planifica con **10
+    min de colchón** en cada una. En Postgres, la fecha de un servicio es **la de su turno**: con la de la
     jornada, las unidades se solapaban consigo mismas 151 veces; con la del turno, 3.
-  - **Los tiempos entre domicilios salen del propio histórico, sin API de mapas**: entre dos recojos
-    seguidos la distancia sí explica el tiempo (R² 0,46 sobre 7.917 tramos, frente al 0,11 del servicio
-    entero): **1,7 min/km más ~5 min por parada**, igual de noche que de madrugada (36 km/h, sin
-    tráfico). Llegar a la sede, 8 min. **Por la tarde no vale** (85 tramos, R² 0,07): las SALIDA
-    diurnas necesitarían otra fuente. La sede de Bellavista no tiene dirección pública; se ajustó con
-    los datos en (-12,055; -77,1075), R² 0,69 del último tramo. La de Magdalena (Av. Faustino Sánchez
-    Carrión 465) no se ajusta bien, y por eso la prueba es solo de Bellavista, que es el 77% de los
-    servicios.
-  - **Los datos personales no salen**: la consulta devuelve paradas con un número opaco y la matriz de
-    kilómetros entre ellas, calculada en Postgres. Intentar bajar el histórico con DNI y domicilios lo
-    frenó el control de permisos, y es la forma correcta de hacerlo.
-  - **VROOM juega con desventaja a propósito**: 10 min de colchón en cada regla (a bordo ≤ 80, en la
-    sede ≥ 20 min antes), cada unidad solo en el horario en que trabajó ese día, sus servicios en otras
-    sedes le bloquean el tiempo, y en RECOJO visita también a quien luego no salió. El modelo de tiempos
-    se equivoca ~8-9 min por servicio y **sobreestima** (+2 a +5 min), así que no le regala nada.
-  - **Resultado, seis días (5, 11, 15, 19, 24 y 28 de agosto)**: minimizando unidades, **37-51% menos
-    unidades** (46 → 27 el 19/8) y 17-24% menos horas; minimizando tiempo, las mismas unidades y
-    **25-32% menos horas**. Nadie sin asignar, 5-20 s de cálculo. **El precio es el tiempo a bordo**: la
-    mediana sube de ~25 a ~40 min, aunque desaparecen los extremos (en la realidad hubo 94-126 min,
-    fuera de la regla de 90; con VROOM, nadie pasa de 80). Con máximo 70 min a bordo el ahorro baja al
-    20-28% de unidades y quedan 8-22 personas al día sin asignar: viven tan lejos que ni en viaje directo
-    llegan, y hoy viajan 92-125 min.
-  - **Lo que queda fuera**: el 20-25% de las visitas no tiene domicilio resuelto y no entra (iría a
-    revisión humana; resolver más domicilios agranda el ahorro); las otras sedes; y la continuidad, porque
-    esto rehace las rutas de cero en vez de «seguir el orden anterior». Qué objetivo usar (menos unidades,
-    menos horas o más comodidad) y si se acepta rehacer rutas es **decisión de los dueños**.
+  - **Turno por turno, un viaje por unidad y turno.** Resolviendo el día de una vez, VROOM subía a
+    alguien de las 06:00 mientras dejaba a los de las 05:00 (116 personas en un día), y a veces hacía dos
+    viajes del mismo turno con la misma unidad, que el plan no puede guardar. Ahora cada turno se
+    resuelve aparte, en orden; una unidad queda libre donde acabó; si VROOM propone un segundo viaje, se
+    conserva el que lleva más gente y el resto se vuelve a resolver con las unidades que aún no salieron.
+    Quien vive tan lejos que ni solo baja de 80 min va igual, con el viaje más corto, como **excepción**.
+  - **Tiempos del propio histórico, sin API de mapas**: entre dos recojos seguidos la distancia sí
+    explica el tiempo (R² 0,46 sobre 7.917 tramos, frente al 0,11 del servicio entero): **1,7 min/km
+    más ~5 min por parada**, igual de noche que de madrugada; entrar en la sede, 3 min, y bajarse, 3.
+    Con eso la duración de un servicio sale **sin sesgo** contra lo real (−1 a −3 min, error típico de
+    7 min). **Por la tarde no vale** (85 tramos, R² 0,07). La sede de Bellavista no tiene dirección
+    pública y se ajustó con los datos en (-12,055; -77,1075), R² 0,69 del último tramo; la de Magdalena
+    (Av. Faustino Sánchez Carrión 465) no se ajusta bien. **Por eso solo se reorganiza Bellavista**, el
+    77% de los servicios (`SEDES_UBICADAS`); lo demás le ocupa el rato a su unidad.
+  - **Lo que no se toca**: un servicio con alguien sin domicilio ubicado se queda como está (no se sabe
+    dónde recogerle, y moverlo sería inventar); en el plan del 26/9 eran 52 de Bellavista, con 83
+    personas sin ubicar. Los **pendientes** los sigue proponiendo el motor de inserción. Las unidades son
+    las del plan, en su horario de ese día.
+  - **Resultado sobre seis días ejecutados (5, 11, 15, 19, 24 y 28 de agosto)**, lo real y lo propuesto
+    medidos con el mismo modelo y los mismos pasajeros: **28-39% menos unidades y 21-27% menos horas**
+    (46 → 33 unidades el 19/8), nadie sin asignar, 1-5 s de cálculo. «Menos unidades» sale también con
+    menos horas que «menos horas», y es la opción por defecto. **El precio es el tiempo a bordo**: la
+    mediana sube de ~28 a ~40 min, aunque desaparecen los extremos (en la realidad, 91-136 min; con
+    VROOM, nadie pasa de 80). Con máximo 70 min el ahorro baja al 20-28% y hay quien no cabe.
+  - **Comprobado contra la base, en una transacción que se deshizo**: aplicar la propuesta del 26/9
+    movió a 179 personas sin perder ni duplicar filas, y deshacerla dejó el plan **idéntico**, orden
+    incluido.
+  - **Los datos personales no salen de la base en el análisis**: `probar_vroom.py` recibe paradas con
+    un número opaco y la matriz de kilómetros calculada en Postgres. Bajar el histórico con DNI y
+    domicilios lo frenó el control de permisos.
+  - Qué objetivo usar y si se acepta rehacer rutas en vez de «seguir el orden anterior» es **decisión
+    de los dueños**; la herramienta deja elegir y no aplica nada sola.
 - **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
   lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
   se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
@@ -764,8 +776,8 @@ Contexto que no cambia con cada lote:
 2. Algoritmos de optimización real de rutas — **descongelado el 2026-09-22** por decisión del usuario, que
    pasó contexto propio (VROOM + CatBoost + OSRM). **Desde el 2026-09-26 hay un motor de inserción**, pedido
    por el usuario y descrito en §2 («El motor de inserción»). No es un optimizador. **Desde el 2026-09-29
-   hay CatBoost** para la duración de cada servicio, pedido por el usuario (§2, «La IA de duración»).
-   VROOM y OSRM siguen sin instalar, y **no deben añadirse por iniciativa propia**.
+   hay CatBoost** para la duración de cada servicio y **VROOM** para proponer el día («Proponer con
+   IA»), los dos pedidos por el usuario (§2). OSRM sigue sin instalar: los tiempos salen del histórico.
    Dos conclusiones medidas que conviene no volver a discutir desde cero:
    - **La ruta de un pasajero es 100% estable** (cobertura + turno + modalidad); lo que rota es el vehículo,
      solo 64% estable. La variación diaria real es del 22%, no del 10%: 88 altas y 76 bajas sobre 738.

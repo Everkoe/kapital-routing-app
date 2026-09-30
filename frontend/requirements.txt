@@ -6,3 +6,4 @@ python-multipart
 email-validator
 httpx
 python-dotenv
+pyvroom==1.15.2

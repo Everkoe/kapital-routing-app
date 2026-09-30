@@ -4082,6 +4082,9 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
              {"json": {"email": "x@k.com", "field": "telefono", "new_value": "1"}}),
             ("POST", "/api/driver/onboarding", {"json": {"email": "x@k.com", "perfilData": {}}}),
             ("POST", "/api/programador/plan/borrar", {"json": {"fecha": "2026-09-29"}}),
+            ("POST", "/api/programador/plan/proponer", {"json": {"fecha": "2026-09-29"}}),
+            ("POST", "/api/programador/plan/aplicar-propuesta",
+             {"json": {"fecha": "2026-09-29", "cambios": [{"accion": "ordenar"}]}}),
             ("POST", "/api/admin/driver/documento/eliminar",
              {"json": {"conductor": "x@k.com", "campo": "dniScaneado"}}),
             ("POST", "/api/admin/driver/foto",
@@ -5028,6 +5031,82 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(backend.intentos_acceso.IntentosNoDisponibles):
             await backend.intentos_acceso.IntentosEnTabla(
                 pedir=rota, url_base=lambda: "https://x.invalid", cabeceras=lambda: {}).registrar("a" * 64, None)
+
+    async def test_the_ai_proposal_reads_the_plan_and_writes_nothing(self):
+        """Proponer solo lee: la propuesta vuelve con la tanda para aplicarla y deshacerla."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        agente = {"id": "1", "nombre": "Persona 1", "lat": -12.045, "lng": -77.1, "ubicacion": "resuelta"}
+        plan = {"fecha": "2026-09-30", "existe": True, "rutas": [
+            {"conductor": "K001", "turno": "06:00", "modalidad": "RECOJO", "sede": "TELEPERFORMANCE BELLAVISTA",
+             "micro_zona": "BLL", "agentes": [agente]}]}
+        with (
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=plan)) as base,
+            patch.object(backend, "_cargar_flota", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            malo = await self._llamar("POST", "/api/programador/plan/proponer", token,
+                                      json={"fecha": "2026-09-30", "objetivo": "barato"})
+            bueno = await self._llamar("POST", "/api/programador/plan/proponer", token,
+                                       json={"fecha": "2026-09-30", "objetivo": "tiempo"})
+        self.assertEqual(malo.status_code, 400)
+        self.assertEqual(bueno.status_code, 200)
+        cuerpo = bueno.json()
+        self.assertEqual(cuerpo["sede"], "TELEPERFORMANCE BELLAVISTA")
+        self.assertEqual(cuerpo["objetivo"], "tiempo")
+        self.assertEqual(cuerpo["propuesta"]["unidades"], 1)
+        self.assertTrue(all(c["accion"] in ("mover", "ordenar") for c in cuerpo["cambios"]))
+        self.assertTrue(cuerpo["deshacer"])
+        self.assertEqual({c.args[0] for c in base.await_args_list}, {"leer_programacion"})
+        guardar.assert_not_awaited()
+
+    async def test_the_ai_proposal_needs_a_plan_and_a_known_site(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        otra_sede = {"existe": True, "rutas": [{"conductor": "K001", "turno": "06:00", "modalidad": "RECOJO",
+                                                "sede": "OTRA", "agentes": [{"id": "1"}]}]}
+        with (
+            patch.object(backend, "_cargar_flota", new=AsyncMock()),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={"existe": False})),
+        ):
+            sin_plan = await self._llamar("POST", "/api/programador/plan/proponer", token,
+                                          json={"fecha": "2026-09-30"})
+        with (
+            patch.object(backend, "_cargar_flota", new=AsyncMock()),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=otra_sede)),
+        ):
+            sin_sede = await self._llamar("POST", "/api/programador/plan/proponer", token,
+                                          json={"fecha": "2026-09-30"})
+        self.assertEqual(sin_plan.status_code, 409)
+        self.assertEqual(sin_sede.status_code, 409)
+        self.assertIn("Bellavista", sin_sede.json()["detail"])
+
+    async def test_applying_a_proposal_accepts_only_moves_and_orders_and_is_logged(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        mover = {"accion": "mover", "dni": "1", "desde": {"vehiculo": "K001", "turno": "06:00", "modalidad": "RECOJO"},
+                 "hacia": {"vehiculo": "K002", "turno": "06:00", "modalidad": "RECOJO"}}
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 30)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(
+                return_value={"fecha": "2026-09-30", "aplicados": 1, "ignorados": 0})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            colada = await self._llamar("POST", "/api/programador/plan/aplicar-propuesta", token, json={
+                "fecha": "2026-09-30", "cambios": [mover, {"accion": "retirar", "dni": "2"}]})
+            vacia = await self._llamar("POST", "/api/programador/plan/aplicar-propuesta", token,
+                                       json={"fecha": "2026-09-30", "cambios": []})
+            buena = await self._llamar("POST", "/api/programador/plan/aplicar-propuesta", token,
+                                       json={"fecha": "2026-09-30", "cambios": [mover]})
+            deshecha = await self._llamar("POST", "/api/programador/plan/aplicar-propuesta", token,
+                                          json={"fecha": "2026-09-30", "cambios": [mover], "deshacer": True})
+        self.assertEqual(colada.status_code, 400)
+        self.assertEqual(vacia.status_code, 400)
+        self.assertEqual(buena.status_code, 200)
+        self.assertEqual(deshecha.status_code, 200)
+        base.assert_awaited_with("editar_programacion", {"dia": "2026-09-30", "cambios": [mover]}, write=True)
+        acciones = [a.get("action_type") for a in backend.actividad_db[-2:]]
+        self.assertEqual(acciones, ["Propuesta de la IA aplicada", "Propuesta de la IA deshecha"])
 
     async def test_the_plan_brings_the_model_estimate_next_to_the_measured_duration(self):
         """La estimación va aparte de `duracion`, y si no hay no rompe el plan."""

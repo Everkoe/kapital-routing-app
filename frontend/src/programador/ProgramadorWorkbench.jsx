@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Trash2, Upload,
+  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Sparkles, Trash2, Undo2, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -23,6 +23,7 @@ import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
 import ConfirmarPlan from './components/ConfirmarPlan.jsx';
+import PropuestaIA from './components/PropuestaIA.jsx';
 import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
@@ -128,6 +129,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const [guardando, setGuardando] = useState(false);
   // Abierto mientras se pide confirmación para borrar la programación del día.
   const [confirmarBorrar, setConfirmarBorrar] = useState(false);
+  const [proponiendo, setProponiendo] = useState(false);
+  // Lo que deshace la última propuesta de la IA aplicada, y de qué día es.
+  const [deshacerIA, setDeshacerIA] = useState(null);
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -348,6 +352,35 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     editar(cambios, `${asignables} ${asignables === 1 ? 'persona asignada' : 'personas asignadas'}.`);
   }, [asignables, editar, tanda]);
 
+  const propuestaAplicada = useCallback(async ({ resultado, deshacer, movidas }) => {
+    setProponiendo(false);
+    setDeshacerIA({ dia, cambios: deshacer, movidas });
+    const ignorados = Number(resultado?.ignorados) || 0;
+    toast.success(`Propuesta aplicada: ${movidas} ${movidas === 1 ? 'persona cambia' : 'personas cambian'} de unidad.`
+      + (ignorados ? ` ${ignorados} ajustes no hacían falta o el plan ya había cambiado.` : ''));
+    await refresh();
+  }, [dia, refresh]);
+
+  const deshacerPropuesta = useCallback(async () => {
+    if (!deshacerIA) return;
+    setGuardando(true);
+    const aviso = toast.loading('Deshaciendo la propuesta…');
+    try {
+      requireRpcSuccess(await apiFetch('/api/programador/plan/aplicar-propuesta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: deshacerIA.dia, cambios: deshacerIA.cambios, deshacer: true }),
+      }), 'No se pudo deshacer la propuesta.');
+      toast.success('Propuesta deshecha: el plan vuelve a como estaba.', { id: aviso });
+      setDeshacerIA(null);
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo deshacer la propuesta.', { id: aviso });
+    } finally {
+      setGuardando(false);
+    }
+  }, [deshacerIA, refresh]);
+
   const botonCrear = (
     <button type="button" className="pw-btn pw-btn-primary"
       onClick={crearPlan} disabled={guardando}>
@@ -458,15 +491,20 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
             {/* Solo sobre un día que no ha pasado: lo ejecutado no se borra.
                 No basta `esProgramable`, que también incluye los planes viejos
                 para que sigan alcanzándose desde el selector. */}
-            {esProgramable && dia >= hoyISO() && (
-              <span className="pw-notice-acciones">
+            <span className="pw-notice-acciones">
+              <button type="button" className="pw-btn pw-btn-sm pw-btn-ia"
+                onClick={() => setProponiendo(true)} disabled={guardando}>
+                <Sparkles size={14} aria-hidden="true" />
+                Proponer con IA
+              </button>
+              {esProgramable && dia >= hoyISO() && (
                 <button type="button" className="pw-btn pw-btn-sm pw-btn-peligro-suave"
                   onClick={() => setConfirmarBorrar(true)} disabled={guardando}>
                   <Trash2 size={14} aria-hidden="true" />
                   Borrar
                 </button>
-              </span>
-            )}
+              )}
+            </span>
           </p>
         ) : esProgramable ? (
           <p className="pw-notice">
@@ -487,6 +525,28 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
             </span>
           </p>
         )
+      )}
+
+      {/* Deshacer va aquí y no en un aviso que se va solo: si alguien lo
+          busca un minuto después, tiene que seguir estando. */}
+      {modo === 'plan' && deshacerIA?.dia === dia && (
+        <p className="pw-notice" data-tone="ok">
+          <Sparkles size={16} aria-hidden="true" />
+          <span>
+            Aplicada la propuesta de la IA: {deshacerIA.movidas}{' '}
+            {deshacerIA.movidas === 1 ? 'persona cambió' : 'personas cambiaron'} de unidad.
+          </span>
+          <span className="pw-notice-acciones">
+            <button type="button" className="pw-btn pw-btn-sm" onClick={deshacerPropuesta} disabled={guardando}>
+              <Undo2 size={14} aria-hidden="true" />
+              Deshacer
+            </button>
+            <button type="button" className="pw-btn pw-btn-sm" onClick={() => setDeshacerIA(null)}
+              disabled={guardando}>
+              Mantener
+            </button>
+          </span>
+        </p>
       )}
 
       <WorkbenchFilters filters={filters} options={options} onChange={setFilters} />
@@ -580,6 +640,14 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
               ))}
           </div>
         </section>
+
+        <PropuestaIA
+          abierto={proponiendo}
+          dia={dia}
+          diaLegible={formatoFecha(dia)}
+          onCerrar={() => setProponiendo(false)}
+          onAplicada={propuestaAplicada}
+        />
 
         <ConfirmarPlan
           abierto={confirmarBorrar}

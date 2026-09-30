@@ -6,10 +6,12 @@ import pandas as pd
 # seis mil lineas.
 try:
     from api import (escritura_estado, estimador_duracion, historico_intranet, intentos_acceso,
-                     novedades_intranet, sesiones)
+                     novedades_intranet, propuesta_ia, ruteo_vroom, sesiones)
 except ImportError:  # ejecucion desde dentro de `api/`
     import escritura_estado
     import estimador_duracion
+    import propuesta_ia
+    import ruteo_vroom
     import historico_intranet
     import intentos_acceso
     import novedades_intranet
@@ -6778,6 +6780,83 @@ async def editar_plan(cuerpo: Dict[str, Any] = Body(...),
     return await _rpc_programador("editar_programacion", {
         "dia": dia, "cambios": cambios,
     }, write=True)
+
+
+# Una propuesta del día entero son unos cientos de movimientos; más que esto no
+# es una propuesta de la IA sino otra cosa.
+MAX_CAMBIOS_PROPUESTA = 5000
+
+
+def _proponer(plan: Dict[str, Any], capacidades: Dict[str, Optional[int]], objetivo: str) -> Optional[Dict[str, Any]]:
+    problema = propuesta_ia.construir(plan, lambda codigo: capacidades.get(_clave_de_vehiculo(codigo)))
+    if problema is None:
+        return None
+    propuesta = ruteo_vroom.proponer(problema.km, problema.paradas, problema.unidades, objetivo)
+    return propuesta_ia.respuesta(problema, propuesta, objetivo)
+
+
+@app.post("/api/programador/plan/proponer")
+async def proponer_plan(cuerpo: Dict[str, Any] = Body(...), session_token: SessionCookie = None):
+    """«Proponer con IA»: VROOM reorganiza el día y se compara con el plan actual.
+
+    No escribe nada. Devuelve la comparación, los servicios propuestos, quién
+    queda para revisión y por qué, y las tandas para aplicarla y deshacerla.
+    La lógica está en `ruteo_vroom.py` (turno por turno, reglas del usuario) y
+    `propuesta_ia.py` (qué se toca del plan y qué no).
+    """
+    await require_admin_session(session_token)
+    objetivo = cuerpo.get("objetivo") or "unidades"
+    if objetivo not in propuesta_ia.OBJETIVOS:
+        raise HTTPException(status_code=400, detail="El objetivo debe ser «unidades» o «tiempo».")
+    dia = await _dia_mutable(cuerpo.get("fecha"))
+    plan = await _rpc_programador("leer_programacion", {"dia": dia})
+    if not isinstance(plan, dict) or not plan.get("existe"):
+        raise HTTPException(status_code=409, detail="Ese día todavía no tiene programación.")
+    # La duración estimada de cada servicio sirve para saber cuánto ocupa lo que no se toca.
+    await asyncio.to_thread(_con_estimaciones, plan, dia)
+    await _cargar_flota()
+    capacidades = {_clave_de_vehiculo(padron): _capacidad_declarada(unidad.get("capacidad"))
+                   for padron, unidad in conductores_db.items() if isinstance(unidad, dict)}
+    try:
+        resultado = await asyncio.to_thread(_proponer, plan, capacidades, objetivo)
+    except ImportError as exc:
+        print(f"[Kapital] VROOM no está instalado: {exc}")
+        raise HTTPException(status_code=503, detail="La IA de rutas no está disponible ahora.") from exc
+    if resultado is None:
+        raise HTTPException(status_code=409, detail=(
+            "No hay servicios que la IA pueda reorganizar: necesita una sede con ubicación conocida "
+            "(hoy, Bellavista) y pasajeros con domicilio ubicado."))
+    return {"fecha": dia, **resultado}
+
+
+@app.post("/api/programador/plan/aplicar-propuesta")
+async def aplicar_propuesta(cuerpo: Dict[str, Any] = Body(...), session_token: SessionCookie = None):
+    """Aplica (o deshace) una propuesta de la IA, y lo deja en el historial.
+
+    Solo admite lo que genera la propuesta —mover y ordenar—, en una tanda que
+    la base aplica entera o no aplica. Lo que el plan cambió desde que se
+    calculó la propuesta se ignora y se cuenta (`ignorados`).
+    """
+    actor = await require_admin_session(session_token)
+    cambios = cuerpo.get("cambios")
+    if not isinstance(cambios, list) or not cambios:
+        raise HTTPException(status_code=400, detail="La propuesta no trae cambios.")
+    if len(cambios) > MAX_CAMBIOS_PROPUESTA or any(
+            not isinstance(c, dict) or c.get("accion") not in ("mover", "ordenar") for c in cambios):
+        raise HTTPException(status_code=400, detail="Eso no es una propuesta de la IA.")
+    dia = await _dia_mutable(cuerpo.get("fecha"))
+    deshacer = bool(cuerpo.get("deshacer"))
+    resultado = await _rpc_programador("editar_programacion", {"dia": dia, "cambios": cambios}, write=True)
+    movidas = sum(1 for c in cambios if c.get("accion") == "mover")
+    registrar_actividad(
+        "Propuesta de la IA deshecha" if deshacer else "Propuesta de la IA aplicada",
+        actor=actor, entity_type="programacion", entity_id=dia,
+        entity_label=f"{movidas} personas cambiadas de unidad",
+        description=(f"Aplicados {resultado.get('aplicados', 0)}, ignorados {resultado.get('ignorados', 0)} "
+                     f"(lo que cambió en el plan desde que se calculó)."),
+    )
+    await persist_users_only()
+    return resultado
 
 
 @app.post("/api/programador/plan/novedades")
