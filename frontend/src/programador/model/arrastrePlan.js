@@ -131,6 +131,9 @@ export const cambiosParaSoltar = (persona, destino, posicionElegida = null) => {
         turno: destino.turno,
         modalidad: destino.modalidad,
         dnis,
+        // Si el `mover` no entra —la vista estaba vieja—, no se renumera el
+        // destino sin la persona.
+        requiere_anterior: true,
       },
     ],
   };

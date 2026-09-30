@@ -120,7 +120,10 @@ test('mover es una tanda: sale de su servicio y entra donde menos alarga el reco
       desde: { vehiculo: 'K027', turno: '05:00', modalidad: 'RECOJO' },
       hacia: { vehiculo: 'K030', turno: '05:00', modalidad: 'RECOJO', cobertura: 'CLL1' },
     },
-    { accion: 'ordenar', vehiculo: 'K030', turno: '05:00', modalidad: 'RECOJO', dnis: ['B', 'A', 'C'] },
+    {
+      accion: 'ordenar', vehiculo: 'K030', turno: '05:00', modalidad: 'RECOJO',
+      dnis: ['B', 'A', 'C'], requiere_anterior: true,
+    },
   ]);
 });
 

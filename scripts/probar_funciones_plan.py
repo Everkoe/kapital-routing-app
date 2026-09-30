@@ -18,9 +18,9 @@ otra, es el error de verdad. Si el día elegido ya tiene plan, no hace nada.
 Cómo se usa
 -----------
     python scripts/probar_funciones_plan.py
-    python scripts/probar_funciones_plan.py --con-migracion   # antes de aplicar la 016
+    python scripts/probar_funciones_plan.py --con-migracion   # antes de aplicar la 017
 
-Con `--con-migracion` manda la migración más reciente del plan (la 016) en la
+Con `--con-migracion` manda la migración más reciente del plan (la 017) en la
 misma llamada: se prueba sin haberla aplicado y se deshace con todo lo demás.
 
 También vuelve a cargar el último día del histórico con una fila menos, otra
@@ -44,7 +44,7 @@ import aplicar_sql  # noqa: E402
 
 SENAL = "PRUEBA_TERMINADA"
 SUPABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase")
-MIGRACION = "016_recarga_y_arrastre.sql"
+MIGRACION = "017_arrastre_sin_perder_pendientes.sql"
 
 # El último día de la ventana: es el que menos probable es que tenga plan.
 BLOQUE = r"""
@@ -65,6 +65,8 @@ declare
   n_antes integer;
   filas_hist jsonb;
   movida jsonb;
+  z record;
+  otro_z text;
 begin
   if exists (select 1 from programacion_dias d where d.fecha = dia) then
     raise exception 'OMITIDA: el % ya tiene plan y no se toca', dia;
@@ -177,6 +179,73 @@ begin
       where p.fecha = dia and p.dni = w.dni and p.turno = w.turno
         and p.modalidad = w.modalidad and p.estado = 'programado') = 1)::int);
 
+  -- Lo que encontró la revisión de la 016: dejar pendiente la SALIDA de
+  -- alguien y mover después su RECOJO borraba también el pendiente de la
+  -- SALIDA, y la persona se quedaba sin coche y fuera de pendientes.
+  select p.dni, p.codigo_vehiculo as v_rec, p.turno as t_rec,
+         s.codigo_vehiculo as v_sal, s.turno as t_sal
+    into z
+  from programacion p
+  join programacion s on s.fecha = p.fecha and s.dni = p.dni
+                     and s.modalidad = 'SALIDA' and s.estado = 'programado'
+  where p.fecha = dia and p.modalidad = 'RECOJO' and p.estado = 'programado'
+    and p.dni <> w.dni
+    and exists (select 1 from programacion q
+                where q.fecha = dia and q.modalidad = 'RECOJO' and q.turno = p.turno
+                  and q.codigo_vehiculo <> p.codigo_vehiculo and q.estado = 'programado')
+  order by p.dni limit 1;
+  select q.codigo_vehiculo into otro_z from programacion q
+  where q.fecha = dia and q.modalidad = 'RECOJO' and q.turno = z.t_rec
+    and q.codigo_vehiculo <> z.v_rec and q.estado = 'programado'
+  limit 1;
+  r := editar_programacion(dia, jsonb_build_array(jsonb_build_object(
+    'accion', 'a_pendientes', 'dni', z.dni, 'vehiculo', z.v_sal,
+    'turno', z.t_sal, 'modalidad', 'SALIDA')));
+  r := editar_programacion(dia, jsonb_build_array(jsonb_build_object(
+    'accion', 'mover', 'dni', z.dni,
+    'desde', jsonb_build_object('vehiculo', z.v_rec, 'turno', z.t_rec, 'modalidad', 'RECOJO'),
+    'hacia', jsonb_build_object('vehiculo', otro_z, 'turno', z.t_rec, 'modalidad', 'RECOJO'))));
+  res := res || jsonb_build_object('otra_vuelta_sigue_pendiente', ((r ->> 'aplicados')::int = 1
+    and exists (select 1 from programacion_pendientes x
+                where x.fecha = dia and x.dni = z.dni and x.modalidad = 'SALIDA'))::int);
+
+  -- Asignarla desde pendientes a su unidad resuelve justo ese pendiente y la
+  -- fila vuelve sin la nota vieja.
+  r := editar_programacion(dia, jsonb_build_array(jsonb_build_object(
+    'accion', 'agregar', 'dni', z.dni, 'vehiculo', z.v_sal, 'turno', z.t_sal,
+    'modalidad', 'SALIDA', 'origen', 'manual',
+    'pendiente', jsonb_build_object('turno', z.t_sal, 'modalidad', 'SALIDA'))));
+  res := res || jsonb_build_object(
+    'pendiente_exacto_resuelto', (not exists (
+      select 1 from programacion_pendientes x where x.fecha = dia and x.dni = z.dni))::int,
+    'vuelve_sin_nota', (exists (
+      select 1 from programacion p
+      where p.fecha = dia and p.dni = z.dni and p.codigo_vehiculo = z.v_sal
+        and p.turno = z.t_sal and p.estado = 'programado' and p.nota is null))::int);
+
+  -- Ya va en un coche de ese turno y sentido: agregarla a otro no entra, y el
+  -- `ordenar` que la acompaña tampoco. Cada cambio dice si se aplicó.
+  r := editar_programacion(dia, jsonb_build_array(
+    jsonb_build_object('accion', 'agregar', 'dni', z.dni, 'vehiculo', 'PRUEBA-DOS',
+                       'turno', z.t_sal, 'modalidad', 'SALIDA', 'origen', 'manual'),
+    jsonb_build_object('accion', 'ordenar', 'vehiculo', 'PRUEBA-DOS', 'turno', z.t_sal,
+                       'modalidad', 'SALIDA', 'dnis', jsonb_build_array(z.dni),
+                       'requiere_anterior', true)));
+  res := res || jsonb_build_object('agregar_en_dos_no', (r -> 'resultados' = '[0, 0]'::jsonb
+    and not exists (select 1 from programacion p
+                    where p.fecha = dia and p.codigo_vehiculo = 'PRUEBA-DOS'))::int);
+
+  -- Un `mover` que no entra no deja que su `ordenar` renumere el destino.
+  r := editar_programacion(dia, jsonb_build_array(
+    jsonb_build_object('accion', 'mover', 'dni', 'NO-EXISTE',
+      'desde', jsonb_build_object('vehiculo', v.codigo_vehiculo, 'turno', v.turno, 'modalidad', v.modalidad),
+      'hacia', jsonb_build_object('vehiculo', otro_z, 'turno', z.t_rec, 'modalidad', 'RECOJO')),
+    jsonb_build_object('accion', 'ordenar', 'vehiculo', otro_z, 'turno', z.t_rec,
+                       'modalidad', 'RECOJO', 'dnis', jsonb_build_array('NO-EXISTE', z.dni),
+                       'requiere_anterior', true)));
+  res := res || jsonb_build_object('ordenar_sin_mover_no',
+    (r -> 'resultados' = '[0, 0]'::jsonb)::int);
+
   r := leer_programacion(dia);
   res := res || jsonb_build_object('leer', jsonb_array_length(r -> 'rutas'));
 
@@ -246,7 +315,8 @@ begin
     and not has_function_privilege('anon', 'public.sembrar_programacion(date,date,boolean)', 'execute')
     and not has_function_privilege('anon', 'public.editar_programacion(date,jsonb)', 'execute')
     and not has_function_privilege('anon', 'public.reemplazar_dia_historico(date,jsonb)', 'execute')
-    and not has_function_privilege('authenticated', 'public.reemplazar_dia_historico(date,jsonb)', 'execute'))::int);
+    and not has_function_privilege('authenticated', 'public.reemplazar_dia_historico(date,jsonb)', 'execute')
+    and not has_function_privilege('anon', 'public._mismo_turno(text,text)', 'execute'))::int);
 
   raise exception '% %', '""" + SENAL + r"""', res;
 end $prueba$;
@@ -259,6 +329,8 @@ MINIMOS = {
     "a_pendientes": 1, "a_pendientes_queda": 1, "a_pendientes_sin_baja": 1,
     "desde_pendientes": 1, "pendiente_resuelto": 1, "reponer_en_dos_no": 1,
     "mover_a_su_fila": 1, "mover_una_sola_fila": 1,
+    "otra_vuelta_sigue_pendiente": 1, "pendiente_exacto_resuelto": 1, "vuelve_sin_nota": 1,
+    "agregar_en_dos_no": 1, "ordenar_sin_mover_no": 1,
     "recarga_otro_dia_no": 1, "recarga": 1,
     "recarga_quita_lo_que_no_viene": 1, "recarga_mueve_de_unidad": 1,
     "rehacer_con_marcas_no": 1, "borrar_con_marcas_no": 1,

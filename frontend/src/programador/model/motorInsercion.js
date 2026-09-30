@@ -218,6 +218,12 @@ export const proponer = (pendiente, services, { maxOpciones = MAX_OPCIONES } = {
  * `agregar` lo mete al final y `ordenar` lo deja donde el motor dijo. Van en
  * la misma tanda porque el servidor la aplica entera o nada: nunca queda la
  * persona dentro y el orden a medias.
+ *
+ * `agregar` dice qué pendiente resuelve —su turno y sentido tal como están
+ * guardados, que pueden no ser los del servicio (22:00 frente a 22:01)—, y
+ * la base quita solo ese: quitarlos todos borraba la otra vuelta pendiente de
+ * la misma persona. `ordenar` exige que el `agregar` se aplicara; si no, no
+ * renumera el servicio sin ella (desde la 017).
  */
 export const cambiosParaAsignar = (pendiente, candidato) => {
   const { service, posicion } = candidato;
@@ -235,6 +241,7 @@ export const cambiosParaAsignar = (pendiente, candidato) => {
       // Si entró por una novedad del cliente, que la fila lo diga: es la
       // diferencia entre algo que decidió una persona y algo que vino de fuera.
       origen: ['alta', 'cambio'].includes(pendiente.motivo) ? 'novedad' : 'manual',
+      pendiente: { turno: texto(pendiente.turno), modalidad: texto(pendiente.modalidad) },
     },
     {
       accion: 'ordenar',
@@ -242,6 +249,7 @@ export const cambiosParaAsignar = (pendiente, candidato) => {
       turno: service.turno,
       modalidad: service.modalidad,
       dnis,
+      requiere_anterior: true,
     },
   ];
 };
