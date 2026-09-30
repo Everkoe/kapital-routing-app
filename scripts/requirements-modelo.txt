@@ -1,3 +1,4 @@
-# Solo para entrenar el modelo de duración (scripts/entrenar_duracion.py).
-# No va a Vercel: el backend usa el modelo ya exportado a Python puro.
+# Solo para entrenar el modelo de duración (scripts/entrenar_duracion.py) y
+# probar VROOM (scripts/probar_vroom.py). No va a Vercel.
 catboost==1.2.10
+pyvroom==1.15.2

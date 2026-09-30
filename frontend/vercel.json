@@ -11,7 +11,8 @@
   ],
   "functions": {
     "api/index.py": {
-      "includeFiles": "api/templates/**"
+      "includeFiles": "api/templates/**",
+      "maxDuration": 60
     }
   }
 }
