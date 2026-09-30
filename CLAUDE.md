@@ -404,6 +404,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - Probado contra la base en una transacción deshecha: `probar_funciones_plan.py --con-migracion`, 35/35.
     La 017 es compatible en los dos sentidos: el código anterior ignora `resultados` y el nuevo, sin la
     017, se juzga por el total como antes.
+  - **Desplegado en producción el 2026-09-30** (merge `964c258`, PR #24), con la 017 aplicada antes por el
+    usuario y `probar_funciones_plan.py` en verde contra ella (35/35); sin sesión, editar, proponer y
+    aplicar siguen en 401.
 - **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
   `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
   Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier
