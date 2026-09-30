@@ -5,9 +5,11 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import escritura_estado, historico_intranet, intentos_acceso, novedades_intranet, sesiones
+    from api import (escritura_estado, estimador_duracion, historico_intranet, intentos_acceso,
+                     novedades_intranet, sesiones)
 except ImportError:  # ejecucion desde dentro de `api/`
     import escritura_estado
+    import estimador_duracion
     import historico_intranet
     import intentos_acceso
     import novedades_intranet
@@ -6682,10 +6684,26 @@ async def leer_plan(fecha: Optional[str] = None, session_token: SessionCookie = 
     histórico de lo que ocurrió y no se toca.
     """
     await require_admin_session(session_token)
-    plan = await _rpc_programador("leer_programacion", {"dia": _dia_o_hoy(fecha)})
+    dia = _dia_o_hoy(fecha)
+    plan = await _rpc_programador("leer_programacion", {"dia": dia})
     if isinstance(plan, dict):
         plan["dias_programables"] = _dias_programables(plan.get("dias_con_plan"))
+        # En un hilo: la primera vez que una instancia estima un plan entero
+        # tarda ~0,7 s de cálculo, y en el bucle bloquearía las demás peticiones.
+        await asyncio.to_thread(_con_estimaciones, plan, dia)
     return plan
+
+
+def _con_estimaciones(plan: Dict[str, Any], dia: str) -> None:
+    """Añade a cada servicio del plan la duración que estima el modelo.
+
+    Va junto a `duracion` —la mediana medida de su ruta—, no en su lugar: la
+    mediana es un hecho y la estimación una predicción, y la pantalla los
+    enseña por separado. Si no hay modelo o falla, queda en `None`.
+    """
+    for ruta in plan.get("rutas") or []:
+        if isinstance(ruta, dict):
+            ruta["estimacion"] = estimador_duracion.estimar(ruta, dia)
 
 
 @app.post("/api/programador/plan/sembrar")

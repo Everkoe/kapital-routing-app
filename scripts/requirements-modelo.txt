@@ -1,0 +1,3 @@
+# Solo para entrenar el modelo de duración (scripts/entrenar_duracion.py).
+# No va a Vercel: el backend usa el modelo ya exportado a Python puro.
+catboost==1.2.10

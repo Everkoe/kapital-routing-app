@@ -1179,6 +1179,20 @@
    al límite. */
 .pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }
 
+/* La estimación del modelo ocupa la fila entera: lleva banda, hora de salida y,
+   con pocos casos, el aviso con el error medido. */
+.pw-detail-estimacion { grid-column: 1 / -1; }
+.pw-detail-estimacion dt { display: inline-flex; align-items: center; gap: 4px; }
+.pw-detail-linea {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: var(--kapital-text-secondary);
+  font-size: 0.76rem;
+}
+.pw-detail-aviso { color: var(--kapital-accent-orange); }
+
 /* --- Mapa del servicio ---------------------------------------------------- */
 
 .pw-map { display: flex; flex-direction: column; gap: 8px; }
