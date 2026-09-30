@@ -341,6 +341,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
     domicilios lo frenó el control de permisos.
   - Qué objetivo usar y si se acepta rehacer rutas en vez de «seguir el orden anterior» es **decisión
     de los dueños**; la herramienta deja elegir y no aplica nada sola.
+  - **Desplegado en producción el 2026-09-30** (merge `e0eef72`, PR #22, sin migraciones): `GET /api`
+    sigue con `estimacion_duracion: true` y, sin sesión, proponer y aplicar responden 401. Que `pyvroom`
+    cargue dentro de la función solo se ve al calcular una propuesta con sesión: `GET /api` no lo dice.
 - **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
   lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
   se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
