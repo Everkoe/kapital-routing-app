@@ -1394,6 +1394,115 @@
 
 .pw-table tr[data-destino='debajo'] td { box-shadow: inset 0 -2px 0 var(--kapital-badge-text); }
 
+/* --- Mover gente arrastrando (solo sobre un plan) ------------------------- */
+
+/* Mientras alguien se arrastra, cada tarjeta dice si lo acepta: borde
+   discontinuo donde se puede soltar, apagada donde no. Nunca solo con color:
+   al pasar por encima, la nota lo dice con palabras. */
+.pw-service { position: relative; }
+
+.pw-service[data-soltar='si'],
+.pw-service[data-soltar='aviso'] { border-style: dashed; }
+
+.pw-service[data-soltar='si'][data-encima='true'] {
+  border-color: var(--kapital-accent-green);
+  background: var(--kapital-badge-bg);
+}
+
+.pw-service[data-soltar='aviso'][data-encima='true'] {
+  border-color: var(--kapital-accent-orange);
+  background: var(--kapital-badge-bg);
+}
+
+.pw-service[data-soltar='no'] { opacity: 0.55; }
+
+/* Por encima de la tarjeta y sin recibir eventos: si los recibiera, el
+   arrastre saldría y entraría de la tarjeta a cada movimiento. */
+.pw-soltar-nota {
+  position: absolute;
+  top: 6px;
+  right: 40px;
+  z-index: 1;
+  max-width: min(60%, 420px);
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--kapital-border);
+  background: var(--kapital-card-bg);
+  font-size: 0.76rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.pw-soltar-nota[data-tono='si'] { color: var(--kapital-accent-green); }
+.pw-soltar-nota[data-tono='aviso'] { color: var(--kapital-accent-orange); }
+.pw-soltar-nota[data-tono='no'] { color: var(--kapital-accent-red); }
+
+.pw-agent-card[draggable='true'] { cursor: grab; }
+.pw-agent-card[data-arrastrando] { opacity: 0.45; }
+
+.pw-agent-asa {
+  flex-shrink: 0;
+  margin-top: 10px;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-panel[data-soltar='si'] {
+  outline: 2px dashed var(--kapital-accent-green);
+  outline-offset: -2px;
+}
+
+.pw-dropzone[data-activa='true'] {
+  border-color: var(--kapital-accent-green);
+  color: var(--kapital-text-primary);
+}
+
+.pw-mover { width: min(560px, 94vw); max-width: 560px; }
+
+.pw-mover-opciones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.pw-arrastre-avisos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-arrastre-avisos li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--kapital-accent-orange);
+}
+
+.pw-arrastre-avisos svg { flex-shrink: 0; margin-top: 3px; }
+
+/* «Crear programación» con el día del que se copia. */
+.pw-crear {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pw-crear-desde {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-crear-desde > span { white-space: nowrap; }
+
 /* --- Rehacer y borrar la programación de un día ---------------------------- */
 
 .pw-notice-acciones {

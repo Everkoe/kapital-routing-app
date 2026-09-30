@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, ListChecks, MapPin,
-  Navigation, Repeat, Route, UserPlus, Users,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Info, ListChecks, MapPin,
+  Route, Undo2, UserPlus,
 } from 'lucide-react';
 import { NoveltyReasonBadge } from './estados.jsx';
+import OpcionServicio from './OpcionServicio.jsx';
 
 /**
  * Panel de novedades y pendientes.
@@ -18,6 +19,11 @@ import { NoveltyReasonBadge } from './estados.jsx';
  * **Sobre el histórico** no se asigna nada: lo que pasó no se edita. Los
  * agentes que aparecen son los que el día dejó sin unidad, con el motivo
  * derivado del propio registro (sin coordenadas, sin dirección, sin unidad).
+ *
+ * **Se arrastra en los dos sentidos** (sobre un plan): cada pendiente se lleva
+ * a cualquier servicio del tablero, también a uno que el motor no propone, y
+ * a quien va en un servicio se le suelta aquí para dejarlo pendiente sin darle
+ * de baja. Qué se deja soltar dónde lo decide `model/arrastrePlan.js`.
  */
 
 const initials = (nombre, agenteId) => {
@@ -30,18 +36,6 @@ const initials = (nombre, agenteId) => {
 
 const MAX_VISIBLE = 50;
 
-const km = (valor) => `${valor.toLocaleString('es-PE', { maximumFractionDigits: 1 })} km`;
-
-// «quedarían 5 de 10» se leía como cinco ocupadas: se dice «libres».
-const textoPlazas = ({ plazas, libresTras }) => {
-  if (plazas.total === null) return 'capacidad desconocida';
-  let base;
-  if (libresTras === 0) base = `se llena (${plazas.total} de ${plazas.total})`;
-  else if (libresTras === 1) base = `1 libre de ${plazas.total}`;
-  else base = `${libresTras} libres de ${plazas.total}`;
-  return plazas.fuente === 'observada' ? `${base}, según lo que ha llevado` : base;
-};
-
 /** Por qué no hay sitio, en palabras. */
 const porQueNoCabe = ({ descartes, total }) => {
   const motivos = [];
@@ -51,42 +45,10 @@ const porQueNoCabe = ({ descartes, total }) => {
   return `Servicios de su turno: ${motivos.join(', ')}.`;
 };
 
-const Opcion = ({ candidato, principal, ocupado, onAsignar }) => {
-  const { service } = candidato;
-  return (
-    <div className="pw-opcion" data-principal={principal || undefined}>
-      <div className="pw-opcion-linea">
-        <strong className="pw-mono">{service.conductor}</strong>
-        <span>{service.microZona}</span>
-        <span className="pw-muted">{service.horario}</span>
-      </div>
-      <div className="pw-opcion-motivos">
-        {candidato.mismaZona && (
-          <span className="pw-tag"><Route size={11} aria-hidden="true" />Su zona</span>
-        )}
-        {candidato.habitual && (
-          <span className="pw-tag"><Repeat size={11} aria-hidden="true" />Su unidad habitual</span>
-        )}
-        {candidato.desvioKm !== null && (
-          <span className="pw-tag pw-tag-quiet"
-            title="Lo que se alarga el recorrido para recogerlo, en línea recta.">
-            <Navigation size={11} aria-hidden="true" />+{km(candidato.desvioKm)}
-          </span>
-        )}
-        <span className="pw-tag pw-tag-quiet"
-          title={candidato.plazas.fuente === 'observada'
-            ? 'La flota no declara capacidad para esta unidad: es lo más que ha llevado en un servicio.'
-            : undefined}>
-          <Users size={11} aria-hidden="true" />{textoPlazas(candidato)}
-        </span>
-      </div>
-      <button type="button" className={`pw-btn pw-btn-sm${principal ? ' pw-btn-primary' : ''}`}
-        disabled={ocupado} onClick={onAsignar}>
-        Asignar aquí
-      </button>
-    </div>
-  );
-};
+const Opcion = ({ candidato, principal, ocupado, onAsignar }) => (
+  <OpcionServicio candidato={candidato} principal={principal} ocupado={ocupado}
+    etiqueta="Asignar aquí" onElegir={onAsignar} />
+);
 
 const Propuesta = ({ resultado, ocupado, onAsignar }) => {
   const [abierto, setAbierto] = useState(false);
@@ -104,7 +66,8 @@ const Propuesta = ({ resultado, ocupado, onAsignar }) => {
     return (
       <p className="pw-propuesta-vacia" data-tone="warn">
         <AlertTriangle size={13} aria-hidden="true" />
-        No cabe en ningún servicio que ya exista. {porQueNoCabe(resultado)}
+        No cabe en ningún servicio que ya exista. {porQueNoCabe(resultado)} Puedes
+        arrastrarlo al servicio que elijas: te avisará de lo que no cuadre.
       </p>
     );
   }
@@ -148,7 +111,15 @@ const PendingPanel = ({
   ocupado = false,
   onAsignar,
   onAsignarTodas,
+  arrastre = null,
+  onArrastrarPendiente,
+  onTerminarArrastre,
+  onDejarPendiente,
 }) => {
+  // Solo sobre un plan: en el histórico no se mueve a nadie.
+  const arrastrable = modoPlan && Boolean(onArrastrarPendiente);
+  // Quien viene arrastrado desde un servicio se puede soltar aquí.
+  const recibe = modoPlan && arrastre?.tipo === 'servicio' && Boolean(onDejarPendiente);
   const counts = useMemo(
     () => pending.reduce(
       (acc, agent) => {
@@ -167,7 +138,10 @@ const PendingPanel = ({
   const visible = pending.slice(0, MAX_VISIBLE);
 
   return (
-    <section className="pw-panel" aria-labelledby="pw-pending-title">
+    <section className="pw-panel" aria-labelledby="pw-pending-title"
+      data-soltar={recibe ? 'si' : undefined}
+      onDragOver={recibe ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
+      onDrop={recibe ? (e) => { e.preventDefault(); onDejarPendiente(); } : undefined}>
       <div className="pw-panel-head">
         <h2 className="pw-panel-title" id="pw-pending-title">Novedades y pendientes</h2>
         <span className="pw-panel-tools">
@@ -235,7 +209,18 @@ const PendingPanel = ({
         ) : (
           <>
             {visible.map((agent) => (
-              <article className="pw-agent-card" key={agent.pendingKey || agent.id}>
+              <article className="pw-agent-card" key={agent.pendingKey || agent.id}
+                draggable={arrastrable || undefined}
+                data-arrastrando={(arrastrable && arrastre?.clave === agent.pendingKey) || undefined}
+                title={arrastrable ? 'Arrástralo a un servicio del tablero para asignarlo ahí' : undefined}
+                onDragStart={arrastrable ? (e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  // Firefox no empieza el arrastre sin algún dato.
+                  e.dataTransfer.setData('text/plain', String(agent.agenteId || agent.pendingKey));
+                  onArrastrarPendiente(agent.pendingKey);
+                } : undefined}
+                onDragEnd={arrastrable ? onTerminarArrastre : undefined}>
+                {arrastrable && <GripVertical size={14} className="pw-agent-asa" aria-hidden="true" />}
                 <span className="pw-avatar" aria-hidden="true">{initials(agent.nombre, agent.agenteId)}</span>
                 <div className="pw-agent-body">
                   <div className="pw-agent-name pw-truncate">{agent.nombre || agent.agenteId || 'Sin nombre'}</div>
@@ -281,18 +266,32 @@ const PendingPanel = ({
 
       {/* Cómo elige, dicho una vez y a la vista: una propuesta que no se sabe
           de dónde sale no se puede discutir, solo aceptar o ignorar. */}
-      {modoPlan && (
+      {modoPlan && (recibe ? (
+        <div className="pw-dropzone" data-activa="true">
+          <Undo2 size={18} aria-hidden="true" />
+          <span>
+            <strong>Suelta aquí para dejarlo pendiente</strong>
+            <span>
+              Sale de {arrastre.origen?.conductor || 'su servicio'} sin darle de baja: queda en
+              esta lista para asignarlo a otro servicio.
+            </span>
+          </span>
+        </div>
+      ) : (
         <div className="pw-dropzone">
           <Route size={18} aria-hidden="true" />
           <span>
             <strong>Cómo elige la propuesta</strong>
-            Busca sitio en los servicios que ya existen del mismo turno, sentido
-            y sede. Prefiere su zona y, dentro de ella, el menor desvío en línea
-            recta. Las plazas son las que declara la flota o, si no declara
-            ninguna, lo más que esa unidad ha llevado. No abre servicios nuevos.
+            <span>
+              Busca sitio en los servicios que ya existen del mismo turno, sentido
+              y sede. Prefiere su zona y, dentro de ella, el menor desvío en línea
+              recta. Las plazas son las que declara la flota o, si no declara
+              ninguna, lo más que esa unidad ha llevado. No abre servicios nuevos.
+              Para decidir tú, arrastra a la persona al servicio que quieras.
+            </span>
           </span>
         </div>
-      )}
+      ))}
     </section>
   );
 };

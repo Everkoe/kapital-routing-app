@@ -65,10 +65,38 @@ test('un archivo de un mes ya cargado se resume, no se lista día por día', () 
   assert.equal(r.subidoEl, '2026-09-22T17:01:00+00:00');
 });
 
+test('volver a cargar dice con cuántos servicios se sustituye cada día', () => {
+  const ya = [{ fecha: '2026-09-22', servicios: 518, cargado_en: '2026-09-23T04:12:46+00:00' }];
+  const r = resumenDeRecarga(ya, ['2026-09-22'], { '2026-09-22': 520 });
+  assert.equal(r.lista[0].enArchivo, 520);
+  assert.equal(r.enArchivo, 520);
+  assert.deepEqual(r.cortos, []);
+});
+
+test('un archivo con bastantes menos servicios que lo cargado se avisa', () => {
+  // Sustituir el día con un reporte a medias lo dejaría a medias.
+  const ya = [
+    { fecha: '2026-09-21', servicios: 500, cargado_en: null },
+    { fecha: '2026-09-22', servicios: 518, cargado_en: null },
+  ];
+  const r = resumenDeRecarga(ya, ['2026-09-21', '2026-09-22'],
+    { '2026-09-21': 401, '2026-09-22': 120 });
+  assert.deepEqual(r.cortos, ['2026-09-22']);
+  assert.equal(r.enArchivo, 521);
+});
+
+test('sin los recuentos del archivo no se inventa ninguno', () => {
+  // Un servidor anterior no los manda: el diálogo sigue como antes.
+  const r = resumenDeRecarga([{ fecha: '2026-09-22', servicios: 518 }], ['2026-09-22']);
+  assert.equal(r.lista[0].enArchivo, null);
+  assert.equal(r.enArchivo, null);
+  assert.deepEqual(r.cortos, []);
+});
+
 test('pocos días se listan, y los nuevos del archivo se dicen aparte', () => {
   const ya = [{ fecha: '2026-09-22', servicios: 518, cargado_en: '2026-09-23T04:12:46+00:00' }];
   const r = resumenDeRecarga(ya, ['2026-09-21', '2026-09-22', '2026-09-23']);
-  assert.deepEqual(r.lista, ya);
+  assert.deepEqual(r.lista, ya.map((dia) => ({ ...dia, enArchivo: null })));
   assert.deepEqual(r.nuevos, ['2026-09-21', '2026-09-23']);
 });
 

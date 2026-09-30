@@ -1,4 +1,6 @@
-import { AlertTriangle, CheckCircle2, CircleDashed, Info, MapPin, UserPlus } from 'lucide-react';
+import {
+  AlertTriangle, CheckCircle2, CircleDashed, Info, MapPin, Undo2, UserPlus,
+} from 'lucide-react';
 
 /**
  * Catálogo de estados.
@@ -37,6 +39,9 @@ export const NOVELTY_REASONS = {
   // una etiqueta que dice «horario» a alguien que cambió de casa confunde. Lo
   // que cambió lo dice la línea de detalle, con las palabras de la novedad.
   cambio: { label: 'Cambio del cliente', tone: 'warn', Icon: Info },
+  // Quien el Programador sacó de su servicio para recolocarlo. No es una baja:
+  // viaja, solo que todavía no tiene coche. La línea de detalle dice en cuál iba.
+  devuelto: { label: 'Por recolocar', tone: 'warn', Icon: Undo2 },
 };
 
 export const SERVICE_STATE_KEYS = Object.keys(SERVICE_STATES);

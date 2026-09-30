@@ -64,14 +64,31 @@ const LIMA_MS = 5 * 60 * 60 * 1000;
 const diaEnLima = (iso) => new Date(Date.parse(iso) - LIMA_MS).toISOString().slice(0, 10);
 
 /**
+ * Por debajo de esta fracción de lo ya cargado, el archivo de un día parece un
+ * reporte a medias. Volver a cargar **sustituye** el día, así que un archivo
+ * cortado lo dejaría cortado; lo normal es que una corrección cambie unas
+ * pocas filas, no una de cada cinco.
+ */
+export const UMBRAL_ARCHIVO_CORTO = 0.8;
+
+/**
  * Lo que se enseña al preguntar si se vuelve a cargar: los días ya cargados
  * resumidos (cuántos, de cuándo a cuándo, cuántos servicios), la lista solo si
  * son pocos, los días del archivo que son nuevos, y cuándo se subieron si fue
  * todo el mismo día —si no, no se inventa una fecha común—.
+ *
+ * `enArchivo` (día → servicios que trae el archivo) dice con qué se va a
+ * sustituir cada día, y `cortos` los días en que trae bastantes menos.
  */
-export const resumenDeRecarga = (yaCargados, diasDelArchivo = []) => {
+export const resumenDeRecarga = (yaCargados, diasDelArchivo = [], enArchivo = {}) => {
+  const cuantos = (dia) => {
+    const valor = enArchivo?.[String(dia.fecha)];
+    return typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+  };
   const cargados = [...(yaCargados || [])]
-    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
+    .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
+    .map((dia) => ({ ...dia, enArchivo: cuantos(dia) }));
+  const conCuenta = cargados.filter((dia) => dia.enArchivo !== null);
   const fechasCargadas = new Set(cargados.map((dia) => String(dia.fecha)));
   const nuevos = [...(diasDelArchivo || [])].map(String)
     .filter((dia) => !fechasCargadas.has(dia)).sort();
@@ -86,5 +103,11 @@ export const resumenDeRecarga = (yaCargados, diasDelArchivo = []) => {
     lista: cargados.length <= MAX_DIAS_EN_LISTA ? cargados : [],
     nuevos,
     subidoEl: unSoloDia ? subidas.sort()[0] : null,
+    enArchivo: conCuenta.length === cargados.length && cargados.length > 0
+      ? conCuenta.reduce((total, dia) => total + dia.enArchivo, 0)
+      : null,
+    cortos: conCuenta
+      .filter((dia) => dia.enArchivo < Number(dia.servicios || 0) * UMBRAL_ARCHIVO_CORTO)
+      .map((dia) => dia.fecha),
   };
 };

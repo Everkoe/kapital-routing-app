@@ -8,7 +8,8 @@ import Indicador from './Indicador';
 import ZonaDeCarga from './ZonaDeCarga';
 import { fecha } from './fechas';
 import {
-  diaEsperado, fueraDeLoEsperado, huecosAnteriores, resumenDeRecarga, tiraDeDias, yaCargadosDelError,
+  diaEsperado, fueraDeLoEsperado, huecosAnteriores, MAX_DIAS_EN_LISTA, resumenDeRecarga, tiraDeDias,
+  yaCargadosDelError,
 } from './model/cargaHistorico.js';
 
 /**
@@ -117,10 +118,15 @@ const EstadoDelDia = ({ estado }) => {
  * Con pocos días los lista; con más, los resume en una línea: el reporte de un
  * mes entero listaba 31 días y no cabía en la ventana. Si el archivo trae
  * además días nuevos, se dice aparte, porque entonces cargarlo sí añade algo.
+ *
+ * Volver a cargar **sustituye** cada día por lo que trae el archivo —lo que
+ * ya no venga se quita—, así que enseña cuántos servicios trae frente a los
+ * que hay, y avisa si trae bastantes menos: un reporte a medias dejaría el día
+ * a medias.
  */
 const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
   if (!pendiente) return null;
-  const r = resumenDeRecarga(pendiente.yaCargados, pendiente.dias);
+  const r = resumenDeRecarga(pendiente.yaCargados, pendiente.dias, pendiente.enArchivo);
   const titulo = r.nuevos.length > 0
     ? 'Parte de ese archivo ya estaba cargada'
     : (r.dias === 1 ? 'Ese día ya estaba cargado' : 'Ese archivo ya estaba cargado');
@@ -143,13 +149,30 @@ const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
               <li key={dia.fecha}>
                 <strong>{fecha(dia.fecha)}</strong>: {Number(dia.servicios).toLocaleString('es-PE')} servicios
                 {dia.cargado_en && <> (subido el {momento(dia.cargado_en)})</>}
+                {dia.enArchivo !== null && (
+                  <>; el archivo trae {dia.enArchivo.toLocaleString('es-PE')}</>
+                )}
               </li>
             ))}
           </ul>
         ) : (
           <p className="historico-recarga-resumen">
             <strong>{r.dias} días</strong>, del {fecha(r.desde)} al {fecha(r.hasta)}: {servicios}
-            {r.subidoEl && <> (subidos el {diaDeSubida(r.subidoEl)})</>}.
+            {r.subidoEl && <> (subidos el {diaDeSubida(r.subidoEl)})</>}
+            {r.enArchivo !== null && <>; el archivo trae {r.enArchivo.toLocaleString('es-PE')}</>}.
+          </p>
+        )}
+        {r.cortos.length > 0 && (
+          <p className="pw-notice" data-tone="warn">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>
+              El archivo trae bastantes menos servicios de los que hay
+              {r.cortos.length <= MAX_DIAS_EN_LISTA
+                ? ` el ${r.cortos.map((d) => fecha(d)).join(', ')}`
+                : ` en ${r.cortos.length} días`}
+              . Cargarlo dejaría {r.cortos.length === 1 ? 'ese día' : 'esos días'} así:
+              comprueba que sea el reporte completo.
+            </span>
           </p>
         )}
         {r.nuevos.length > 0 && (
@@ -162,8 +185,8 @@ const ConfirmarRecarga = ({ pendiente, ocupado, onConfirmar, onCancelar }) => {
         )}
         <p>
           {r.nuevos.length > 0
-            ? 'Cargarlo añade los días nuevos y actualiza los que ya estaban; no se duplica nada.'
-            : 'Volver a cargarlo actualiza esos servicios con lo que trae el archivo; no se duplica nada. Si no esperabas esto, quizá sea el archivo de otro día.'}
+            ? 'Cargarlo añade los días nuevos y sustituye los que ya estaban por lo que trae el archivo: lo que ya no venga en él se quita.'
+            : 'Volver a cargarlo sustituye esos días por lo que trae el archivo: lo que ya no venga en él se quita. Si no esperabas esto, quizá sea el archivo de otro día.'}
         </p>
         <div className="pw-confirmar-botones">
           <button type="button" className="pw-btn" onClick={onCancelar} disabled={ocupado}>
@@ -230,7 +253,9 @@ const PanelHistorico = () => {
       if (yaCargados) {
         // No es un fallo: el servidor paró antes de escribir y hay que preguntar.
         toast.dismiss(aviso);
-        setPendiente({ archivo, yaCargados, dias: detalle.dias || [] });
+        setPendiente({
+          archivo, yaCargados, dias: detalle.dias || [], enArchivo: detalle.en_archivo || {},
+        });
       } else {
         toast.error(error?.message || 'No se pudo cargar el reporte.', { id: aviso });
       }

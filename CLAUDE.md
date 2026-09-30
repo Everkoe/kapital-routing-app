@@ -67,6 +67,18 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   pliega; si se sube un día que ya estaba, el servidor **para antes de escribir** con un 409 que lista lo
   ya cargado y solo recarga si se confirma (`reemplazar`). Esa tira destapó el hueco: el 28/9 el histórico
   tenía agosto entero y **de septiembre solo el 22**.
+  **Volver a cargar un día lo sustituye** (desde el 2026-09-30, `reemplazar_dia_historico()` en
+  [supabase/016_recarga_y_arrastre.sql](supabase/016_recarga_y_arrastre.sql)): antes era un upsert por la
+  clave natural, que actualizaba lo que seguía en el archivo pero **no quitaba lo que ya no venía**; si la
+  intranet corregía a alguien de unidad, quedaba en las dos, y el diálogo decía «no se duplica nada». Ahora
+  cada día del archivo se borra y se reescribe en su propia transacción. Es seguro porque **cada día sale de
+  un solo reporte** (medido el 2026-09-30: los 32 días cargados tienen una sola carga, y el reporte de un día
+  no trae filas de otra fecha ejecutada; `fecha_programada` es casi siempre la víspera). El 409 lleva
+  `en_archivo` (servicios por día) y el diálogo avisa si el archivo trae menos del 80% de lo cargado: un
+  reporte a medias dejaría el día a medias. **Lo ejecutado no se edita a mano**: se corrige en la intranet y
+  se vuelve a cargar (decisión del 2026-09-30; editarlo mezclaría lo que pasó con lo que alguien cambió, y
+  la IA aprende de ahí). `scripts/cargar_historico.py`, el de meses enteros, sigue con el upsert.
+  **La 016 va antes que el código**: sin la función, la carga del histórico daría 503.
 - **Novedades del cliente — el cambio se deduce, no se lee**: es el otro archivo que maneja el Programador
   (altas, bajas y cambios para los próximos días; suele llegar el viernes con el fin de semana dentro) y se
   sube en **Cargar datos → Novedades** (`POST /api/programador/novedades`, en
@@ -350,6 +362,26 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   falla; `editar` devuelve si se guardó precisamente para eso. Verificado disparando los eventos de arrastre
   del navegador; **un arrastre físico con ratón no se pudo probar** porque la automatización no inicia el
   arrastre nativo. En el histórico no hay asa: lo que pasó no se reordena.
+- **La gente también se arrastra entre servicios y pendientes** (desde el 2026-09-30, pedido del usuario:
+  «poder seguir arrastrando en novedades y pendientes» una vez programado). Una fila se suelta en otro
+  servicio (`mover` + `ordenar`, en la posición que menos alarga el recorrido, la del motor), un pendiente
+  en cualquier servicio (`agregar` + `ordenar`, también donde el motor no lo propone) y una fila en
+  «Novedades y pendientes» la deja **pendiente sin baja** (`a_pendientes`, en la 016: la fila se marca
+  retirada, como una novedad de cambio, y el pendiente sale con motivo `devuelto` —«Por recolocar»— y «Iba
+  en K027»). Qué se deja soltar está en
+  [model/arrastrePlan.js](frontend/src/programador/model/arrastrePlan.js): **no** a otro sentido, otra sede
+  ni donde ya va; **con aviso que se confirma**, a otro turno o pasándose de capacidad, porque aquí decide
+  una persona y el arrastre es para las excepciones. Mientras se arrastra, cada tarjeta dice si acepta y
+  por qué no. **«Mover»** en cada fila hace lo mismo sin arrastrar (teclado, o destino lejos en la lista),
+  con las opciones del motor. La 016 también arregla dos cosas de la base: `mover` reutiliza la fila si la
+  persona ya estuvo retirada en el destino (antes lo ignoraba) y `reponer` no devuelve a nadie que ya va en
+  otro coche del mismo turno. Y **`editar` avisa cuando la base aplicó cero cambios** en vez de anunciarlo
+  como guardado. Verificado en el navegador sobre el plan del 26/9 con el guardado interceptado (sin tocar
+  la base), y las acciones de la 016 contra la base en una transacción deshecha
+  (`scripts/probar_funciones_plan.py --con-migracion`).
+- **«Crear programación» deja elegir de qué día copiar** («Copiar de», desde el 2026-09-30): el servidor
+  ya aceptaba `desde` y la pantalla siempre copiaba el último ejecutado. Se marcan los días que caen en el
+  mismo día de la semana, porque un domingo lleva ~390 servicios y un laborable ~800.
 - **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
   `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
   Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier

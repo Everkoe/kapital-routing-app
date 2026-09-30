@@ -70,7 +70,7 @@ export const distanciaKm = (a, b) => {
   return 2 * RADIO_TIERRA_KM * Math.asin(Math.sqrt(h));
 };
 
-const puntoDe = (algo) => (
+export const puntoDe = (algo) => (
   hasCoordinate(algo?.lat) && hasCoordinate(algo?.lng)
     ? { lat: Number(algo.lat), lng: Number(algo.lng) }
     : null
@@ -123,7 +123,7 @@ export const mejorPosicion = (agentes, punto) => {
 };
 
 /** Plazas de un servicio: las declaradas, o las demostradas si no hay otras. */
-const plazasDe = (service) => {
+export const plazasDe = (service) => {
   const usadas = service.agentes.length;
   if (service.capacity?.known) {
     return { usadas, total: service.capacity.total, fuente: 'declarada' };
