@@ -5029,6 +5029,162 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             await backend.intentos_acceso.IntentosEnTabla(
                 pedir=rota, url_base=lambda: "https://x.invalid", cabeceras=lambda: {}).registrar("a" * 64, None)
 
+    async def test_the_plan_brings_the_model_estimate_next_to_the_measured_duration(self):
+        """La estimación va aparte de `duracion`, y si no hay no rompe el plan."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        rutas = [{"conductor": "K027", "turno": "06:00", "modalidad": "RECOJO", "agentes": [],
+                  "duracion": {"p50": 60, "p90": 80, "casos": 9}},
+                 {"conductor": "K028", "turno": "07:00", "modalidad": "RECOJO", "agentes": []}]
+        estimaciones = [{"minutos": 55, "desde": 40, "hasta": 70}, None]
+        with (
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
+                "fecha": "2026-09-30", "existe": True, "rutas": rutas, "dias_con_plan": []})),
+            patch.object(backend.estimador_duracion, "estimar", side_effect=estimaciones) as estimar,
+        ):
+            respuesta = await self._llamar("GET", "/api/programador/plan?fecha=2026-09-30", token)
+        self.assertEqual(respuesta.status_code, 200)
+        cuerpo = respuesta.json()["rutas"]
+        self.assertEqual(cuerpo[0]["estimacion"], {"minutos": 55, "desde": 40, "hasta": 70})
+        self.assertEqual(cuerpo[0]["duracion"], {"p50": 60, "p90": 80, "casos": 9})
+        self.assertIsNone(cuerpo[1]["estimacion"])
+        self.assertEqual(estimar.call_args_list[0].args[1], "2026-09-30")
+
+
+class EstimadorDuracionTestCase(unittest.TestCase):
+    """El modelo de duración: mismas características al entrenar y al estimar."""
+
+    def setUp(self):
+        self.est = backend.estimador_duracion
+        self.est._predecir.cache_clear()
+        self.addCleanup(self.est._predecir.cache_clear)
+
+    def _modelo_falso(self, p50=60.0, p10=45.0, p90=80.0, falla=False):
+        def aplicar(valor):
+            def apply_catboost_model(numeros, textos):
+                if falla:
+                    raise ValueError("modelo roto")
+                return valor
+            return type("Modelo", (), {"apply_catboost_model": staticmethod(apply_catboost_model)})
+        meta = {
+            "ensanche": {"RECOJO": 5.0, "SALIDA": 3.0},
+            "casos": {"VEN1|RECOJO|00:00": 3, "VEN1|SALIDA|22:01": 40},
+            "prueba": {"banda": {"RECOJO": 80, "SALIDA": 77}, "a_tiempo": {"RECOJO": 87},
+                       "error_por_confianza": {"baja": 21.8, "alta": 15.7}},
+            "entrenado_el": "2026-09-29",
+        }
+        return type("Paquete", (), {"META": meta, "p50": aplicar(p50), "p10": aplicar(p10), "p90": aplicar(p90)})
+
+    def _ruta(self, **cambios):
+        ruta = {"conductor": "K027", "micro_zona": "VEN1", "turno": "00:00", "modalidad": "RECOJO",
+                "sede": "TELEPERFORMANCE BELLAVISTA", "agentes": [
+                    {"ubicacion": "resuelta", "lat": -12.0, "lng": -77.0},
+                    {"ubicacion": "resuelta", "lat": "-12.0", "lng": "-77.01"},
+                    {"ubicacion": "dudosa", "lat": -12.5, "lng": -77.5},
+                    {"ubicacion": "resuelta", "lat": "", "lng": None}]}
+        return {**ruta, **cambios}
+
+    def test_texts_lose_accents_and_broken_characters_before_the_hash(self):
+        """El hash de una «Ñ» no coincidía con el de CatBoost."""
+        self.assertEqual(self.est.normalizar("BREÑA"), "BRENA")
+        self.assertEqual(self.est.normalizar(" ate "), "ATE")
+        self.assertEqual(self.est.normalizar("BREÃ‘A"), "BREAA")
+        self.assertEqual(self.est.normalizar(None), "NA")
+        self.assertEqual(self.est.normalizar(""), "NA")
+
+    def test_the_route_is_measured_in_a_straight_line_between_resolved_homes(self):
+        km, extension = self.est.recorrido([(-12.0, -77.0), (-12.0, -77.01)])
+        self.assertAlmostEqual(km, 1.09, places=2)
+        self.assertAlmostEqual(extension, 1.09, places=2)
+        self.assertEqual(self.est.recorrido([]), (0.0, 0.0))
+        self.assertEqual(self.est.recorrido([(-12.0, -77.0)]), (0.0, 0.0))
+
+    def test_a_plan_service_has_the_shape_of_a_training_sample(self):
+        muestra = self.est.muestra_del_plan(self._ruta(), "2026-09-26")
+        self.assertEqual(muestra["dia_semana"], 6)  # sábado
+        self.assertEqual(muestra["cobertura"], "VEN1")
+        self.assertEqual(muestra["vehiculo"], "K027")
+        self.assertEqual(muestra["programados"], 4)
+        # Ni la dudosa ni la que no tiene punto entran en el recorrido.
+        self.assertEqual(muestra["paradas_ubicadas"], 2)
+        self.assertAlmostEqual(muestra["km"], 1.09, places=2)
+        self.assertIsNone(self.est.muestra_del_plan(self._ruta(), "no es fecha"))
+
+    def test_features_come_in_a_fixed_order_and_in_catboost_precision(self):
+        numeros, textos = self.est.caracteristicas(self.est.muestra_del_plan(self._ruta(), "2026-09-26"))
+        self.assertEqual(len(numeros), len(self.est.NUMERICAS))
+        self.assertEqual(textos, ("RECOJO", "TELEPERFORMANCE BELLAVISTA", "VEN1", "00:00", "K027", "6"))
+        self.assertEqual(numeros[0], 0.0)
+        self.assertEqual(numeros[3], 0.5)
+        self.assertEqual(numeros[4], self.est._en_float32(1.09))
+        self.assertIsNone(self.est.caracteristicas({"turno": "mañana"}))
+        self.assertIsNone(self.est.caracteristicas({"turno": "25:00"}))
+
+    def test_a_salida_is_measured_from_leaving_the_site(self):
+        salida = {"modalidad": "SALIDA", "inicio": -40, "primer_punto": 0, "llegada": 45}
+        recojo = {"modalidad": "RECOJO", "inicio": -95, "primer_punto": -72, "llegada": -26}
+        self.assertEqual(self.est.duracion_observada(salida), 45)
+        self.assertEqual(self.est.duracion_observada(recojo), 69)
+        self.assertIsNone(self.est.duracion_observada({**recojo, "llegada": -93}))
+        self.assertIsNone(self.est.duracion_observada({**recojo, "llegada": None}))
+
+    def test_without_a_model_there_is_no_estimate(self):
+        with patch.object(self.est, "_modelo", return_value=None):
+            self.assertIsNone(self.est.estimar(self._ruta(), "2026-09-26"))
+
+    def test_a_recojo_says_when_to_leave_with_the_calibrated_band(self):
+        with patch.object(self.est, "_modelo", return_value=self._modelo_falso()):
+            estimacion = self.est.estimar(self._ruta(), "2026-09-26")
+        self.assertEqual((estimacion["minutos"], estimacion["desde"], estimacion["hasta"]), (60, 40, 85))
+        # Turno de las 00:00 y hasta 85 minutos: salir la víspera.
+        self.assertEqual(estimacion["salir_antes"], "22:35")
+        self.assertEqual(estimacion["a_tiempo"], 87)
+        self.assertEqual(estimacion["acierto_banda"], 80)
+        self.assertEqual((estimacion["casos"], estimacion["confianza"]), (3, "baja"))
+        self.assertEqual(estimacion["error_medio"], 21.8)
+        self.assertNotIn("ultima_entrega", estimacion)
+
+    def test_a_salida_says_when_the_last_drop_off_is(self):
+        ruta = self._ruta(modalidad="SALIDA", turno="22:01")
+        with patch.object(self.est, "_modelo", return_value=self._modelo_falso(p50=50.0)):
+            estimacion = self.est.estimar(ruta, "2026-09-26")
+        self.assertEqual(estimacion["ultima_entrega"], "22:51")
+        self.assertEqual((estimacion["casos"], estimacion["confianza"]), (40, "alta"))
+        self.assertNotIn("salir_antes", estimacion)
+
+    def test_a_failing_model_never_breaks_the_plan(self):
+        with (
+            patch.object(self.est, "_modelo", return_value=self._modelo_falso(falla=True)),
+            self.assertLogs(self.est.logger, level="ERROR"),
+        ):
+            self.assertIsNone(self.est.estimar(self._ruta(), "2026-09-26"))
+
+    def test_the_band_always_contains_the_estimate(self):
+        minutos, desde, hasta = self.est.banda_calibrada(30.0, 40.0, 25.0, 2.0)
+        self.assertLessEqual(desde, minutos)
+        self.assertLessEqual(minutos, hasta)
+        self.assertEqual(self.est.banda_calibrada(1.0, 0.0, 2.0, 0.0)[0], self.est.DURACION_MINIMA)
+
+    def test_the_health_check_says_whether_the_model_shipped(self):
+        """Sin esto, un despliegue sin el paquete del modelo no lo señalaría nada."""
+        self.assertEqual(backend.read_root()["estimacion_duracion"], self.est.disponible())
+        with patch.object(self.est.importlib.util, "find_spec", return_value=None):
+            self.assertFalse(self.est.disponible())
+
+    def test_the_exported_model_loads_and_gives_plausible_minutes(self):
+        """El modelo que va a producción, no uno falso."""
+        paquete = self.est._modelo()
+        if paquete is None:
+            self.skipTest("No hay modelo exportado en api/modelo_duracion.")
+        for clave in ("ensanche", "casos", "prueba", "entrenado_el"):
+            self.assertIn(clave, paquete.META)
+        estimacion = self.est.estimar(self._ruta(), "2026-09-26")
+        self.assertLess(self.est.DURACION_MINIMA, estimacion["minutos"])
+        self.assertLess(estimacion["minutos"], self.est.DURACION_MAXIMA)
+        self.assertLessEqual(estimacion["desde"], estimacion["minutos"])
+        self.assertLessEqual(estimacion["minutos"], estimacion["hasta"])
+
+
 class _YaExiste(Exception):
     """Lo que en Postgres es el `PT409` de `si_ausente`."""
 

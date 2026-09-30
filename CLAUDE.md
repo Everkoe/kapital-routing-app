@@ -162,6 +162,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   Flota (`_VENCE_EN_PERFIL`, con copia en los dos sentidos como el resto de `_ESPEJO_EN_PERFIL`). El
   servidor también la exige cuando sube el conductor (`_fechas_del_perfil`), no cuando sube Administración,
   que pone la suya en la ficha; y al aprobar a un conductor en una unidad, sus fechas pasan a ella.
+  **Subir un documento ya no manda a la cola de Accesos a un conductor activo**: solo vuelve a «Pendiente
+  Revisión» quien estaba en «Documentos Observados» (le pasó a la K-163 y la K-170 al subirles documentos
+  desde la ficha). La lista de Accesos lleva el `unidad_id` de cada cuenta —sin él, aprobar pedía un padrón en
+  blanco y subir un documento desde ahí no sabía su carpeta—, y un conductor sin unidad recibe lo que sube
+  Administración en su carpeta personal (`_carpeta_para_la_subida`). **Desplegado en producción el
+  2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -245,6 +251,44 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   La tanda («Asignar las N propuestas») atiende primero a **quien menos opciones tiene**, y sus cambios se
   aplican **en el orden en que el motor eligió**, no en el de la lista: si dos personas van al mismo coche,
   aplicarlos al revés deja a dos con la misma posición. Hay prueba de las dos cosas.
+- **La IA de duración: CatBoost** (desde el 2026-09-29, pedido del usuario: el ruteo tiene que integrar
+  una IA, según su arquitectura del 21/9 —CatBoost predice, VROOM organiza, el humano resuelve lo
+  demás—). Es la primera pieza: **estima cuánto va a durar de verdad cada servicio del plan**, y la
+  tarjeta del servicio lo enseña como «Estimación de la IA» junto a la duración medida de la tabla,
+  **no en su lugar** (la tabla es un hecho; esto, una predicción). En un RECOJO dice a qué hora salir
+  para estar en la sede antes del turno; en una SALIDA, hacia qué hora termina de repartir. No decide
+  nada todavía: ni el motor de inserción ni nadie lo usa para asignar.
+  - **Los datos personales no salen de la base.** Se entrena con `muestras_de_duracion()`
+    ([supabase/015_muestras_de_duracion.sql](supabase/015_muestras_de_duracion.sql), solo
+    `service_role`): una fila por servicio con recuentos, kilómetros y tiempos, sin DNI ni
+    coordenadas. Bajar el histórico entero a un equipo para entrenar lo frenó el control de permisos,
+    y es mejor así: se puede reentrenar desde cualquier equipo.
+  - **Entrenar**: `python scripts/entrenar_duracion.py --revisar` (mide) o `--escribir` (además
+    exporta), con CatBoost instalado (`scripts/requirements-modelo.txt`, **no** va a Vercel: pesa
+    97 MB). El modelo se exporta a **Python puro** en `frontend/api/modelo_duracion/` (tres modelos
+    —mediana y cuantiles 10 y 90—, ~1,2 MB cada uno, generados: no editar) y lo lee
+    [frontend/api/estimador_duracion.py](frontend/api/estimador_duracion.py), que construye las
+    características **igual** al entrenar y al estimar. Reentrenar es repetir `--escribir` y desplegar.
+  - **Lo medido** (última semana cargada, que el modelo no vio): en RECOJO, error medio **17,2 min
+    frente a 20,5** de la tabla de medianas; en SALIDA casi empata (18,2 frente a 19,2). La SALIDA se
+    mide desde que sale de la sede: medida desde el arranque metía la espera y todo predecía peor. La
+    banda la calibra una semana aparte (conformal por cuantiles): sin calibrar prometía el 80% y
+    acertaba el 67%; calibrada acierta el 80%. Salir a la hora que dice deja en la sede antes del turno
+    el 87% de las veces. La pantalla enseña **esas cifras medidas**, no las prometidas, y con menos de
+    cinco servicios de la misma ruta y hora lo avisa con el error que se midió en ese caso (22 min).
+    **Más historial no lo mejora**: de 7 a 14 días el error baja; de 14 a 24, no. Lo que queda son
+    esperas y tráfico del día, que el reporte de la intranet no registra; las marcas de «A bordo» de
+    los conductores (`ejecucion_viajes`) sí traerían la hora real de cada recojo.
+  - **El exportado tiene que dar lo mismo que CatBoost, y no lo daba por dos cosas**: el hash de una
+    «Ñ» (BREÑA) y los cortes de los árboles, que el exportado escribe con nueve cifras y compara en
+    doble precisión (un servicio de justo 12,49 km caía del otro lado). Se resuelven quitando tildes y
+    todo lo que no sea ASCII (`normalizar`) y pasando números y cortes a float32 (`ajustar_cortes`).
+    El script lo **comprueba servicio a servicio** tras exportar y se para si difieren.
+  - El distrito no entra: sin él predice igual, y el plan no lo trae. La unidad es lo que más pesa,
+    después el turno y la cobertura.
+  - **Siguiente pieza**: VROOM, que cabe en Vercel como `pyvroom` (4,7 MB, sin servidor aparte). Le
+    falta decidir de dónde salen los tiempos entre domicilios —la línea recta explica poco (R² 0,11)—
+    y las reglas que el usuario no ha dado (tiempo máximo a bordo, antelación, margen entre turnos).
 - **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
   lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
   se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
@@ -679,8 +723,9 @@ Contexto que no cambia con cada lote:
    memoria restante se elimina o se formaliza como caché intencional.
 2. Algoritmos de optimización real de rutas — **descongelado el 2026-09-22** por decisión del usuario, que
    pasó contexto propio (VROOM + CatBoost + OSRM). **Desde el 2026-09-26 hay un motor de inserción**, pedido
-   por el usuario y descrito en §2 («El motor de inserción»). No es un optimizador: no hay VROOM, OSRM ni
-   CatBoost instalados, y **no deben añadirse por iniciativa propia**.
+   por el usuario y descrito en §2 («El motor de inserción»). No es un optimizador. **Desde el 2026-09-29
+   hay CatBoost** para la duración de cada servicio, pedido por el usuario (§2, «La IA de duración»).
+   VROOM y OSRM siguen sin instalar, y **no deben añadirse por iniciativa propia**.
    Dos conclusiones medidas que conviene no volver a discutir desde cero:
    - **La ruta de un pasajero es 100% estable** (cobertura + turno + modalidad); lo que rota es el vehículo,
      solo 64% estable. La variación diaria real es del 22%, no del 10%: 88 altas y 76 bajas sobre 738.

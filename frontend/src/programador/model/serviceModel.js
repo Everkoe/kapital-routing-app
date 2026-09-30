@@ -170,6 +170,10 @@ export const buildServices = (routes, fleetIndex = {}) => {
       // casos suficientes. No se estima: una cifra inventada aquí se
       // convertiría en una promesa de hora de llegada.
       duracion: route.duracion ?? null,
+      // Lo que estima el modelo entrenado sobre el histórico, con su banda y
+      // lo que se midió de ella. Solo lo trae el plan; va aparte de
+      // `duracion` porque aquella es un hecho y esta una predicción.
+      estimacion: route.estimacion ?? null,
       // Qué cambió respecto al día cargado anterior. Sale de comparar los
       // documentos del servicio, no de ninguna etiqueta.
       cambio: route.cambio ?? null,

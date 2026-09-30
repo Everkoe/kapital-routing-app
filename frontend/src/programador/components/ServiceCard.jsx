@@ -11,11 +11,13 @@ import {
   History,
   MapPin,
   RotateCcw,
+  Sparkles,
   UserMinus,
   UserPlus,
   Truck,
   X,
 } from 'lucide-react';
+import { describirEstimacion } from '../model/estimacionDuracion.js';
 import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
 import PreviewAction from './PreviewAction.jsx';
@@ -267,6 +269,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
                       onRetirar, onReponer, onOrdenar, historical }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
+  const estimacion = describirEstimacion(service.estimacion, service.turno);
 
   return (
     <article className="pw-service" data-open={isOpen}>
@@ -351,6 +354,27 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
                 <dd className="pw-muted">Sin casos suficientes en el histórico</dd>
               )}
             </div>
+            {estimacion && (
+              <div className="pw-detail-item pw-detail-estimacion">
+                <dt title={estimacion.entrenadoEl
+                  ? `Modelo entrenado el ${estimacion.entrenadoEl} con el histórico de servicios`
+                  : 'Modelo entrenado con el histórico de servicios'}>
+                  <Sparkles size={12} aria-hidden="true" /> Estimación de la IA
+                </dt>
+                <dd>
+                  {estimacion.principal}
+                  <small className="pw-detail-nota"> · {estimacion.banda}</small>
+                  {estimacion.accion && (
+                    <small className="pw-detail-linea">{estimacion.accion}</small>
+                  )}
+                  {estimacion.aviso && (
+                    <small className="pw-detail-linea pw-detail-aviso">
+                      <AlertTriangle size={12} aria-hidden="true" /> {estimacion.aviso}
+                    </small>
+                  )}
+                </dd>
+              </div>
+            )}
             <div className="pw-detail-item">
               <dt>Orden de recogida</dt>
               <dd className="pw-muted">
