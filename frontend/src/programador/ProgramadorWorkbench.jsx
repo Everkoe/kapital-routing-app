@@ -23,7 +23,11 @@ import WorkbenchFilters from './components/WorkbenchFilters.jsx';
 import ServiceCard from './components/ServiceCard.jsx';
 import PendingPanel from './components/PendingPanel.jsx';
 import ConfirmarPlan from './components/ConfirmarPlan.jsx';
+import ConfirmarArrastre from './components/ConfirmarArrastre.jsx';
+import CrearProgramacion from './components/CrearProgramacion.jsx';
+import MoverAgente from './components/MoverAgente.jsx';
 import PropuestaIA from './components/PropuestaIA.jsx';
+import { useArrastrePlan } from './useArrastrePlan.js';
 import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
 
@@ -132,6 +136,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const [proponiendo, setProponiendo] = useState(false);
   // Lo que deshace la última propuesta de la IA aplicada, y de qué día es.
   const [deshacerIA, setDeshacerIA] = useState(null);
+  // De qué día ejecutado se copia al crear la programación; vacío es el último.
+  const [desde, setDesde] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
 
@@ -251,19 +257,19 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       const r = requireRpcSuccess(await apiFetch('/api/programador/plan/sembrar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha: dia }),
+        body: JSON.stringify(desde ? { fecha: dia, desde } : { fecha: dia }),
       }), 'No se pudo crear la programación.');
       if (r?.sin_historico) throw new Error('No hay histórico del que partir.');
       toast.success(r.ya_existia
         ? 'Ese día ya tenía programación.'
-        : `${r.creadas} asignaciones copiadas del ${r.sembrado_desde}.`, { id: aviso });
+        : `${r.creadas} asignaciones copiadas del ${formatoFecha(r.sembrado_desde)}.`, { id: aviso });
       await refresh();
     } catch (fallo) {
       toast.error(fallo?.message || 'No se pudo crear la programación.', { id: aviso });
     } finally {
       setGuardando(false);
     }
-  }, [dia, esProgramable, refresh]);
+  }, [desde, dia, esProgramable, refresh]);
 
   // Borrar tira trabajo: se pide confirmado (ver `ConfirmarPlan`) y la base lo
   // rechaza igualmente sobre un día pasado o con viajes marcados.
@@ -299,6 +305,14 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         body: JSON.stringify({ fecha: fecha || dia, cambios }),
       });
       requireRpcSuccess(respuesta, 'El plan no aceptó el cambio.');
+      // La base ignora un cambio que ya no encaja —alguien movió a esa persona
+      // desde otra pestaña, o ya va en otro coche del mismo turno— y lo cuenta
+      // en `ignorados`. Anunciarlo como hecho sería mentir.
+      if (Number(respuesta?.aplicados) === 0 && Number(respuesta?.ignorados) > 0) {
+        toast.error('No se aplicó: el plan ya había cambiado. Se actualiza la vista.');
+        await refresh();
+        return false;
+      }
       toast.success(mensaje);
       await refresh();
       return true;
@@ -329,6 +343,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     accion: 'ordenar', vehiculo: service.conductor, turno: service.turno,
     modalidad: service.modalidad, dnis,
   }], 'Orden de recogida guardado.'), [editar]);
+
+  // Mover gente a mano: arrastrando entre servicios y pendientes, o con «Mover».
+  const arrastrePlan = useArrastrePlan({ editar, pendientesMotor });
 
   // La propuesta que se ve se calculó suponiendo que los demás pendientes
   // también entraban. Al asignar solo a una persona se recalcula contra el
@@ -382,12 +399,21 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   }, [deshacerIA, refresh]);
 
   const botonCrear = (
-    <button type="button" className="pw-btn pw-btn-primary"
-      onClick={crearPlan} disabled={guardando}>
-      <CalendarPlus size={16} aria-hidden="true" />
-      Crear programación
-    </button>
+    <CrearProgramacion
+      dia={dia}
+      diasEjecutados={dias.filter((d) => !diasProgramables.includes(d))}
+      desde={desde}
+      onCambiarDesde={setDesde}
+      ocupado={guardando}
+      onCrear={crearPlan}
+    />
   );
+
+  // El día de origen elegido era para el día que se miraba.
+  const cambiarDia = useCallback((nuevo) => {
+    setDia(nuevo);
+    setDesde('');
+  }, []);
 
   const handleExport = useCallback(() => {
     // La exportación es una entrega del plan, no una captura de la vista.
@@ -456,13 +482,12 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         canExport={modo === 'plan' && !isLoading
           && (services.length > 0 || pendientesDelPlan.length > 0)}
         exportHelp={exportHelp}
-        modo={modo}
         onIrACargar={onIrACargar}
         dia={dia}
         dias={dias}
         diasProgramables={diasProgramables}
         diasConPlan={diasConPlan}
-        onCambiarDia={setDia}
+        onCambiarDia={cambiarDia}
       />
 
       {error && (
@@ -511,7 +536,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
             <CalendarPlus size={16} aria-hidden="true" />
             <span>
               Este día <strong>todavía no tiene programación</strong>. Se crea
-              copiando el último día ejecutado y a partir de ahí se edita.
+              copiando un día ejecutado —el último, si no eliges otro— y a
+              partir de ahí se edita.
             </span>
             {botonCrear}
           </p>
@@ -594,8 +620,9 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   title="Este día no tiene programación todavía"
                   accion={botonCrear}
                 >
-                  Se crea copiando el último día ejecutado —seguir el orden
-                  anterior— y encima se aplican las novedades del cliente.
+                  Se crea copiando un día ejecutado —el último, para seguir el
+                  orden anterior, u otro que elijas— y encima se aplican las
+                  novedades del cliente.
                 </Placeholder>
               ) : (
                 <Placeholder
@@ -636,6 +663,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   onRetirar={modo === 'plan' ? retirar : null}
                   onOrdenar={modo === 'plan' ? ordenar : null}
                   onReponer={modo === 'plan' ? reponer : null}
+                  arrastre={arrastrePlan.arrastre}
+                  onArrastrar={modo === 'plan' ? arrastrePlan.empezarDesdeServicio : null}
+                  onSoltar={modo === 'plan' ? arrastrePlan.soltarEn : null}
+                  onMover={modo === 'plan' ? arrastrePlan.abrirMover : null}
                 />
               ))}
           </div>
@@ -647,6 +678,22 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           diaLegible={formatoFecha(dia)}
           onCerrar={() => setProponiendo(false)}
           onAplicada={propuestaAplicada}
+        />
+
+        <MoverAgente
+          persona={arrastrePlan.moviendo}
+          services={services}
+          ocupado={guardando}
+          onElegir={arrastrePlan.moverA}
+          onDejarPendiente={arrastrePlan.moverAPendientes}
+          onCerrar={arrastrePlan.cerrarMover}
+        />
+
+        <ConfirmarArrastre
+          pendiente={arrastrePlan.porConfirmar}
+          ocupado={guardando}
+          onConfirmar={arrastrePlan.confirmar}
+          onCancelar={arrastrePlan.cancelarConfirmacion}
         />
 
         <ConfirmarPlan
@@ -666,6 +713,10 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           ocupado={guardando}
           onAsignar={asignar}
           onAsignarTodas={asignarTodas}
+          arrastre={arrastrePlan.arrastre}
+          onArrastrarPendiente={modo === 'plan' ? arrastrePlan.empezarDesdePendiente : null}
+          onTerminarArrastre={arrastrePlan.terminar}
+          onDejarPendiente={modo === 'plan' ? arrastrePlan.soltarEnPendientes : null}
         />
       </div>
     </div>

@@ -17,6 +17,7 @@ import {
   Truck,
   X,
 } from 'lucide-react';
+import { comprobarDestino } from '../model/arrastrePlan.js';
 import { describirEstimacion } from '../model/estimacionDuracion.js';
 import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
@@ -35,7 +36,26 @@ import ServiceMap from './ServiceMap.jsx';
  * acciones por agente, más aprobar/rechazar el servicio— aunque esos controles
  * no estén operativos: sin motor no hay propuesta que revisar. Se marcan con
  * `PreviewAction` para que se vean sin engañar.
+ *
+ * Sobre un plan, cada fila se arrastra: dentro de su tabla cambia el orden, y
+ * soltada en otro servicio mueve a la persona (o en «Novedades y pendientes»,
+ * la deja pendiente). Mientras alguien se arrastra, cada tarjeta dice si lo
+ * acepta, lo acepta con aviso o no lo acepta y por qué. «Mover» hace lo mismo
+ * sin arrastrar, que con teclado no se puede y con 200 servicios es lejos.
  */
+
+/** Lo que dice la tarjeta cuando se le pasa a alguien por encima. */
+const notaDeSoltar = (destino) => {
+  if (!destino) return null;
+  if (!destino.permitido) return destino.motivo;
+  return destino.avisos[0] || 'Suelta para moverlo aquí';
+};
+
+const tonoDeSoltar = (destino) => {
+  if (!destino) return undefined;
+  if (destino.permitido) return destino.avisos.length > 0 ? 'aviso' : 'si';
+  return destino.motivo ? 'no' : undefined;
+};
 
 /** El sentido viaja dentro del texto del horario; no existe campo propio. */
 const sentido = (horario = '') => {
@@ -120,7 +140,9 @@ const moverEn = (lista, desde, hasta) => {
   return copia;
 };
 
-const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical }) => {
+const AgentTable = ({
+  agentes, comparadoCon, onRetirar, onOrdenar, onArrastrar, onMover, historical,
+}) => {
   // El orden recién soltado, mientras el servidor lo guarda. Sin esto la fila
   // vuelve a su sitio hasta que llega la relectura y parece que el arrastre no
   // funcionó. La tarjeta monta la tabla con una `key` hecha del orden, así que
@@ -130,6 +152,9 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical })
   const [destino, setDestino] = useState(null);
   const filas = enEspera ?? agentes;
   const puedeOrdenar = Boolean(onOrdenar) && filas.length > 1;
+  // Sobre un plan toda fila se puede llevar a otro servicio o a pendientes,
+  // aunque sea la única del servicio.
+  const puedeArrastrar = Boolean(onArrastrar);
 
   const reordenar = async (desde, hasta) => {
     if (desde === null || desde === hasta || hasta < 0 || hasta >= filas.length) return;
@@ -155,8 +180,9 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical })
     <table className="pw-table">
       <thead>
         <tr>
-          {puedeOrdenar ? (
-            <th scope="col" title="Orden de recogida del plan. Arrastra la fila o usa las flechas para cambiarlo.">#</th>
+          {puedeArrastrar ? (
+            <th scope="col"
+              title="Orden del plan. Arrastra la fila o usa las flechas para cambiarlo; arrástrala a otro servicio para mover a la persona.">#</th>
           ) : (
             /* En el histórico es el orden real en que se recogió a cada
                persona, según la hora. Lo que pasó no se reordena. */
@@ -173,25 +199,36 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical })
       <tbody>
         {markDuplicates(filas).map((agente, index) => (
           <tr key={`${agente?.id || 'sin-id'}-${index}`} data-duplicado={agente.duplicado}
-            draggable={puedeOrdenar || undefined}
+            draggable={puedeArrastrar || undefined}
             data-arrastrando={arrastrado === index || undefined}
             data-destino={marcaDestino(index)}
-            onDragStart={puedeOrdenar ? (e) => {
+            onDragStart={puedeArrastrar ? (e) => {
               setArrastrado(index);
               e.dataTransfer.effectAllowed = 'move';
               // Firefox no empieza el arrastre sin algún dato.
               e.dataTransfer.setData('text/plain', String(agente?.id ?? index));
+              onArrastrar(agente);
             } : undefined}
-            onDragOver={puedeOrdenar ? (e) => { e.preventDefault(); setDestino(index); } : undefined}
-            onDrop={puedeOrdenar ? (e) => {
+            // Solo lo que sale de esta misma tabla la reordena. Lo que viene
+            // de otro servicio o de pendientes sigue hasta la tarjeta, que es
+            // quien decide si se mueve aquí.
+            onDragOver={puedeOrdenar ? (e) => {
+              if (arrastrado === null) return;
               e.preventDefault();
+              e.stopPropagation();
+              setDestino(index);
+            } : undefined}
+            onDrop={puedeOrdenar ? (e) => {
+              if (arrastrado === null) return;
+              e.preventDefault();
+              e.stopPropagation();
               reordenar(arrastrado, index);
               soltarArrastre();
             } : undefined}
-            onDragEnd={puedeOrdenar ? soltarArrastre : undefined}>
+            onDragEnd={puedeArrastrar ? () => { soltarArrastre(); onArrastrar(null); } : undefined}>
             <td className="pw-mono">
               <span className="pw-orden">
-                {puedeOrdenar && <GripVertical size={14} className="pw-orden-asa" aria-hidden="true" />}
+                {puedeArrastrar && <GripVertical size={14} className="pw-orden-asa" aria-hidden="true" />}
                 {String(index + 1).padStart(2, '0')}
                 {puedeOrdenar && (
                   <span className="pw-orden-flechas">
@@ -236,15 +273,25 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical })
             <td>
               <span className="pw-row-actions">
                 {onRetirar ? (
-                  /* Sobre un plan sí hay algo que hacer: sacar a alguien del
-                     servicio. Aprobar y rechazar siguen sin existir porque no
-                     hay propuesta que revisar. */
-                  <button type="button" className="pw-btn pw-btn-sm"
-                    onClick={() => onRetirar(agente)}
-                    title="Sacar a esta persona del servicio">
-                    <UserMinus size={13} aria-hidden="true" />
-                    Retirar
-                  </button>
+                  /* Sobre un plan sí hay algo que hacer: llevar a alguien a
+                     otro servicio o sacarlo de este. Aprobar y rechazar siguen
+                     sin existir porque no hay propuesta que revisar. */
+                  <>
+                    {onMover && (
+                      <button type="button" className="pw-btn pw-btn-sm"
+                        onClick={() => onMover(agente)}
+                        title="Llevar a esta persona a otro servicio, o dejarla pendiente">
+                        <ArrowRightLeft size={13} aria-hidden="true" />
+                        Mover
+                      </button>
+                    )}
+                    <button type="button" className="pw-btn pw-btn-sm"
+                      onClick={() => onRetirar(agente)}
+                      title="Dar de baja a esta persona en este servicio: ya no viaja">
+                      <UserMinus size={13} aria-hidden="true" />
+                      Retirar
+                    </button>
+                  </>
                 ) : (
                   <>
                     <PreviewAction Icon={Check} size="sm" entrega="Propuesta automática y revisión">
@@ -266,13 +313,42 @@ const AgentTable = ({ agentes, comparadoCon, onRetirar, onOrdenar, historical })
 };
 
 const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
-                      onRetirar, onReponer, onOrdenar, historical }) => {
+                      onRetirar, onReponer, onOrdenar, historical,
+                      arrastre = null, onArrastrar, onSoltar, onMover }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
   const estimacion = describirEstimacion(service.estimacion, service.turno);
 
+  // Si lo que se arrastra se puede soltar aquí. Se recuerda para qué arrastre
+  // se está encima, y no un sí o no: así un arrastre nuevo no hereda el
+  // «encima» de uno anterior que se soltó en otra parte.
+  const destino = arrastre && onSoltar ? comprobarDestino(arrastre, service) : null;
+  const [encimaDe, setEncimaDe] = useState(null);
+  const encima = Boolean(arrastre) && encimaDe === arrastre;
+  const soltar = tonoDeSoltar(destino);
+  const nota = encima ? notaDeSoltar(destino) : null;
+
   return (
-    <article className="pw-service" data-open={isOpen}>
+    <article className="pw-service" data-open={isOpen}
+      data-soltar={soltar} data-encima={(encima && soltar) ? 'true' : undefined}
+      onDragOver={destino ? (e) => {
+        if (encimaDe !== arrastre) setEncimaDe(arrastre);
+        if (destino.permitido) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      } : undefined}
+      onDragLeave={destino ? (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setEncimaDe(null);
+      } : undefined}
+      onDrop={destino ? (e) => {
+        e.preventDefault();
+        setEncimaDe(null);
+        if (destino.permitido) onSoltar(service);
+      } : undefined}>
+      {nota && (
+        <span className="pw-soltar-nota" data-tono={soltar} aria-hidden="true">{nota}</span>
+      )}
       <button
         type="button"
         className="pw-service-summary"
@@ -378,7 +454,8 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
             <div className="pw-detail-item">
               <dt>Orden de recogida</dt>
               <dd className="pw-muted">
-                {onOrdenar ? 'El del plan: arrastra las filas para cambiarlo'
+                {onOrdenar
+                  ? 'El del plan: arrastra las filas para cambiarlo, o a otro servicio para mover a alguien'
                   : 'Por la hora real del histórico'}
               </dd>
             </div>
@@ -426,7 +503,9 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
               agentes={service.agentes} comparadoCon={comparadoCon}
               historical={historical}
               onRetirar={onRetirar ? (agente) => onRetirar(service, agente) : null}
-              onOrdenar={onOrdenar ? (dnis) => onOrdenar(service, dnis) : null} />
+              onOrdenar={onOrdenar ? (dnis) => onOrdenar(service, dnis) : null}
+              onArrastrar={onArrastrar ? (agente) => onArrastrar(service, agente) : null}
+              onMover={onMover ? (agente) => onMover(service, agente) : null} />
           ) : (
             <p className="pw-notice" data-tone="warn">
               <Building size={16} aria-hidden="true" />

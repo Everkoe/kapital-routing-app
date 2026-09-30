@@ -6316,6 +6316,30 @@ async def _upsert_tabla(cliente: httpx.AsyncClient, tabla: str,
     return escritas
 
 
+def _servicios_por_dia(servicios: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Los servicios del reporte agrupados por su fecha ejecutada."""
+    por_dia: Dict[str, List[Dict[str, Any]]] = {}
+    for fila in servicios:
+        if fila.get("fecha_ejecutada"):
+            por_dia.setdefault(str(fila["fecha_ejecutada"]), []).append(fila)
+    return por_dia
+
+
+async def _reemplazar_dias_historico(por_dia: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Deja cada día del histórico exactamente como lo trae el reporte.
+
+    Un día por llamada y cada uno en su transacción (`reemplazar_dia_historico`,
+    en la 016): o queda el día del archivo entero o el que había. Un upsert por
+    la clave natural no bastaba, porque no quita lo que el reporte corregido ya
+    no trae: quien la intranet pasaba a otra unidad quedaba en las dos. Es
+    seguro porque cada día sale de un solo reporte (medido el 2026-09-30).
+    """
+    for dia in sorted(por_dia):
+        await _rpc_programador("reemplazar_dia_historico", {
+            "p_dia": dia, "p_filas": por_dia[dia],
+        }, write=True)
+
+
 async def _dias_cargados(desde: str, hasta: str) -> List[Dict[str, Any]]:
     """Los días del histórico entre esas fechas, con cuántos servicios y cuándo se cargaron."""
     filas = await _rpc_programador("dias_cargados", {"p_desde": desde, "p_hasta": hasta})
@@ -6365,13 +6389,14 @@ async def cargar_historico_intranet(
             detail="El reporte no trae ningún servicio con fecha y turno legibles.",
         )
 
-    # Si el día ya estaba, se para antes de escribir nada y se pregunta. Subirlo
-    # otra vez no duplica —la carga resuelve por la clave natural—, pero rehace
-    # el trabajo sin decirlo y casi siempre es un despiste: el archivo de ayer
-    # otra vez, o dos personas subiendo el mismo. Quien quiere recargarlo lo
-    # confirma y vuelve con `reemplazar`.
-    dias_del_archivo = sorted({str(fila["fecha_ejecutada"]) for fila in servicios
-                               if fila.get("fecha_ejecutada")})
+    # Si el día ya estaba, se para antes de escribir nada y se pregunta: volver
+    # a cargarlo **sustituye** ese día por el archivo, y casi siempre es un
+    # despiste —el archivo de ayer otra vez, o dos personas subiendo el mismo—.
+    # Quien quiere recargarlo lo confirma y vuelve con `reemplazar`. Se dice
+    # cuántos servicios trae el archivo de cada día, porque un reporte a medias
+    # dejaría el día a medias.
+    por_dia = _servicios_por_dia(servicios)
+    dias_del_archivo = sorted(por_dia)
     if not reemplazar and dias_del_archivo:
         ya_cargados = [dia for dia in await _dias_cargados(dias_del_archivo[0], dias_del_archivo[-1])
                        if str(dia.get("fecha")) in dias_del_archivo]
@@ -6382,6 +6407,7 @@ async def cargar_historico_intranet(
                 "mensaje": f"Ya estaba cargado: {fechas}. ¿Volver a cargarlo?",
                 "ya_cargados": ya_cargados,
                 "dias": dias_del_archivo,
+                "en_archivo": {dia: len(filas) for dia, filas in por_dia.items()},
             })
 
     async with httpx.AsyncClient(timeout=90.0) as cliente:
@@ -6394,8 +6420,7 @@ async def cargar_historico_intranet(
             await _upsert_tabla(cliente, "pasajeros", declarados, "dni")
         if deducidos:
             await _upsert_tabla(cliente, "pasajeros", deducidos, "dni")
-        await _upsert_tabla(cliente, "servicios_historicos", servicios,
-                            "fecha_ejecutada,codigo_vehiculo,turno,dni,modalidad")
+        await _reemplazar_dias_historico(por_dia)
         if duraciones:
             await _upsert_tabla(cliente, "duraciones_base", duraciones,
                                 "cobertura,modalidad,turno")
@@ -6545,6 +6570,7 @@ PROGRAMADOR_ERROR_STATUS = {
     "fuera_de_hora": (409, "Solo se puede marcar desde 3 horas antes hasta 6 horas después de la hora del servicio."),
     "dia_pasado": (409, "Ese día ya pasó: su programación no se borra ni se rehace."),
     "con_marcas": (409, "Los conductores ya marcaron viajes de ese día: su programación no se borra ni se rehace."),
+    "otro_dia": (400, "El reporte trae servicios de un día distinto al que se estaba guardando."),
 }
 
 

@@ -4462,9 +4462,11 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=[{"fecha_ejecutada": "2026-09-22"}],
                                   headers={"content-range": "0-0/518"})
 
-    def _parches_de_carga(self, ya_cargados):
-        servicios = [{"fecha_ejecutada": "2026-09-27", "dni": "1"},
-                     {"fecha_ejecutada": "2026-09-27", "dni": "2"}]
+    SERVICIOS_DE_CARGA = [{"fecha_ejecutada": "2026-09-27", "dni": "1"},
+                          {"fecha_ejecutada": "2026-09-27", "dni": "2"}]
+
+    def _parches_de_carga(self, ya_cargados, servicios=None):
+        servicios = servicios or self.SERVICIOS_DE_CARGA
         hi = backend.historico_intranet
         return (
             patch.object(hi, "leer_reporte", return_value=object()),
@@ -4499,29 +4501,60 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         detalle = respuesta.json()["detail"]
         self.assertEqual(detalle["ya_cargados"], cargado)
         self.assertIn("27", detalle["mensaje"])
+        # Cuántos trae el archivo de cada día: 518 cargados contra 2 en el
+        # archivo es un reporte a medias, y la pantalla tiene que poder decirlo.
+        self.assertEqual(detalle["en_archivo"], {"2026-09-27": 2})
         escribir.assert_not_awaited()
         base.assert_awaited_once_with("dias_cargados", {"p_desde": "2026-09-27", "p_hasta": "2026-09-27"})
 
-    async def test_uploading_it_again_on_purpose_does_load_it(self):
+    async def test_uploading_it_again_on_purpose_replaces_the_day(self):
+        """Volver a cargar hacía un upsert: no quitaba lo que el reporte corregido ya no trae."""
         backend.AUTH_ENFORCED = True
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
         parches = self._parches_de_carga([{"fecha": "2026-09-27", "servicios": 518, "cargado_en": None}])
-        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5], \
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5] as base, \
                 parches[6] as escribir, parches[7], parches[8]:
             respuesta = await self._subir(token, reemplazar="true")
         self.assertEqual(respuesta.status_code, 200)
-        escribir.assert_awaited()
+        base.assert_awaited_once_with("reemplazar_dia_historico", {
+            "p_dia": "2026-09-27", "p_filas": self.SERVICIOS_DE_CARGA}, write=True)
+        self.assertNotIn("servicios_historicos", [c.args[1] for c in escribir.await_args_list])
 
     async def test_a_new_day_loads_without_asking(self):
         backend.AUTH_ENFORCED = True
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
         parches = self._parches_de_carga([])
-        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5], \
-                parches[6] as escribir, parches[7], parches[8]:
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5] as base, \
+                parches[6], parches[7], parches[8]:
             respuesta = await self._subir(token)
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json()["hasta"], "2026-09-27")
-        escribir.assert_awaited()
+        self.assertEqual([c.args[0] for c in base.await_args_list],
+                         ["dias_cargados", "reemplazar_dia_historico"])
+
+    async def test_a_file_with_several_days_replaces_each_day_on_its_own(self):
+        """Un día por transacción: el fallo de uno no deja otro a medias."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        servicios = [{"fecha_ejecutada": "2026-09-27", "dni": "1"},
+                     {"fecha_ejecutada": "2026-09-26", "dni": "2"},
+                     {"fecha_ejecutada": "2026-09-27", "dni": "3"}]
+        parches = self._parches_de_carga([], servicios=servicios)
+        with parches[0], parches[1], parches[2], parches[3], parches[4], parches[5] as base, \
+                parches[6], parches[7], parches[8]:
+            respuesta = await self._subir(token)
+        self.assertEqual(respuesta.status_code, 200)
+        dias = [c.args[1] for c in base.await_args_list if c.args[0] == "reemplazar_dia_historico"]
+        self.assertEqual(dias, [
+            {"p_dia": "2026-09-26", "p_filas": [servicios[1]]},
+            {"p_dia": "2026-09-27", "p_filas": [servicios[0], servicios[2]]},
+        ])
+
+    def test_a_report_with_rows_of_another_day_is_a_clear_400(self):
+        with self.assertRaises(HTTPException) as ctx:
+            backend._raise_programador_result_error("reemplazar_dia_historico", {"error": "otro_dia"})
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("día distinto", ctx.exception.detail)
 
     async def test_the_history_status_says_which_day_is_due_and_the_last_week(self):
         """El reporte que toca es el del día que ya terminó: ayer, en Lima."""

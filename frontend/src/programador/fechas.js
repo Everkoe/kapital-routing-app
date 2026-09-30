@@ -11,6 +11,21 @@ export const fecha = (iso) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE');
 };
 
+/** Una fecha ISO corta y con el día de la semana: «mar, 22 set.». */
+export const fechaCorta = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE',
+    { weekday: 'short', day: '2-digit', month: 'short' });
+};
+
+/** Si dos fechas ISO caen en el mismo día de la semana. */
+export const mismoDiaDeLaSemana = (a, b) => {
+  const da = new Date(`${a}T00:00:00`);
+  const db = new Date(`${b}T00:00:00`);
+  return !Number.isNaN(da.getTime()) && !Number.isNaN(db.getTime()) && da.getDay() === db.getDay();
+};
+
 /** El día de hoy en ISO según el reloj del navegador, que es el de la operación. */
 export const hoyISO = () => {
   const d = new Date();

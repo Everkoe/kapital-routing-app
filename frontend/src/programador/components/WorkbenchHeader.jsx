@@ -11,7 +11,7 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
-import { hoyISO } from '../fechas';
+import { fechaCorta, hoyISO } from '../fechas';
 
 /**
  * Encabezado y tira de KPIs.
@@ -35,14 +35,6 @@ import { hoyISO } from '../fechas';
  * trabajar. Mientras solo ofreció los primeros, el día que un programador
  * necesita —mañana— no se podía ni seleccionar.
  */
-
-/** Una fecha ISO en el formato que se lee en Perú. */
-const fechaCorta = (iso) => {
-  if (!iso) return '—';
-  const d = new Date(`${iso}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE',
-    { weekday: 'short', day: '2-digit', month: 'short' });
-};
 
 /** Desplaza una fecha ISO los días que se le pidan, sin salirse del día local. */
 const masDias = (iso, dias) => {
@@ -76,7 +68,6 @@ const WorkbenchHeader = ({
   onExport,
   canExport,
   exportHelp,
-  modo,
   onIrACargar,
   dia,
   dias,
@@ -97,9 +88,13 @@ const WorkbenchHeader = ({
     if (d === manana) return `mañana · ${fechaCorta(d)}`;
     return fechaCorta(d);
   };
-  const etiquetaDiaVacio = modo === 'plan'
-    ? `Plan de hoy${fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}`
-    : `Último ejecutado${fechaPlanificacion ? ` (${fechaCorta(fechaPlanificacion)})` : ''}`;
+  // La opción vacía dice lo que abre ella, no lo que se está mirando: el plan
+  // de hoy si existe y, si no, el último día ejecutado. Con la fecha abierta
+  // decía «Último ejecutado (31 ago.)» aunque el último cargado fuera el 22/9.
+  const ultimoEjecutado = [...(dias || [])].sort().at(-1);
+  const etiquetaDiaVacio = diasConPlan?.includes(hoy)
+    ? `Plan de hoy (${fechaCorta(hoy)})`
+    : `Último ejecutado${ultimoEjecutado ? ` (${fechaCorta(ultimoEjecutado)})` : ''}`;
 
   return (
     <>
