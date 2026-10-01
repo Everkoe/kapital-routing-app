@@ -1403,6 +1403,13 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 .review-doc-card.doc-dropzone { padding-bottom: 26px; }
 /* Por hojas, lo que se pega lo recibe cada casilla: la tarjeta no reserva franja. */
 .review-doc-card.doc-dropzone.doc-por-hojas { padding-bottom: 12px; }
+/* El CAMO, al final y con su fila entera: es más alto que las demás, y
+   compartiendo fila las estiraba y descolocaba la rejilla. */
+.review-docs-grid .doc-por-hojas { grid-column: 1 / -1; }
+.review-docs-grid .doc-por-hojas .doc-hojas {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 260px));
+  justify-content: center;
+}
 
 /* El CAMO: una casilla por hoja, y cada una recibe lo que se le suelta o pega. */
 .doc-hojas {

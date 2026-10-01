@@ -9,7 +9,7 @@ import { apiFetch } from '../utils/apiClient';
 import { subirDocumento } from '../utils/documentoStorage';
 import { validarArchivoDocumento } from '../utils/validacionDocumento';
 import {
-  DUENO_CONDUCTOR, DUENO_VEHICULO, documentosPorDueno, vigenciaDeDocumento,
+  documentosDeLaRevision, vigenciaDeDocumento,
 } from '../constants/documentosConductor';
 import { getDocumentStatus } from '../utils/flotaDocumentStatus';
 import CampoEditable from './CampoEditable';
@@ -174,6 +174,9 @@ const RevisionDocumentosConductor = ({
     />
   );
 
+  // En el orden que pidió el usuario (`ORDEN_DE_REVISION`).
+  const revision = documentosDeLaRevision();
+
   return (
     <>
       <div className="review-docs-section">
@@ -181,10 +184,11 @@ const RevisionDocumentosConductor = ({
           <ShieldCheck size={18} /> {titulo}
         </h4>
         <div className="review-docs-grid">
-          {documentosPorDueno(DUENO_CONDUCTOR).map(tarjetaDe)}
+          {revision.enOrden.map(tarjetaDe)}
           {/* No es un documento: es el test del alta, y enseña su resultado. */}
           <ResultadoCuestionario resultado={perfil?.quizManejoDefensivo} />
-          {documentosPorDueno(DUENO_VEHICULO).map(tarjetaDe)}
+          {/* Lo de Administración, al final y en su propia fila (el CAMO). */}
+          {revision.deAdministracion.map(tarjetaDe)}
         </div>
       </div>
 

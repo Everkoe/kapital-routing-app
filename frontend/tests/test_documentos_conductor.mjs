@@ -18,6 +18,7 @@ import {
   claveCompleto,
   claveReverso,
   documentoPorClave,
+  documentosDeLaRevision,
   documentosPorDueno,
   documentosQueEntregaElConductor,
   esDeAdministracion,
@@ -291,4 +292,23 @@ test('un carnet sigue con delante, detrás y completo', () => {
   assert.deepEqual(carasDeDocumento(dni).map((c) => c.nombre), [CARA_COMPLETO, 'Delante', 'Detrás']);
   assert.equal(etiquetaCara(dni, 'reverso'), 'DNI Escaneado · Detrás');
   assert.equal(textosDeCaras(documentoPorClave('cv')), null, 'un papel no tiene caras');
+});
+
+test('la revisión sigue el orden que pidió el usuario, con el CAMO al final', () => {
+  const { enOrden, deAdministracion } = documentosDeLaRevision();
+  const claves = enOrden.map((d) => d.key);
+
+  // De tres en tres, como se ven en la ficha.
+  assert.deepEqual(claves.slice(0, 8), [
+    'recordConductor', 'comprobanteDomicilio', 'dniScaneado',
+    'licenciaConducir', 'antecedentesPoliciales', 'tarjetaPropiedad',
+    'revisionTecnica', 'soat',
+  ]);
+  // Después, lo demás; y el CAMO, que es lo último que se añade y su tarjeta
+  // de dos hojas descolocaba las de al lado, aparte y al final.
+  assert.deepEqual(new Set(claves.slice(8)),
+    new Set(['lunasPolarizadas', 'cv', 'certificadosTrabajo', 'referenciasLaborales']));
+  assert.deepEqual(deAdministracion.map((d) => d.key), ['camo']);
+  assert.equal(claves.includes('camo'), false);
+  assert.equal(enOrden.length + deAdministracion.length, DOCUMENTOS_CONDUCTOR.length);
 });
