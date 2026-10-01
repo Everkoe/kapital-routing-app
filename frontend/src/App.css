@@ -1401,21 +1401,19 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
  * reservar el hueco, el contenido daría un salto cada vez.
  */
 .review-doc-card.doc-dropzone { padding-bottom: 26px; }
-/* Por hojas, lo que se pega lo recibe cada casilla: la tarjeta no reserva franja. */
-.review-doc-card.doc-dropzone.doc-por-hojas { padding-bottom: 12px; }
-/* El CAMO, al final y con su fila entera: es más alto que las demás, y
-   compartiendo fila las estiraba y descolocaba la rejilla. */
-.review-docs-grid .doc-por-hojas { grid-column: 1 / -1; }
-.review-docs-grid .doc-por-hojas .doc-hojas {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 260px));
-  justify-content: center;
-}
 
-/* El CAMO: una casilla por hoja, y cada una recibe lo que se le suelta o pega. */
+/**
+ * El CAMO: una casilla por hoja, y cada una recibe lo que se le suelta o pega.
+ *
+ * Compactas, una al lado de la otra, para que la tarjeta quepa en su casilla
+ * de la rejilla con la altura de las demás: más alta, estiraba su fila.
+ */
 .doc-hojas {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  /* La heredada (1.45) le daba al botón de cada hoja diez píxeles más que a «Ver». */
+  line-height: 1.2;
 }
 
 .doc-hoja {
@@ -1423,17 +1421,28 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 10px 10px 24px;
+  padding: 6px;
   border: 1px dashed var(--border-color);
   border-radius: 8px;
 }
 
+.doc-hoja-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .doc-hoja-nombre {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
+/* La casilla no tiene sitio para la pista: la pone la tarjeta, en su franja de
+   abajo como las demás, y el borde de la casilla dice cuál lo recibe. */
+.doc-por-hojas:has(.doc-hoja[data-pegable])::after,
 .doc-dropzone[data-pegable]::after {
   content: 'Ctrl+V para pegar';
   position: absolute;
@@ -1448,7 +1457,8 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 }
 
 /* Mientras se arrastra, el aviso de soltar manda sobre el de pegar. */
-.doc-dropzone-activa[data-pegable]::after { content: none; }
+.doc-dropzone-activa[data-pegable]::after,
+.doc-por-hojas:has(.doc-hoja.doc-dropzone-activa)::after { content: none; }
 /* En un botón no cabe; su borde ya dice que es él quien recibe. */
 .doc-dropzone[data-sin-pista]::after { content: none; }
 /* Con una zona dentro bajo el cursor, la pista es de esa: la de fuera calla. */

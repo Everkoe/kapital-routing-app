@@ -187,7 +187,7 @@ const RevisionDocumentosConductor = ({
           {revision.enOrden.map(tarjetaDe)}
           {/* No es un documento: es el test del alta, y enseña su resultado. */}
           <ResultadoCuestionario resultado={perfil?.quizManejoDefensivo} />
-          {/* Lo de Administración, al final y en su propia fila (el CAMO). */}
+          {/* Lo de Administración, al final (el CAMO). */}
           {revision.deAdministracion.map(tarjetaDe)}
         </div>
       </div>
