@@ -13,38 +13,49 @@ test('las duraciones se leen en minutos y en horas', () => {
   assert.equal(duracionLegible(65.4), '1 h 05');
 });
 
-test('un RECOJO da la duración y a qué hora salir, cada una con lo medido debajo', () => {
+test('un RECOJO da tres columnas: cuánto dura, a qué hora salir y cuánto fiarse', () => {
   const texto = describirEstimacion(recojo, '00:00');
-  assert.equal(texto.duracion, '1 h 01');
-  assert.equal(texto.rango, 'Entre 37 min y 1 h 30; acierta el 80% de las veces.');
-  assert.deepEqual(texto.hora, {
-    etiqueta: 'Salir antes de',
-    hora: '22:30',
-    detalle: 'Para estar en la sede antes de las 00:00; así se llegó a tiempo el 87% de las veces.',
+  assert.deepEqual(texto.duracion, {
+    etiqueta: 'Duración estimada', valor: '1 h 01', detalle: 'Entre 37 min y 1 h 30',
   });
-  assert.equal(texto.aviso, null);
+  assert.deepEqual(texto.hora, {
+    etiqueta: 'Salir antes de', valor: '22:30', detalle: 'Para estar en la sede a las 00:00',
+  });
+  assert.deepEqual(texto.fiabilidad, {
+    nivel: 'alta',
+    valor: 'Alta',
+    detalle: '38 servicios de esta ruta a esta hora · el rango acierta el 80% · a tiempo el 87%',
+  });
   assert.equal(texto.entrenadoEl, '2026-09-29');
 });
 
 test('una SALIDA dice hacia qué hora termina de repartir', () => {
-  const salida = { ...recojo, salir_antes: undefined, a_tiempo: undefined, ultima_entrega: '23:05' };
-  const { hora } = describirEstimacion(salida, '22:01');
-  assert.equal(hora.etiqueta, 'Última entrega hacia');
-  assert.equal(hora.hora, '23:05');
+  const salida = { ...recojo, salir_antes: undefined, a_tiempo: 87, ultima_entrega: '23:05' };
+  const texto = describirEstimacion(salida, '22:01');
+  assert.equal(texto.hora.etiqueta, 'Última entrega hacia');
+  assert.equal(texto.hora.valor, '23:05');
+  // «A tiempo» solo tiene sentido cuando hay una hora a la que llegar.
+  assert.doesNotMatch(texto.fiabilidad.detalle, /a tiempo/);
 });
 
-test('sin hora de salida ni de entrega, solo la duración', () => {
-  const sinHora = { ...recojo, salir_antes: undefined };
-  assert.equal(describirEstimacion(sinHora).hora, null);
+test('sin hora de salida ni de entrega, no hay segunda columna', () => {
+  assert.equal(describirEstimacion({ ...recojo, salir_antes: undefined }).hora, null);
 });
 
-test('con pocos casos avisa, con lo que se desvió en ese caso', () => {
+test('con pocos casos la fiabilidad es baja y dice cuánto puede desviarse', () => {
   const pocos = { ...recojo, casos: 3, confianza: 'baja', error_medio: 21.8 };
-  assert.equal(describirEstimacion(pocos).aviso,
-    'Pocos datos: solo 3 servicios de esta ruta a esta hora, así que puede desviarse unos 22 min.');
-  const ninguno = { ...pocos, casos: 0 };
-  assert.match(describirEstimacion(ninguno).aviso, /^Sin servicios de esta ruta a esta hora/);
-  assert.match(describirEstimacion({ ...pocos, casos: 1 }).aviso, /solo 1 servicio de/);
+  assert.deepEqual(describirEstimacion(pocos).fiabilidad, {
+    nivel: 'baja',
+    valor: 'Baja, pocos datos',
+    detalle: 'Solo 3 servicios de esta ruta a esta hora: puede desviarse unos 22 min',
+  });
+  assert.match(describirEstimacion({ ...pocos, casos: 0 }).fiabilidad.detalle,
+    /^Sin servicios de esta ruta a esta hora/);
+  assert.match(describirEstimacion({ ...pocos, casos: 1 }).fiabilidad.detalle, /^Solo 1 servicio de/);
+});
+
+test('una confianza que no se conoce se trata como media', () => {
+  assert.equal(describirEstimacion({ ...recojo, confianza: 'rara' }).fiabilidad.nivel, 'media');
 });
 
 test('sin estimación, o con cifras que faltan, no se enseña nada', () => {
@@ -56,7 +67,6 @@ test('sin estimación, o con cifras que faltan, no se enseña nada', () => {
 
 test('sin medición de la prueba no inventa el porcentaje', () => {
   const sinPrueba = { ...recojo, acierto_banda: null, a_tiempo: null };
-  const texto = describirEstimacion(sinPrueba, '06:00');
-  assert.equal(texto.rango, 'Entre 37 min y 1 h 30.');
-  assert.equal(texto.hora.detalle, 'Para estar en la sede antes de las 06:00.');
+  assert.equal(describirEstimacion(sinPrueba, '06:00').fiabilidad.detalle,
+    '38 servicios de esta ruta a esta hora');
 });

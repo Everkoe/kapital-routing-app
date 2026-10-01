@@ -23,44 +23,59 @@ export const duracionLegible = (minutos) => {
   return `${Math.floor(total / 60)} h ${String(total % 60).padStart(2, '0')}`;
 };
 
-const avisoDePocosCasos = (casos, errorMedio) => {
-  const error = numero(errorMedio);
-  const cola = error === null ? '' : `, así que puede desviarse unos ${Math.round(error)} min`;
-  if (!casos) {
-    return `Sin servicios de esta ruta a esta hora en el histórico: se apoya en rutas parecidas${cola}.`;
-  }
-  return `Pocos datos: solo ${casos} ${casos === 1 ? 'servicio' : 'servicios'} de esta ruta a esta hora${cola}.`;
-};
-
-/** La segunda cifra: a qué hora salir (RECOJO) o hacia cuándo termina (SALIDA). */
+/** La segunda columna: a qué hora salir (RECOJO) o hacia cuándo termina (SALIDA). */
 const horaDelServicio = (estimacion, turno) => {
   if (estimacion.salir_antes) {
-    const aTiempo = numero(estimacion.a_tiempo);
     return {
       etiqueta: 'Salir antes de',
-      hora: estimacion.salir_antes,
-      detalle: [
-        turno ? `Para estar en la sede antes de las ${turno}` : 'Para llegar a su hora',
-        aTiempo === null ? null : `así se llegó a tiempo el ${aTiempo}% de las veces`,
-      ].filter(Boolean).join('; ') + '.',
+      valor: estimacion.salir_antes,
+      detalle: turno ? `Para estar en la sede a las ${turno}` : 'Para llegar a su hora',
     };
   }
   if (estimacion.ultima_entrega) {
     return {
       etiqueta: 'Última entrega hacia',
-      hora: estimacion.ultima_entrega,
-      detalle: 'Cuando deja a la última persona.',
+      valor: estimacion.ultima_entrega,
+      detalle: 'Cuando deja a la última persona',
     };
   }
   return null;
 };
 
+const NIVELES = { alta: 'Alta', media: 'Media', baja: 'Baja' };
+
+/**
+ * La tercera columna: cuánto fiarse. Con pocos casos de esa ruta y hora dice
+ * cuánto puede desviarse; si no, lo que se midió en días que el modelo no vio.
+ */
+const fiabilidadDe = (estimacion) => {
+  const nivel = NIVELES[estimacion.confianza] ? estimacion.confianza : 'media';
+  const casos = numero(estimacion.casos) ?? 0;
+  if (nivel === 'baja') {
+    const error = numero(estimacion.error_medio);
+    const desvio = error === null ? '' : `: puede desviarse unos ${Math.round(error)} min`;
+    const base = casos
+      ? `Solo ${casos} ${casos === 1 ? 'servicio' : 'servicios'} de esta ruta a esta hora`
+      : 'Sin servicios de esta ruta a esta hora; se apoya en rutas parecidas';
+    return { nivel, valor: 'Baja, pocos datos', detalle: `${base}${desvio}` };
+  }
+  const acierto = numero(estimacion.acierto_banda);
+  const aTiempo = estimacion.salir_antes ? numero(estimacion.a_tiempo) : null;
+  const partes = [
+    `${casos} ${casos === 1 ? 'servicio' : 'servicios'} de esta ruta a esta hora`,
+    acierto === null ? null : `el rango acierta el ${acierto}%`,
+    aTiempo === null ? null : `a tiempo el ${aTiempo}%`,
+  ].filter(Boolean);
+  return { nivel, valor: NIVELES[nivel], detalle: partes.join(' · ') };
+};
+
 /**
  * Lo que se enseña de la estimación de un servicio, o `null` si no hay.
  *
- * Va en piezas y no en frases porque la pantalla las pone en sitios distintos:
- * dos cifras grandes —la duración y la hora— con su explicación debajo, y el
- * aviso aparte. Todo en una línea se leía amontonado.
+ * Tres columnas con la misma forma —etiqueta, valor y una línea debajo—:
+ * cuánto dura, a qué hora salir y cuánto fiarse. Con forma fija se leen de un
+ * vistazo; como frases seguidas se leían amontonadas, y con el aviso suelto
+ * debajo, desordenadas.
  *
  * `turno` es la hora del servicio («06:00»): en un RECOJO es la hora de
  * entrada a la sede, que es a lo que hay que llegar.
@@ -71,14 +86,14 @@ export const describirEstimacion = (estimacion, turno = null) => {
   const desde = numero(estimacion.desde);
   const hasta = numero(estimacion.hasta);
   if (minutos === null || desde === null || hasta === null) return null;
-  const acierto = numero(estimacion.acierto_banda);
   return {
-    duracion: duracionLegible(minutos),
-    rango: `Entre ${duracionLegible(desde)} y ${duracionLegible(hasta)}`
-      + (acierto === null ? '.' : `; acierta el ${acierto}% de las veces.`),
+    duracion: {
+      etiqueta: 'Duración estimada',
+      valor: duracionLegible(minutos),
+      detalle: `Entre ${duracionLegible(desde)} y ${duracionLegible(hasta)}`,
+    },
     hora: horaDelServicio(estimacion, turno),
-    aviso: estimacion.confianza === 'baja'
-      ? avisoDePocosCasos(numero(estimacion.casos) ?? 0, estimacion.error_medio) : null,
+    fiabilidad: fiabilidadDe(estimacion),
     entrenadoEl: estimacion.entrenado_el || null,
   };
 };

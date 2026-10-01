@@ -1199,14 +1199,16 @@
 }
 
 /* La estimación de la IA, como una sección más de la ficha —igual que «Dónde
-   viven»—: dos cifras grandes con lo medido debajo y el aviso aparte. Como una
-   línea más se leía amontonada, y como tarjeta con otro fondo, borde redondeado
-   y título de color desentonaba con el resto (lo dijo el usuario). */
+   viven»—, separada de los datos de arriba por una línea fina. Tres columnas
+   iguales a todo el ancho con la forma de la fila de datos: etiqueta, valor y
+   una línea debajo. Es una pantalla de muchas horas: nada de cifras gigantes,
+   tarjetas con otro fondo, líneas verticales ni avisos sueltos (el usuario
+   descartó las tres versiones anteriores por eso). */
 .pw-estimacion {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   padding-top: 4px;
   border-top: 1px solid var(--kapital-border);
 }
@@ -1221,26 +1223,13 @@
 
 .pw-estimacion-titulo svg { color: var(--kapital-text-secondary); }
 
-/* Las dos cifras juntas y con una línea fina entre ellas: repartidas a lo ancho
-   quedaba cada una en un extremo y no se leían como una sola estimación. */
 .pw-estimacion-cifras {
-  display: flex;
-  flex-wrap: wrap;
-  row-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 24px;
 }
 
-.pw-estimacion-cifra {
-  display: flex;
-  flex: 0 1 340px;
-  flex-direction: column;
-  gap: 2px;
-  padding-right: 24px;
-}
-
-.pw-estimacion-cifra + .pw-estimacion-cifra {
-  padding-left: 24px;
-  border-left: 1px solid var(--kapital-border);
-}
+.pw-estimacion-cifra { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
 .pw-estimacion-etiqueta {
   font-size: 0.74rem;
@@ -1248,35 +1237,35 @@
   color: var(--kapital-text-secondary);
 }
 
+/* Un escalón por encima de los valores de la fila de datos, no más. */
 .pw-estimacion-valor {
-  font-size: 1.35rem;
-  font-weight: 700;
-  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
   color: var(--kapital-text-primary);
 }
 
+/* La fiabilidad lleva un punto de color, siempre junto a su palabra. */
+.pw-estimacion-valor[data-nivel]::before {
+  content: '';
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kapital-text-secondary);
+}
+
+.pw-estimacion-valor[data-nivel='alta']::before { background: var(--kapital-accent-green); }
+.pw-estimacion-valor[data-nivel='baja']::before { background: var(--kapital-accent-orange); }
+
 .pw-estimacion-detalle {
   font-size: 0.8rem;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--kapital-text-secondary);
-}
-
-/* El aviso, en el gris del resto: solo el icono lo marca. */
-.pw-estimacion-aviso {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.4;
-  color: var(--kapital-text-secondary);
-}
-
-.pw-estimacion-aviso svg {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--kapital-accent-orange);
 }
 
 /* --- Mapa del servicio ---------------------------------------------------- */
