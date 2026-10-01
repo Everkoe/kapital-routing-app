@@ -4261,7 +4261,8 @@ async def get_profile(email: str, session_token: SessionCookie = None):
     }
 
 @app.put("/api/user/profile")
-async def update_profile(update_data: UsuarioUpdate, session_token: SessionCookie = None):
+async def update_profile(update_data: UsuarioUpdate, request: Request = None,
+                         session_token: SessionCookie = None):
     await reload_db()
     user = get_user_by_identifier(update_data.identifier)
     if not user:
@@ -4281,13 +4282,22 @@ async def update_profile(update_data: UsuarioUpdate, session_token: SessionCooki
             user.get("unidad_id")):
         raise HTTPException(status_code=403, detail="La unidad la asigna Administración.")
     
-    # Validar password actual si se intenta cambiar la password
+    # Cambiar la contraseña exige la actual. Dos cosas que no hacía:
+    # - Contarla en el tope de intentos, como el login y el cambio sin sesión:
+    #   con una sesión ajena abierta se podía probar la actual sin límite.
+    # - Responder 400 y no 401 cuando no es la actual. Un 401 es «la sesión ya
+    #   no sirve», y el cliente echaba a la persona por equivocarse al teclear.
     if update_data.new_password:
         if len(update_data.new_password) < 4:
             raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 4 caracteres.")
+        clave_intento = _clave_de_intentos(user, update_data.identifier)
+        origen = _origen_de_peticion(request)
+        anotado = await _registrar_intento(clave_intento, origen)
         if not verify_password(update_data.current_password or "", user.get("password")):
-            raise HTTPException(status_code=401, detail="Contraseña actual incorrecta.")
+            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
+        await _olvidar_intentos(clave_intento, origen, anotado)
         user["password"] = password_for_storage(update_data.new_password)
+        user["needs_password_change"] = False
 
     if update_data.nombre: user["nombre"] = update_data.nombre
     if update_data.avatar: user["avatar"] = _foto_guardable(update_data.avatar)

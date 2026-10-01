@@ -596,6 +596,17 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   base—: con `_db_http_request`, un tope caído alargaba el login ~20 s y podía dejar la instancia en 503.
   Contra la base real: `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el
   permiso de leer `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
+  **Cambiar la contraseña desde «Mi perfil»** (`PUT /api/user/profile`) cuenta en el mismo tope desde el
+  2026-10-01: con una sesión ajena abierta se podía probar la actual sin límite. Y una actual equivocada
+  da **400, no 401**: el 401 es «la sesión ya no sirve», y el cliente cerraba la sesión de quien se
+  equivocaba al teclear. Cualquier endpoint con sesión que compruebe una contraseña, igual.
+- **«Mi perfil» rehecho** (2026-10-01, pedido del usuario: «muy básico, no se ve profesional»):
+  [src/perfil/](frontend/src/perfil/) con la lógica aparte y probada (`modeloPerfil.js`). Cabecera con
+  foto, nombre, rol, cuenta y estado; los datos que no se editan van como texto y no como cajas grises; la
+  foto y el nombre se guardan al momento; la contraseña se pide dos veces y lleva indicador de fortaleza
+  que orienta sin exigir más que el servidor (4 caracteres). El conductor tiene además «Datos y vehículo»
+  (cada dato con «Solicitar cambio» o «En revisión») y «Documentos». La capacidad ya no sale como
+  «15 pax» a quien no la tiene, y el límite de las fotos dice 5 MB, que es el real (decía 2).
 - **El plan llega al conductor y al cliente** (desde el 2026-09-27,
   [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
   recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor

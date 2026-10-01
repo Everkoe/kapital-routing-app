@@ -1,0 +1,602 @@
+/*
+ * «Mi perfil» (2026-10-01).
+ *
+ * Solo colores del tema (`--kapital-*`), para que se vea igual de bien en claro
+ * y en oscuro. El acento es el azul de la navegación, con el texto en el azul
+ * profundo de la marca encima: el blanco sobre ese azul claro no se leía.
+ * Un único tamaño de esquina (12px en tarjetas, 8px en controles) y una sola
+ * línea fina de borde: es una página que se usa poco pero tiene que parecer
+ * de la misma aplicación que las que se usan horas.
+ */
+
+.pf {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 8px 0 32px;
+  color: var(--kapital-text-primary);
+  /* La raíz de la aplicación centra el texto (resto de la plantilla de Vite). */
+  text-align: left;
+}
+
+/* --- Cabecera -------------------------------------------------------------- */
+
+.pf-cabecera {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-card-bg);
+}
+
+/* Una franja suave de color de marca detrás de la foto: da presencia sin
+   meter un color nuevo. */
+.pf-portada {
+  height: 96px;
+  background:
+    linear-gradient(120deg, var(--kapital-badge-bg) 0%, transparent 75%),
+    var(--kapital-card-bg);
+  border-bottom: 1px solid var(--kapital-border);
+}
+
+/* La foto sube sobre la franja; el nombre queda debajo de ella, no encima de
+   la línea que la cierra. */
+.pf-identidad {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 0 28px 22px;
+  margin-top: -48px;
+}
+
+.pf-avatar {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 4px solid var(--kapital-card-bg);
+  background: var(--kapital-badge-bg);
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+}
+
+.pf-avatar:focus-visible,
+.pf-avatar[data-arrastrando] { box-shadow: 0 0 0 3px var(--kapital-nav-link-active); }
+
+.pf-avatar-iniciales {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--kapital-badge-text);
+}
+
+.pf-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pf-avatar-camara {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--kapital-card-bg);
+  background: var(--kapital-nav-link-active);
+  color: var(--kapital-blue-deep);
+  transition: transform 0.15s ease;
+}
+
+.pf-avatar:hover .pf-avatar-camara { transform: scale(1.08); }
+
+.pf-identidad-texto { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding-top: 60px; }
+
+.pf-nombre {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--kapital-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pf-identidad-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 0.82rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-rol,
+.pf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+.pf-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.pf-meta-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* El estado con un punto, nunca solo con color: el texto lo dice. */
+.pf-estado { display: inline-flex; align-items: center; gap: 6px; }
+.pf-estado::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kapital-text-secondary);
+}
+.pf-estado[data-tono='ok']::before { background: var(--kapital-accent-green); }
+.pf-estado[data-tono='aviso']::before { background: var(--kapital-accent-orange); }
+.pf-estado[data-tono='mal']::before { background: var(--kapital-accent-red); }
+
+/* --- Secciones del conductor ----------------------------------------------- */
+
+.pf-secciones {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-card-bg);
+  overflow-x: auto;
+}
+
+.pf-seccion {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pf-seccion:hover { color: var(--kapital-text-primary); }
+
+.pf-seccion[aria-selected='true'] {
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+/* --- Tarjetas y filas ------------------------------------------------------ */
+
+.pf-rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.pf-columna { display: flex; flex-direction: column; gap: 20px; }
+
+.pf-tarjeta {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 24px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-card-bg);
+  min-width: 0;
+}
+
+.pf-tarjeta-cabecera { display: flex; align-items: center; gap: 12px; }
+
+.pf-tarjeta-icono {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--kapital-badge-bg);
+  color: var(--kapital-badge-text);
+}
+
+.pf-tarjeta-titulo {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--kapital-text-primary);
+}
+
+.pf-tarjeta-subtitulo {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-filas { margin: 0; }
+
+/* La columna de etiquetas tiene ancho fijo: con `fr`, una etiqueta larga
+   («Teléfono de emergencia») empujaba su valor más a la derecha que el resto. */
+.pf-fila {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 13px 0;
+  border-top: 1px solid var(--kapital-border);
+}
+
+.pf-fila:first-child { border-top: none; padding-top: 4px; }
+
+.pf-fila-etiqueta {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-fila-valor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.92rem;
+  color: var(--kapital-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pf-fila-nota { font-size: 0.76rem; color: var(--kapital-text-secondary); }
+.pf-fila-accion { display: flex; justify-content: flex-end; }
+.pf-valor-fuerte { font-weight: 600; }
+.pf-sin-dato { color: var(--kapital-text-secondary); font-size: 0.86rem; }
+.pf-candado { color: var(--kapital-text-secondary); }
+
+/* --- Controles ------------------------------------------------------------- */
+
+.pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 8px;
+  background: var(--kapital-card-bg);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--kapital-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.pf-btn:hover:not(:disabled) { background: var(--kapital-badge-bg); }
+.pf-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.pf-btn:focus-visible { outline: 2px solid var(--kapital-nav-link-active); outline-offset: 2px; }
+
+.pf-btn-primario {
+  border-color: var(--kapital-nav-link-active);
+  background: var(--kapital-nav-link-active);
+  color: var(--kapital-blue-deep);
+}
+
+.pf-btn-primario:hover:not(:disabled) { background: var(--kapital-nav-link-active); opacity: 0.88; }
+
+.pf-btn-texto {
+  padding: 6px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--kapital-badge-text);
+}
+
+.pf-btn-icono { padding: 6px; border-color: transparent; background: transparent; margin-left: auto; }
+
+.pf-input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 8px;
+  background: var(--kapital-bg);
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--kapital-text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pf-input:focus {
+  outline: none;
+  border-color: var(--kapital-nav-link-active);
+  box-shadow: 0 0 0 3px var(--kapital-badge-bg);
+}
+
+/* El campo a lo ancho y los dos botones juntos debajo: al lado del campo se
+   partían en dos líneas. */
+.pf-edicion { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.pf-edicion .pf-input { flex: 1 1 100%; }
+
+.pf-formulario { display: flex; flex-direction: column; gap: 14px; }
+.pf-campo { display: flex; flex-direction: column; gap: 6px; }
+
+.pf-campo-etiqueta {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-contrasena { position: relative; }
+.pf-contrasena .pf-input { padding-right: 42px; }
+
+.pf-contrasena-ojo {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--kapital-text-secondary);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.pf-contrasena-ojo:hover { color: var(--kapital-text-primary); }
+
+.pf-acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* --- Fortaleza de la contraseña ------------------------------------------- */
+
+.pf-fortaleza {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: -4px;
+}
+
+.pf-fortaleza-barra { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+
+.pf-fortaleza-barra span {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--kapital-border);
+  transition: background 0.2s ease;
+}
+
+.pf-fortaleza-barra[data-nivel='corta'] span[data-lleno],
+.pf-fortaleza-barra[data-nivel='debil'] span[data-lleno] { background: var(--kapital-accent-red); }
+.pf-fortaleza-barra[data-nivel='aceptable'] span[data-lleno] { background: var(--kapital-accent-orange); }
+.pf-fortaleza-barra[data-nivel='buena'] span[data-lleno],
+.pf-fortaleza-barra[data-nivel='fuerte'] span[data-lleno] { background: var(--kapital-accent-green); }
+
+.pf-fortaleza-etiqueta { font-size: 0.78rem; font-weight: 600; color: var(--kapital-text-secondary); }
+
+.pf-requisitos {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-requisitos li { display: inline-flex; align-items: center; gap: 5px; }
+.pf-requisitos li[data-cumple] { color: var(--kapital-text-primary); }
+.pf-requisitos li[data-cumple] svg { color: var(--kapital-accent-green); }
+.pf-requisito-tipo { color: var(--kapital-text-secondary); }
+
+/* --- Avisos ---------------------------------------------------------------- */
+
+.pf-aviso,
+.pf-nota,
+.pf-error,
+.pf-pista {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.pf-aviso svg,
+.pf-nota svg { flex-shrink: 0; margin-top: 1px; }
+
+.pf-aviso {
+  padding: 10px 12px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 8px;
+  color: var(--kapital-text-primary);
+}
+
+.pf-aviso svg { color: var(--kapital-accent-orange); }
+.pf-nota { color: var(--kapital-text-secondary); }
+
+.pf-nota-destacada {
+  padding: 12px 14px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-card-bg);
+}
+
+.pf-nota-destacada svg { color: var(--kapital-badge-text); }
+.pf-error { color: var(--kapital-accent-red); font-weight: 600; }
+.pf-pista { color: var(--kapital-text-secondary); }
+
+.pf-revision {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+  white-space: nowrap;
+}
+
+.pf-revision svg { color: var(--kapital-accent-orange); }
+
+/* --- Vehículo -------------------------------------------------------------- */
+
+/* La foto al lado de los datos si caben los dos; si no, encima. Lado a lado
+   en poco ancho, los valores se partían letra a letra. */
+.pf-vehiculo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 28px;
+  align-items: flex-start;
+}
+
+.pf-vehiculo .pf-filas { flex: 999 1 440px; min-width: 0; }
+
+.pf-vehiculo-foto {
+  position: relative;
+  flex: 1 1 300px;
+  max-width: 340px;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-bg);
+  cursor: pointer;
+  outline: none;
+}
+
+.pf-vehiculo-foto:focus-visible,
+.pf-vehiculo-foto[data-arrastrando] { box-shadow: 0 0 0 3px var(--kapital-nav-link-active); }
+
+.pf-vehiculo-vacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pf-vehiculo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pf-vehiculo-camara {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--kapital-card-bg);
+  border: 1px solid var(--kapital-border);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--kapital-text-primary);
+}
+
+.pf-vehiculo2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 20px;
+  border: 1px dashed var(--kapital-border);
+  border-radius: 12px;
+}
+
+.pf-vehiculo2 > span { display: flex; flex-direction: column; gap: 3px; }
+.pf-vehiculo2 strong { font-size: 0.92rem; }
+.pf-vehiculo2 small { font-size: 0.8rem; color: var(--kapital-text-secondary); }
+
+/* --- Diálogo de solicitud -------------------------------------------------- */
+
+.pf-modal-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.6);
+}
+
+.pf-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(440px, 100%);
+  padding: 22px 24px;
+  border: 1px solid var(--kapital-border);
+  border-radius: 12px;
+  background: var(--kapital-card-bg);
+  color: var(--kapital-text-primary);
+}
+
+.pf-modal-cabecera { display: flex; align-items: center; gap: 12px; }
+.pf-modal-actual { margin: 0; font-size: 0.86rem; color: var(--kapital-text-secondary); }
+.pf-modal-actual strong { color: var(--kapital-text-primary); }
+
+/* --- Movimiento y pantallas pequeñas --------------------------------------- */
+
+.pf-girando { animation: pf-girar 0.9s linear infinite; }
+@keyframes pf-girar { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-girando { animation: none; }
+  .pf-btn, .pf-input, .pf-avatar-camara, .pf-fortaleza-barra span { transition: none; }
+}
+
+@media (max-width: 720px) {
+  .pf { gap: 14px; padding-top: 0; }
+  .pf-identidad { flex-direction: column; align-items: flex-start; gap: 12px; padding: 0 18px 18px; }
+  .pf-identidad-texto { padding-top: 0; }
+  .pf-seccion { flex: 1 1 0; padding: 9px 6px; font-size: 0.8rem; }
+  .pf-seccion svg { display: none; }
+  .pf-nombre { font-size: 1.3rem; }
+  .pf-tarjeta { padding: 18px; }
+  .pf-rejilla { grid-template-columns: 1fr; }
+  .pf-fila { grid-template-columns: 1fr auto; }
+  .pf-fila-etiqueta { grid-column: 1 / -1; }
+  .pf-vehiculo-foto { max-width: none; }
+}
