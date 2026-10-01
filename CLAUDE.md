@@ -613,6 +613,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   que orienta sin exigir más que el servidor (4 caracteres). El conductor tiene además «Datos y vehículo»
   (cada dato con «Solicitar cambio» o «En revisión») y «Documentos». La capacidad ya no sale como
   «15 pax» a quien no la tiene, y el límite de las fotos dice 5 MB, que es el real (decía 2).
+  **Desplegado en producción el 2026-10-01** (merge `f796ff1`, PR #25, sin migraciones), con la
+  estimación de la IA en tres columnas y los arreglos de sesión del perfil y de la lista de usuarios;
+  comprobado que sin sesión el perfil (leer y guardar) y la lista de usuarios responden 401 para una
+  cuenta que existe y para una que no.
 - **El plan llega al conductor y al cliente** (desde el 2026-09-27,
   [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
   recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor
