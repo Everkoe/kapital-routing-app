@@ -203,6 +203,11 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   de fuera y un Ctrl+V lo recoge solo la más interior bajo el cursor (`zonaMasInterior`, por `:hover`).
   Sin eso, soltar en un botón subía el archivo dos veces. Una cara bloqueada por la imagen completa avisa en
   vez de subir.
+- **Un conductor solo puede pedir que se le cambie lo que le ofrece «Mi perfil»** (desde el 2026-10-01,
+  `_CAMPOS_SOLICITABLES`, con una prueba que la compara con `modeloPerfil.js` y `DatosConductor.jsx`): el
+  campo lo elegía él y aprobar escribía en su perfil cualquier clave, también sus revisiones, el CAMO o el
+  estado. Pedir otro campo da 400, el valor tiene tope de 300 caracteres, y una solicitud de antes con un
+  campo no permitido se puede rechazar pero no aprobar. Si se añade un dato a «Mi perfil», va también ahí.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -586,6 +591,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
   `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
   nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
+  **El navegador no guarda a la persona, solo que hay sesión** (desde el 2026-10-01,
+  [frontend/src/utils/marcaDeSesion.js](frontend/src/utils/marcaDeSesion.js)): la marca `kapital_sesion`
+  decide si al abrir se espera a `/api/auth/me` («Validando sesión...») o se enseña el login. Antes
+  `kapital_user` guardaba el usuario entero —el de un conductor con su `perfil_conductor`: documento,
+  dirección, teléfonos, nacimiento— y nada lo pintaba: la aplicación espera siempre a `/api/auth/me` y
+  al perfil. El `kapital_user` que quede cuenta como marca y se borra al validar o al cerrar sesión. **No
+  volver a escribir el usuario en `localStorage`**: los cambios del perfil viven en memoria.
   Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. **Desplegado en producción
   el 2026-09-27** (merge `bee7f21`, junto con la escritura por diferencias, los endpoints cerrados y el
   tope de intentos); `migrar_sesiones.py --aplicar` no encontró sesiones abiertas en el índice viejo.

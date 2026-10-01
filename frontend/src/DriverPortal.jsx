@@ -225,7 +225,6 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
                     toast.success('🎉 ¡Tu perfil ha sido aprobado!', { duration: 6000 });
                   }
                   const updatedUser = { ...currentUser, ...data };
-                  localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
                   if (setUsuarioActual) setUsuarioActual(updatedUser);
                 }
               })
@@ -237,7 +236,6 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
           // Estado general del usuario cambió
           const currentUser = usuarioRef.current;
           const updatedUser = { ...currentUser, estado: msg.estado };
-          localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
           if (setUsuarioActual) setUsuarioActual(updatedUser);
           toast(msg.mensaje || `Tu estado cambió a: ${msg.estado}`, { icon: 'ℹ️' });
         }
@@ -453,7 +451,6 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
       // Sin el perfil recién guardado, la pantalla siguiente lee el anterior y
       // da por faltante todo lo que el conductor acaba de subir.
       const updatedUser = { ...usuario, estado: 'Pendiente Revisión', perfil_conductor: data };
-      localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
       if (setUsuarioActual) {
         setUsuarioActual(updatedUser);
       }
@@ -467,7 +464,6 @@ const DriverPortal = ({ usuario, setUsuarioActual }) => {
 
   const handleResubmissionComplete = (data) => {
     const updatedUser = data.user || { ...usuario, estado: data.estado || 'Pendiente Revisión' };
-    localStorage.setItem('kapital_user', JSON.stringify(updatedUser));
     if (setUsuarioActual) {
       setUsuarioActual(updatedUser);
     }
