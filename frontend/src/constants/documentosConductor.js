@@ -92,7 +92,9 @@ export const DOCUMENTOS_CONDUCTOR = [
   // La clave sigue siendo `comprobanteDomicilio` aunque el documento ya no se
   // llame así: con ella están guardados los archivos que ya se subieron.
   { key: 'comprobanteDomicilio', label: 'Declaración Jurada de Domicilio', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
-  { key: 'recordConductor', label: 'Récord de Conductor', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
+  // Como el domicilio: el nombre cambió (pedido del usuario, 2026-10-01) y la
+  // clave no, porque con ella están guardados los archivos ya subidos.
+  { key: 'recordConductor', label: 'Ficha de Conductor', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'cv', label: 'Currículum Vitae', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'certificadosTrabajo', label: 'Certificados de Trabajo', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },

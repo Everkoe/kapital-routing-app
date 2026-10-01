@@ -106,7 +106,7 @@ export const CAMPOS_ONBOARDING = [
     valido: fechaValida,
     ayuda: AYUDA_FECHA,
   },
-  { campo: 'recordConductor', seccion: 'personales', etiqueta: 'Récord del conductor', archivo: true },
+  { campo: 'recordConductor', seccion: 'personales', etiqueta: 'Ficha de conductor', archivo: true },
   { campo: 'antecedentesPoliciales', seccion: 'personales', etiqueta: 'Antecedentes policiales', archivo: true },
 
   { campo: 'vehiculoMarca', seccion: 'vehiculares', etiqueta: 'Marca del vehículo' },
