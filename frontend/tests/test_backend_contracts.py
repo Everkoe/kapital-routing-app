@@ -2277,6 +2277,21 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((aviso["campo"], aviso["estado"]), ("dniScaneado", "faltante"))
         self.assertEqual(backend.actividad_db[-1]["action_type"], "Documento eliminado")
 
+    async def test_removing_the_camo_asks_the_driver_for_nothing(self):
+        # El CAMO lo sube Administración: decirle al conductor que lo vuelva a
+        # subir sería pedirle algo que no puede hacer.
+        conductor = self._unidad_con_conductor()
+        conductor["perfil_conductor"]["camo"] = {"name": "camo.pdf", "path": "K-027/camo-aaaa1111.pdf"}
+        avisos = len(backend.notifications_db)
+
+        respuesta, borrar = await self._eliminar_documento("camo")
+
+        self.assertIsNone(conductor["perfil_conductor"]["camo"])
+        borrar.assert_awaited_once_with("K-027/camo-aaaa1111.pdf")
+        self.assertTrue(respuesta["archivo_borrado"])
+        self.assertEqual(len(backend.notifications_db), avisos)
+        self.assertNotIn("conductor", backend.actividad_db[-1]["description"])
+
     async def test_removing_a_document_never_erases_someone_elses_file(self):
         # El perfil lo escribe el conductor: podría apuntar su documento al de
         # otra unidad, y quitarlo borraría el archivo de otro.
@@ -4146,6 +4161,81 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         guardar.assert_not_awaited()
         self.assertEqual(chofer["perfil_conductor"]["revision_docs"]["dniScaneado"]["estado"], "rechazado")
 
+    async def test_only_administration_uploads_the_camo(self):
+        """El certificado médico lo pone Administración: al conductor no se le pide."""
+        backend.AUTH_ENFORCED = True
+        chofer, token_chofer = await self._sesion(
+            "chofer@k.com", rol="Conductor", perfil_conductor={"revision_docs": {}})
+        _, token_admin = await self._sesion("admin@k.com", rol="Administración")
+        camo = {"name": "camo.pdf", "path": "K-027/camo-1.pdf"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            propio = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token_chofer,
+                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
+            self.assertEqual(propio.status_code, 403, "declararse admin no basta")
+            guardar.assert_not_awaited()
+            self.assertNotIn("camo", chofer["perfil_conductor"])
+
+            de_admin = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token_admin,
+                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
+        self.assertEqual(de_admin.status_code, 200, de_admin.text)
+        self.assertEqual(chofer["perfil_conductor"]["camo"], camo)
+        self.assertEqual(backend.notifications_db, [], "no hay nada que revisar")
+
+    async def test_the_onboarding_never_writes_what_administration_decides(self):
+        """El alta reescribe el perfil entero con lo que manda el conductor.
+
+        Así podía ponerse un CAMO —o aprobarse sus propios documentos con
+        `revision_docs`— y, al reenviarla, borraba el CAMO que había subido
+        Administración.
+        """
+        backend.AUTH_ENFORCED = True
+        camo = {"name": "camo.pdf", "path": "K-027/camo-1.pdf"}
+        chofer, token = await self._sesion(
+            "chofer@k.com", rol="Conductor",
+            perfil_conductor={"numDoc": "22222222", "camo": camo,
+                              "revision_docs": {"dniScaneado": {"estado": "rechazado"}}})
+        with (
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/driver/onboarding", token,
+                json={"email": "chofer@k.com", "perfilData": {
+                    "numDoc": "22222222", "nombres": "Chofer",
+                    "camo": {"name": "otro.pdf", "path": "K-027/otro.pdf"},
+                    "revision_docs": {"dniScaneado": {"estado": "aprobado"}},
+                }})
+        self.assertEqual(respuesta.status_code, 200)
+        perfil = chofer["perfil_conductor"]
+        self.assertEqual(perfil["camo"], camo)
+        self.assertNotIn("revision_docs", perfil)
+        self.assertEqual(perfil["nombres"], "Chofer")
+
+    async def test_the_camo_is_not_reviewed(self):
+        """Lo sube Administración: rechazarlo le pediría al conductor algo que no puede subir."""
+        backend.AUTH_ENFORCED = True
+        chofer, _ = await self._sesion(
+            "chofer@k.com", rol="Conductor", perfil_conductor={"camo": {"path": "K-027/camo-1.pdf"}})
+        _, token = await self._sesion("admin@k.com", rol="Administración")
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            respuesta = await self._llamar(
+                "POST", "/api/admin/driver/review", token,
+                json={"admin_email": "admin@k.com", "conductor_email": "chofer@k.com",
+                      "campo": "camo", "estado": "rechazado"})
+        self.assertEqual(respuesta.status_code, 400)
+        guardar.assert_not_awaited()
+        self.assertNotIn("revision_docs", chofer["perfil_conductor"])
+
     async def test_a_driver_submits_only_their_own_onboarding(self):
         """No pedía sesión: cualquiera cambiaba el perfil y el estado de otro conductor."""
         backend.AUTH_ENFORCED = True
@@ -4314,6 +4404,14 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         claves = set(re.findall(r"key:\s*'([^']+)'", bloque))
         self.assertTrue(claves)
         self.assertEqual(claves, set(backend._CAMPOS_DOCUMENTO))
+        # Y los que solo sube Administración: si la pantalla se lo ofreciera al
+        # conductor, el servidor se lo rechazaría.
+        de_administracion = {
+            re.search(r"key:\s*'([^']+)'", entrada).group(1)
+            for entrada in re.findall(r"\{[^{}]*\}", bloque)
+            if re.search(r"soloAdministracion:\s*true", entrada)
+        }
+        self.assertEqual(de_administracion, set(backend._DOCUMENTOS_DE_ADMINISTRACION))
 
     async def test_a_driver_marks_only_their_own_notifications(self):
         backend.AUTH_ENFORCED = True

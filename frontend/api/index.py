@@ -4970,6 +4970,10 @@ async def permanent_delete_user(target_email: str, admin_email: str, session_tok
 async def review_driver_doc(payload: DriverDocReviewPayload, session_token: SessionCookie = None):
     """Admin marca un documento individual del conductor como aprobado o rechazado."""
     await require_admin_session(session_token)
+    if _es_de_administracion(payload.campo):
+        # Lo puso Administración: rechazarlo le pediría al conductor que suba
+        # algo que no puede subir.
+        raise HTTPException(status_code=400, detail="Ese documento lo sube Administración: no se revisa.")
     # Toca la cuenta del conductor, sus avisos, la actividad y, al aprobar el
     # último documento, su unidad: todo tiene que estar cargado. Sin esto, en
     # una instancia fría el conductor no aparecía y se guardaba encima de su
@@ -5117,7 +5121,10 @@ async def eliminar_documento_del_conductor(payload: DocumentoEliminado, session_
     revisiones = {k: v for k, v in (perfil.get("revision_docs") or {}).items() if k != payload.campo}
     nuevo = {**perfil, payload.campo: None, **({"revision_docs": revisiones} if "revision_docs" in perfil else {})}
     conductor_key = conductor.get("identifier") or payload.conductor
-    aviso = {
+    # Lo que sube Administración (el CAMO) no se le pide al conductor: avisarle
+    # de que lo vuelva a subir sería pedirle algo que no puede hacer.
+    de_administracion = _es_de_administracion(payload.campo)
+    aviso = None if de_administracion else {
         "id": _next_notification_id(),
         "tipo": "documento_revisado",
         "campo": payload.campo,
@@ -5130,12 +5137,14 @@ async def eliminar_documento_del_conductor(payload: DocumentoEliminado, session_
         "leido": False,
     }
     conductor["perfil_conductor"] = nuevo
-    notifications_db.append(aviso)
+    if aviso is not None:
+        notifications_db.append(aviso)
     actividad_previa = list(actividad_db)
     registrar_actividad(
         "Documento eliminado", actor=actor, entity_type="documento", entity_id=payload.campo,
         entity_label=f"{payload.campo} · {conductor.get('unidad_id') or conductor_key}",
-        description="Administración quitó un archivo mal subido; el conductor tendrá que volver a entregarlo.",
+        description=("Administración quitó un archivo que había subido." if de_administracion
+                     else "Administración quitó un archivo mal subido; el conductor tendrá que volver a entregarlo."),
         status="warning",
     )
     try:
@@ -5557,7 +5566,7 @@ async def driver_onboarding(payload: DriverProfilePayload, session_token: Sessio
         raise HTTPException(status_code=409, detail="Ese documento ya está registrado en otra cuenta.")
 
     fechas = _fechas_del_perfil(payload.perfilData, payload.perfilData)
-    user["perfil_conductor"] = {**conservar_documentos(user.get("perfil_conductor"), payload.perfilData), **fechas}
+    user["perfil_conductor"] = {**_perfil_del_alta(user.get("perfil_conductor"), payload.perfilData), **fechas}
     user["estado"] = "Pendiente Revisión"
     # Si ya tiene unidad, sus fechas llegan al panel sin esperar a la aprobación.
     if str(user.get("unidad_id") or "").strip():
@@ -5638,8 +5647,13 @@ _CAMPOS_DOCUMENTO = frozenset({
     "dniScaneado", "licenciaConducir", "lunasPolarizadas", "comprobanteDomicilio",
     "recordConductor", "antecedentesPoliciales", "cv", "certificadosTrabajo",
     "referenciasLaborales", "tarjetaPropiedad",
-    "soat", "revisionTecnica",
+    "soat", "revisionTecnica", "camo",
 })
+# Los que pone Administración y nunca el conductor: el CAMO, el certificado
+# médico de la clínica. No se revisan (lo pone quien lo revisaría) y el alta,
+# que reescribe el perfil entero, los conserva. Son los `soloAdministracion`
+# del catálogo de la interfaz; la misma prueba lo comprueba.
+_DOCUMENTOS_DE_ADMINISTRACION = frozenset({"camo"})
 _SUFIJOS_DOCUMENTO = ("", "Reverso", "Completo")
 
 
@@ -5648,6 +5662,33 @@ def _es_campo_documento(campo: str) -> bool:
         campo.endswith(sufijo) and campo[: len(campo) - len(sufijo)] in _CAMPOS_DOCUMENTO
         for sufijo in _SUFIJOS_DOCUMENTO
     )
+
+
+def _es_de_administracion(campo: str) -> bool:
+    """Si este campo (o una cara suya) es de un documento que solo sube Administración."""
+    return any(
+        campo.endswith(sufijo) and campo[: len(campo) - len(sufijo)] in _DOCUMENTOS_DE_ADMINISTRACION
+        for sufijo in _SUFIJOS_DOCUMENTO
+    )
+
+
+def _perfil_del_alta(anterior: Any, enviado: Dict[str, Any]) -> Dict[str, Any]:
+    """El perfil que deja el alta del conductor, sin lo que decide Administración.
+
+    El alta sustituye el perfil entero por lo que manda el conductor. Así podía
+    ponerse un CAMO o aprobarse sus documentos con `revision_docs`, y al
+    reenviarla borraba el CAMO que había subido Administración. Lo de
+    Administración se queda como estaba; las revisiones empiezan de cero, como
+    siempre que se reenvía el alta.
+    """
+    suyo = {
+        campo: valor for campo, valor in enviado.items()
+        if campo != "revision_docs" and not _es_de_administracion(str(campo))
+    }
+    perfil = conservar_documentos(anterior, suyo)
+    if isinstance(anterior, dict):
+        perfil.update({campo: valor for campo, valor in anterior.items() if _es_de_administracion(campo)})
+    return perfil
 
 
 @app.post("/api/conductor/resubmit-docs")
@@ -5667,6 +5708,11 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
         # Sin esto se podía mandar `revision_docs` o `estado` como si fueran un
         # documento y aprobarse la revisión uno mismo.
         raise HTTPException(status_code=400, detail=f"No son documentos: {', '.join(ajenos)}.")
+    # Por el rol de la sesión, no por `uploaded_by`, que lo declara quien llama.
+    if actor is not None and actor.get("rol") not in _ADMIN_ROLES and any(
+        _es_de_administracion(str(campo)) for campo in payload.docs
+    ):
+        raise HTTPException(status_code=403, detail="Ese documento lo sube Administración.")
     user = await _load_compat_user(payload.email)
     if not user:
         raise HTTPException(status_code=404, detail="Conductor no encontrado.")

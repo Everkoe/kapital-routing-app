@@ -180,6 +180,17 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   blanco y subir un documento desde ahí no sabía su carpeta—, y un conductor sin unidad recibe lo que sube
   Administración en su carpeta personal (`_carpeta_para_la_subida`). **Desplegado en producción el
   2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
+- **El CAMO lo sube solo Administración** (desde el 2026-09-30, pedido del usuario): el Certificado de
+  Aptitud Médico Ocupacional que emite la clínica, en la revisión de documentos de la ficha y de Accesos.
+  En el catálogo va con `soloAdministracion` y en el backend en `_DOCUMENTOS_DE_ADMINISTRACION` (una
+  prueba compara las dos listas). **No se pide en el alta ni sale en las pantallas del conductor**, el
+  servidor no se lo acepta a él (403 por el rol de la sesión, no por `uploaded_by`, que lo declara quien
+  llama), **no se aprueba ni se rechaza** (400: rechazarlo le pediría algo que no puede subir) y quitarlo no
+  le manda aviso. El alta reescribe el perfil entero con lo que manda el conductor, así que ahora pasa por
+  `_perfil_del_alta`: conserva el CAMO y **ya no acepta `revision_docs`**, con el que un conductor podía
+  aprobarse sus propios documentos llamando al API. En la misma tanda, el «Comprobante de domicilio» pasó a
+  llamarse **«Declaración jurada de domicilio»**; la clave sigue siendo `comprobanteDomicilio`, que es con
+  la que están guardados los archivos ya subidos.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -613,6 +624,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   que orienta sin exigir más que el servidor (4 caracteres). El conductor tiene además «Datos y vehículo»
   (cada dato con «Solicitar cambio» o «En revisión») y «Documentos». La capacidad ya no sale como
   «15 pax» a quien no la tiene, y el límite de las fotos dice 5 MB, que es el real (decía 2).
+  **Desplegado en producción el 2026-10-01** (merge `f796ff1`, PR #25, sin migraciones), con la
+  estimación de la IA en tres columnas y los arreglos de sesión del perfil y de la lista de usuarios;
+  comprobado que sin sesión el perfil (leer y guardar) y la lista de usuarios responden 401 para una
+  cuenta que existe y para una que no.
 - **El plan llega al conductor y al cliente** (desde el 2026-09-27,
   [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
   recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor

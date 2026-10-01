@@ -292,7 +292,7 @@ const DriverOnboardingWizard = ({ usuario, onComplete }) => {
   // Detalle que antes vivía entre paréntesis en la etiqueta. Fuera del título
   // no alarga la tarjeta ni descuadra la rejilla.
   const PISTAS = {
-    comprobanteDomicilio: 'Recibo de agua o luz a tu nombre.',
+    comprobanteDomicilio: 'Firmada por ti, con la dirección donde vives.',
     recordConductor: 'El historial que emite el MTC.',
     cv: 'Tu currículum actualizado.',
     soat: 'Debe estar vigente.',

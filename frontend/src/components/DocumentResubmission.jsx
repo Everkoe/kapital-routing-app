@@ -4,7 +4,7 @@ import FileUploadZone from './FileUploadZone';
 import { apiFetch } from '../utils/apiClient';
 import toast from 'react-hot-toast';
 import {
-  DOCUMENTOS_CONDUCTOR, campoDeVencimiento, carasDeDocumento, fechaValida,
+  campoDeVencimiento, carasDeDocumento, documentosQueEntregaElConductor, fechaValida,
 } from '../constants/documentosConductor';
 import { documentoEntregado, documentosRequeridos } from '../constants/camposOnboarding';
 import { subirDocumento } from '../utils/documentoStorage';
@@ -20,10 +20,11 @@ const MAX_DOCUMENT_SIZE_BYTES = FileUploadZone.MAX_DOCUMENT_SIZE_BYTES;
  * dos caras eso se vuelve un agujero: si el administrador rechaza
  * `dniScaneadoReverso` y la clave no figura aquí, el conductor no ve el rechazo
  * y no puede resubir la cara mala. El catálogo evita que las tres pantallas
- * vuelvan a desincronizarse.
+ * vuelvan a desincronizarse. Lo que sube Administración (el CAMO) no sale:
+ * aquí no hay nada que el conductor pueda hacer con ello.
  */
 const DOC_LABELS = Object.fromEntries(
-  DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
+  documentosQueEntregaElConductor().flatMap((documento) =>
     carasDeDocumento(documento).map((cara) => [
       cara.campo,
       cara.nombre === documento.label ? documento.label : `${documento.label} · ${cara.nombre}`,

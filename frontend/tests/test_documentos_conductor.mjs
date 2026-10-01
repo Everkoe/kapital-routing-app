@@ -16,7 +16,10 @@ import {
   conDocumentoNuevo,
   claveCompleto,
   claveReverso,
+  documentoPorClave,
   documentosPorDueno,
+  documentosQueEntregaElConductor,
+  esDeAdministracion,
   etiquetaCara,
   todasLasClaves,
 } from '../src/constants/documentosConductor.js';
@@ -241,4 +244,25 @@ test('empezado por caras sueltas, la tarjeta abre por la que falta', () => {
   assert.equal(caraInicial(caras), 'dniScaneadoReverso');
   assert.equal(caraInicial([]), null);
   assert.equal(caraInicial(null), null);
+});
+
+test('el CAMO lo sube Administración y al conductor no se le ofrece', () => {
+  const camo = documentoPorClave('camo');
+
+  assert.ok(camo, 'el documento existe');
+  assert.equal(camo.tipo, TIPO_PAPEL, 'una hoja, o un PDF con las que tenga');
+  assert.equal(camo.dueno, DUENO_CONDUCTOR, 'va con los del conductor en la ficha');
+  assert.equal(esDeAdministracion(camo), true);
+  assert.match(camo.detalle, /Aptitud Médico Ocupacional/);
+  // La revisión de Administración lo enseña; las pantallas del conductor, no.
+  assert.ok(documentosPorDueno(DUENO_CONDUCTOR).includes(camo));
+  assert.equal(documentosQueEntregaElConductor().includes(camo), false);
+});
+
+test('el resto de documentos los sigue entregando el conductor', () => {
+  const deAdministracion = DOCUMENTOS_CONDUCTOR.filter(esDeAdministracion).map((d) => d.key);
+  assert.deepEqual(deAdministracion, ['camo']);
+  assert.equal(documentosQueEntregaElConductor().length, DOCUMENTOS_CONDUCTOR.length - 1);
+  assert.equal(esDeAdministracion(documentoPorClave('dniScaneado')), false);
+  assert.equal(esDeAdministracion(null), false);
 });

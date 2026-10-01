@@ -114,8 +114,11 @@ const RevisionDocumentosConductor = ({
         json: { conductor: conductorEmail, campo: cara.campo },
       });
       onDocumentoEliminado?.(respuesta.perfil_conductor);
+      const deAdministracion = viendo?.deAdministracion;
       setViendo(null);
-      toast.success('Archivo eliminado. El conductor tendrá que volver a entregarlo.');
+      toast.success(deAdministracion
+        ? 'Archivo eliminado.'
+        : 'Archivo eliminado. El conductor tendrá que volver a entregarlo.');
     } catch (error) {
       toast.error(error?.message || 'No se pudo eliminar el archivo.');
       throw error;
