@@ -61,7 +61,9 @@ export const DOCUMENTOS_CONDUCTOR = [
     dueno: DUENO_CONDUCTOR,
     opcional: true,
   },
-  { key: 'comprobanteDomicilio', label: 'Comprobante de Domicilio', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
+  // La clave sigue siendo `comprobanteDomicilio` aunque el documento ya no se
+  // llame así: con ella están guardados los archivos que ya se subieron.
+  { key: 'comprobanteDomicilio', label: 'Declaración Jurada de Domicilio', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'recordConductor', label: 'Récord de Conductor', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'cv', label: 'Currículum Vitae', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },

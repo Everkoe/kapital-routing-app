@@ -94,7 +94,7 @@ export const CAMPOS_ONBOARDING = [
     valido: (valor) => FORMATO_CORREO.test(String(valor).trim().toLowerCase()),
     ayuda: 'Revisa que tenga @ y el dominio, como nombre@gmail.com.',
   },
-  { campo: 'comprobanteDomicilio', seccion: 'personales', etiqueta: 'Comprobante de domicilio', archivo: true },
+  { campo: 'comprobanteDomicilio', seccion: 'personales', etiqueta: 'Declaración jurada de domicilio', archivo: true },
   { campo: 'dniScaneado', seccion: 'personales', etiqueta: 'DNI escaneado', archivo: true },
   { campo: 'licenciaConducir', seccion: 'personales', etiqueta: 'Licencia de conducir', archivo: true },
   // Las fechas de lo que vence van con su documento y llegan al panel de
