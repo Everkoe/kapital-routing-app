@@ -356,6 +356,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **Desplegado en producción el 2026-09-30** (merge `e0eef72`, PR #22, sin migraciones): `GET /api`
     sigue con `estimacion_duracion: true` y, sin sesión, proponer y aplicar responden 401. Que `pyvroom`
     cargue dentro de la función solo se ve al calcular una propuesta con sesión: `GET /api` no lo dice.
+    **Comprobado en producción el 2026-09-30** con la sesión del usuario, sin aplicar: el plan del 26/9
+    dio 42 → 21 unidades en lo que se reorganiza (51 → 46 en la sede), 67,8 → 51,2 h, a bordo mediana
+    33 → 38 min y máximo 142 → 80, 6 sin sitio y 52 servicios intactos por 83 personas sin ubicar,
+    calculado en **2,3 s** dentro de Vercel.
 - **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
   lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
   se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
@@ -404,6 +408,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - Probado contra la base en una transacción deshecha: `probar_funciones_plan.py --con-migracion`, 35/35.
     La 017 es compatible en los dos sentidos: el código anterior ignora `resultados` y el nuevo, sin la
     017, se juzga por el total como antes.
+  - **Desplegado en producción el 2026-09-30** (merge `964c258`, PR #24), con la 017 aplicada antes por el
+    usuario y `probar_funciones_plan.py` en verde contra ella (35/35); sin sesión, editar, proponer y
+    aplicar siguen en 401.
 - **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
   `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
   Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier
@@ -589,6 +596,23 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   base—: con `_db_http_request`, un tope caído alargaba el login ~20 s y podía dejar la instancia en 503.
   Contra la base real: `scripts/probar_intentos.py`. La misma 009 quitó a `anon` y `authenticated` el
   permiso de leer `app_state`, que conservaban aunque la RLS sin políticas no les dejara ver ninguna fila.
+  **Cambiar la contraseña desde «Mi perfil»** (`PUT /api/user/profile`) cuenta en el mismo tope desde el
+  2026-10-01: con una sesión ajena abierta se podía probar la actual sin límite. Y una actual equivocada
+  da **400, no 401**: el 401 es «la sesión ya no sirve», y el cliente cerraba la sesión de quien se
+  equivocaba al teclear. Cualquier endpoint con sesión que compruebe una contraseña, igual.
+  Y **el perfil pide la sesión antes de buscar la cuenta** (`GET` y `PUT /api/user/profile`): al revés,
+  sin sesión daba 404 si la cuenta no existía y 401 si existía, y se podía averiguar desde fuera qué
+  DNI o correos tienen cuenta. Al añadir un endpoint que busque una cuenta por lo que manda el cliente,
+  comprobar la sesión primero. Lo mismo tenía `GET /api/admin/users`, y peor: sin sesión **cargaba todas
+  las cuentas** (~255 KB de transferencia por llamada) antes de responder 403 o 401, que además decía si
+  el correo era de Administración. Ahora pide sesión y rol antes de leer nada.
+- **«Mi perfil» rehecho** (2026-10-01, pedido del usuario: «muy básico, no se ve profesional»):
+  [src/perfil/](frontend/src/perfil/) con la lógica aparte y probada (`modeloPerfil.js`). Cabecera con
+  foto, nombre, rol, cuenta y estado; los datos que no se editan van como texto y no como cajas grises; la
+  foto y el nombre se guardan al momento; la contraseña se pide dos veces y lleva indicador de fortaleza
+  que orienta sin exigir más que el servidor (4 caracteres). El conductor tiene además «Datos y vehículo»
+  (cada dato con «Solicitar cambio» o «En revisión») y «Documentos». La capacidad ya no sale como
+  «15 pax» a quien no la tiene, y el límite de las fotos dice 5 MB, que es el real (decía 2).
 - **El plan llega al conductor y al cliente** (desde el 2026-09-27,
   [supabase/010_servicios_conductor_cliente.sql](supabase/010_servicios_conductor_cliente.sql)). Cada uno
   recibe solo lo suyo, filtrado en Postgres: `servicios_de_unidad()` para el conductor

@@ -4979,6 +4979,83 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")).status_code, 401)
             self.assertEqual((await self._entrar("chofer@k.com", "otra", ip="198.51.100.66")).status_code, 429)
 
+    async def _cambiar_desde_el_perfil(self, token, actual, nueva="nueva-clave", ip="203.0.113.7"):
+        return await self._llamar("PUT", "/api/user/profile", token, headers={"x-forwarded-for": ip}, json={
+            "identifier": "chofer@k.com", "current_password": actual, "new_password": nueva})
+
+    async def test_a_wrong_current_password_in_the_profile_is_a_400_not_a_logout(self):
+        """Con un 401 el cliente daba la sesión por caducada y echaba a quien se equivocaba al teclear."""
+        backend.AUTH_ENFORCED = True
+        self._cuenta_con_clave()
+        token = await backend.abrir_sesion(backend.usuarios_db["chofer@k.com"])
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            respuesta = await self._cambiar_desde_el_perfil(token, "otra")
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("actual", respuesta.json()["detail"])
+        guardar.assert_not_awaited()
+        self.assertTrue(backend.verify_password("la-buena", backend.usuarios_db["chofer@k.com"]["password"]))
+
+    async def test_guessing_the_current_password_from_the_profile_hits_the_limit(self):
+        """Con una sesión ajena abierta se podía probar la contraseña actual sin límite."""
+        backend.AUTH_ENFORCED = True
+        self._cuenta_con_clave()
+        token = await backend.abrir_sesion(backend.usuarios_db["chofer@k.com"])
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            for _ in range(backend.intentos_acceso.MAX_POR_CUENTA_Y_ORIGEN):
+                self.assertEqual((await self._cambiar_desde_el_perfil(token, "otra")).status_code, 400)
+            self.assertEqual((await self._cambiar_desde_el_perfil(token, "la-buena")).status_code, 429)
+
+    async def test_changing_the_password_from_the_profile_ends_the_provisional_one(self):
+        backend.AUTH_ENFORCED = True
+        self._cuenta_con_clave(needs_password_change=True)
+        token = await backend.abrir_sesion(backend.usuarios_db["chofer@k.com"])
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            respuesta = await self._cambiar_desde_el_perfil(token, "la-buena")
+        self.assertEqual(respuesta.status_code, 200)
+        guardar.assert_awaited()
+        cuenta = backend.usuarios_db["chofer@k.com"]
+        self.assertTrue(backend.verify_password("nueva-clave", cuenta["password"]))
+        self.assertFalse(cuenta["needs_password_change"])
+        self.assertEqual(backend.almacen_intentos.filas, [], "acertar olvida el intento")
+
+    async def test_the_profile_without_a_session_does_not_tell_which_accounts_exist(self):
+        """Sin sesión daba 404 si la cuenta no existía y 401 si existía."""
+        backend.AUTH_ENFORCED = True
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuestas = [
+                await self._llamar("GET", f"/api/user/profile?email={cuenta}")
+                for cuenta in ("chofer@k.com", "nadie@k.com")
+            ] + [
+                await self._llamar("PUT", "/api/user/profile", json={"identifier": cuenta, "nombre": "x"})
+                for cuenta in ("chofer@k.com", "nadie@k.com")
+            ]
+        self.assertEqual([r.status_code for r in respuestas], [401, 401, 401, 401])
+
+    async def test_the_user_list_asks_for_a_session_before_loading_every_account(self):
+        """Sin sesión cargaba todas las cuentas y el 403 o el 401 decía si el correo era de Administración."""
+        backend.AUTH_ENFORCED = True
+        backend.usuarios_db["jefa@k.com"] = {"identifier": "jefa@k.com", "rol": "Administración"}
+        self._cuenta_con_clave()
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as recargar,
+            patch.object(backend, "_load_compat_users", new=AsyncMock()) as cargar,
+        ):
+            respuestas = [await self._llamar("GET", f"/api/admin/users?email={cuenta}")
+                          for cuenta in ("jefa@k.com", "chofer@k.com", "nadie@k.com")]
+        self.assertEqual([r.status_code for r in respuestas], [401, 401, 401])
+        cargar.assert_not_awaited()
+        recargar.assert_not_awaited()
+
     async def test_nothing_readable_is_stored_about_a_failed_attempt(self):
         with patch.object(backend, "reload_db", new=AsyncMock()):
             await self._entrar("74538840", "x", ip="198.51.100.9")

@@ -1179,19 +1179,94 @@
    al límite. */
 .pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }
 
-/* La estimación del modelo ocupa la fila entera: lleva banda, hora de salida y,
-   con pocos casos, el aviso con el error medido. */
-.pw-detail-estimacion { grid-column: 1 / -1; }
-.pw-detail-estimacion dt { display: inline-flex; align-items: center; gap: 4px; }
-.pw-detail-linea {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+/* El margen de la duración medida, debajo de la cifra y no a su lado: en la
+   misma línea se partía en tres renglones y la cifra se perdía. */
+.pw-detail-bajo {
+  display: block;
   margin-top: 2px;
-  color: var(--kapital-text-secondary);
   font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--kapital-text-secondary);
 }
-.pw-detail-aviso { color: var(--kapital-accent-orange); }
+
+.pw-detail-vacio { color: var(--kapital-text-secondary); font-size: 0.84rem; }
+
+/* Cómo se usa la tabla de agentes, en una línea sobre ella. */
+.pw-detail-ayuda {
+  margin: -4px 0 10px;
+  font-size: 0.8rem;
+  color: var(--kapital-text-secondary);
+}
+
+/* La estimación de la IA, como una sección más de la ficha —igual que «Dónde
+   viven»—, separada de los datos de arriba por una línea fina. Tres columnas
+   iguales a todo el ancho con la forma de la fila de datos: etiqueta, valor y
+   una línea debajo. Es una pantalla de muchas horas: nada de cifras gigantes,
+   tarjetas con otro fondo, líneas verticales ni avisos sueltos (el usuario
+   descartó las tres versiones anteriores por eso). */
+.pw-estimacion {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding-top: 4px;
+  border-top: 1px solid var(--kapital-border);
+}
+
+.pw-estimacion-titulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+  cursor: help;
+}
+
+.pw-estimacion-titulo svg { color: var(--kapital-text-secondary); }
+
+.pw-estimacion-cifras {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 24px;
+}
+
+.pw-estimacion-cifra { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.pw-estimacion-etiqueta {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+/* Un escalón por encima de los valores de la fila de datos, no más. */
+.pw-estimacion-valor {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  color: var(--kapital-text-primary);
+}
+
+/* La fiabilidad lleva un punto de color, siempre junto a su palabra. */
+.pw-estimacion-valor[data-nivel]::before {
+  content: '';
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kapital-text-secondary);
+}
+
+.pw-estimacion-valor[data-nivel='alta']::before { background: var(--kapital-accent-green); }
+.pw-estimacion-valor[data-nivel='baja']::before { background: var(--kapital-accent-orange); }
+
+.pw-estimacion-detalle {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--kapital-text-secondary);
+}
 
 /* --- Mapa del servicio ---------------------------------------------------- */
 
