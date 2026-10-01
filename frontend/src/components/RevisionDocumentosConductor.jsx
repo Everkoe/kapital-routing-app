@@ -170,7 +170,12 @@ const RevisionDocumentosConductor = ({
       accept={ACCEPT}
       onUpload={subirEnNombreDelConductor}
       onReview={revisarDocumento}
-      onView={(abierto) => setViendo({ ...abierto, clave: documento.key })}
+      onView={(abierto) => setViendo({
+        ...abierto,
+        clave: documento.key,
+        // Al descargar, delante del nombre: de quién es el archivo.
+        prefijoArchivo: unidadId || conductor?.nombre || '',
+      })}
     />
   );
 

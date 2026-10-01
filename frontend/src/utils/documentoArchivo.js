@@ -69,3 +69,36 @@ export const pegadoEnCampoDeTexto = (target) =>
  */
 export const caraTieneDocumento = (cara) =>
   tieneContenido(cara?.src) || Boolean(cara?.path);
+
+const EXTENSION_POR_TIPO = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/heic': 'heic',
+  'application/pdf': 'pdf',
+};
+
+// Los que Windows no admite en un nombre de archivo.
+const NO_ADMITIDOS_EN_NOMBRE = /[\\/:*?"<>|]/g;
+
+/**
+ * Nombre del archivo al descargar un documento: «K-027 - SOAT.jpg».
+ *
+ * La unidad va delante para que, al bajar varios, se sepa de quién es cada uno.
+ * La extensión sale del tipo real del archivo y solo si no se conoce del nombre
+ * con que se subió: las fotos se comprimen a JPEG al subirlas y conservan su
+ * nombre, así que una «captura.png» es en realidad un JPEG.
+ */
+export const nombreDeDescarga = ({ titulo, prefijo = '', nombreOriginal = '', tipo = '' }) => {
+  const tipoLimpio = String(tipo || '').split(';')[0].trim().toLowerCase();
+  const delNombre = /\.([a-z0-9]{2,5})$/i.exec(String(nombreOriginal || ''))?.[1] || '';
+  const extension = (EXTENSION_POR_TIPO[tipoLimpio] || delNombre).toLowerCase();
+
+  const base = [prefijo, titulo].filter(Boolean).join(' - ')
+    .replace(/\s*·\s*/g, ' - ')
+    .replace(NO_ADMITIDOS_EN_NOMBRE, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'documento';
+  return extension ? `${base}.${extension}` : base;
+};

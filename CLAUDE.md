@@ -210,6 +210,18 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   campo no permitido se puede rechazar pero no aprobar. Si se añade un dato a «Mi perfil», va también ahí.
   **Desplegado en producción el 2026-10-01** (merge `96f757c`, PR #27, sin migraciones), con el CAMO por
   hojas, la «Ficha de Conductor», el soltar por cara y la marca de sesión.
+- **La revisión de documentos va en el orden que pidió el usuario** (`ORDEN_DE_REVISION`; el CAMO, al
+  final y compacto, en una casilla como las demás). Desplegado el 2026-10-01 (merge `3ba6ea8`, PR #28),
+  con la velocidad (§2 ter) y la sesión caducada del Resumen.
+- **El visor de documentos descarga y hace zoom** (2026-10-01, pedido del usuario). «Descargar» guarda el
+  archivo como «K-027 - SOAT.jpg» (`nombreDeDescarga`: la extensión sale del tipo real, porque las fotos
+  se comprimen a JPEG y conservan su nombre). **No vale un enlace con `download` a la URL firmada**: es
+  de otro origen y el navegador abriría la imagen en vez de guardarla; se baja antes como `blob:`
+  (`descargarArchivo.js`; el bucket responde con CORS abierto, comprobado). El zoom
+  (`ImagenConZoom.jsx`, cuentas en `zoomDeImagen.js`) va con la rueda hacia el cursor, el pellizco del
+  panel, los botones, doble clic y «+», «−», «0»; ampliada, se arrastra sin salirse del marco. De paso: el
+  cuerpo del visor medía el 80% de la pantalla igual que el visor entero, así que la cabecera lo empujaba
+  y se cortaban los últimos ~50 px de cada imagen.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

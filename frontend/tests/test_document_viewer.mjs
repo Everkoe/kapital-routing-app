@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../src/utils/documentoArchivo.js';
+import {
+  caraTieneDocumento, carasDe, esPdf, nombreDeDescarga, tieneContenido,
+} from '../src/utils/documentoArchivo.js';
 import { VIGENCIA_POR_DOCUMENTO, vigenciaDeDocumento } from '../src/constants/documentosConductor.js';
 import { FLEET_DOCUMENT_FIELDS } from '../src/utils/flotaDocumentStatus.js';
 
@@ -92,4 +94,36 @@ test('cada vencimiento apunta a un campo real de la unidad', () => {
       `${clave} apunta a un campo que la flota ya no sigue`,
     );
   }
+});
+
+test('el archivo descargado se llama como el documento, con su unidad delante', () => {
+  assert.equal(
+    nombreDeDescarga({ titulo: 'Declaración Jurada de Domicilio', prefijo: 'K-027', tipo: 'image/jpeg' }),
+    'K-027 - Declaración Jurada de Domicilio.jpg',
+  );
+  // La cara va en el nombre, sin el punto medio, que en un archivo se lee mal.
+  assert.equal(
+    nombreDeDescarga({ titulo: 'DNI Escaneado · Delante', prefijo: 'K-027', tipo: 'image/png' }),
+    'K-027 - DNI Escaneado - Delante.png',
+  );
+});
+
+test('la extensión sale de lo que es el archivo, no del nombre con que se subió', () => {
+  // Las fotos se comprimen a JPEG al subirlas y conservan su nombre original.
+  assert.equal(
+    nombreDeDescarga({ titulo: 'SOAT', nombreOriginal: 'captura.png', tipo: 'image/jpeg' }),
+    'SOAT.jpg',
+  );
+  assert.equal(nombreDeDescarga({ titulo: 'CAMO', tipo: 'application/pdf' }), 'CAMO.pdf');
+  // Sin tipo conocido, vale la del nombre original; sin ninguna, va sin extensión.
+  assert.equal(nombreDeDescarga({ titulo: 'CV', nombreOriginal: 'cv.DOCX', tipo: '' }), 'CV.docx');
+  assert.equal(nombreDeDescarga({ titulo: 'CV' }), 'CV');
+});
+
+test('el nombre no lleva caracteres que Windows no admite', () => {
+  assert.equal(
+    nombreDeDescarga({ titulo: 'Ficha: "récord"/MTC?', prefijo: 'K<1>', tipo: 'image/jpeg' }),
+    'K1 - Ficha récordMTC.jpg',
+  );
+  assert.equal(nombreDeDescarga({ titulo: '', tipo: 'image/jpeg' }), 'documento.jpg');
 });

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Download, FileText, Loader, Trash2, X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import ImagenConZoom from './ImagenConZoom';
 import { caraTieneDocumento, carasDe, esPdf, tieneContenido } from '../utils/documentoArchivo';
+import { descargarArchivo } from '../utils/descargarArchivo';
 import { urlFirmada } from '../utils/documentoStorage';
 
 /**
@@ -37,6 +40,7 @@ const DocumentViewer = ({
   // Borrar pide confirmación en el propio visor: es lo único que no se deshace.
   const [confirmando, setConfirmando] = useState(false);
   const [eliminando, setEliminando] = useState(false);
+  const [descargando, setDescargando] = useState(false);
 
   const caraActiva = carasDe(documento)[indice];
   const rutaActiva = caraActiva?.path;
@@ -77,12 +81,23 @@ const DocumentViewer = ({
     }
   };
 
-  const descargar = () => {
-    if (!disponible) return;
-    const a = document.createElement('a');
-    a.href = src;
-    a.download = titulo;
-    a.click();
+  const puedeDescargar = disponible && !esperandoFirma;
+
+  const descargar = async () => {
+    if (!puedeDescargar || descargando) return;
+    setDescargando(true);
+    try {
+      await descargarArchivo(src, {
+        titulo,
+        prefijo: documento.prefijoArchivo,
+        nombreOriginal: cara?.raw?.name,
+        tipo: cara?.raw?.type,
+      });
+    } catch {
+      toast.error('No se pudo descargar el archivo. Vuelve a intentarlo.');
+    } finally {
+      setDescargando(false);
+    }
   };
 
   return (
@@ -100,14 +115,28 @@ const DocumentViewer = ({
         <div className="doc-viewer-header">
           <h3>{titulo}</h3>
           <div className="doc-viewer-acciones">
+            {puedeDescargar && (
+              <button
+                type="button"
+                className="doc-viewer-bajar"
+                onClick={descargar}
+                disabled={descargando}
+                title="Guardar este archivo en el equipo"
+                aria-label="Descargar"
+              >
+                {descargando ? <Loader size={15} className="animate-spin" /> : <Download size={15} />}
+                <span className="doc-viewer-texto">Descargar</span>
+              </button>
+            )}
             {puedeEliminar && !confirmando && (
               <button
                 type="button"
                 className="doc-viewer-eliminar"
                 onClick={() => setConfirmando(true)}
                 title="Quitar este archivo, por ejemplo si se subió por error"
+                aria-label="Eliminar"
               >
-                <Trash2 size={15} /> Eliminar
+                <Trash2 size={15} /> <span className="doc-viewer-texto">Eliminar</span>
               </button>
             )}
             <button type="button" className="close-btn-inline" onClick={onClose} title="Cerrar">
@@ -172,12 +201,12 @@ const DocumentViewer = ({
             <div className="doc-viewer-pdf">
               <FileText size={72} />
               <h3>Archivo PDF</h3>
-              <button type="button" className="doc-viewer-descargar" onClick={descargar}>
+              <button type="button" className="doc-viewer-descargar" onClick={descargar} disabled={descargando}>
                 <Download size={20} /> Descargar para visualizar
               </button>
             </div>
           ) : (
-            <img src={src} alt={titulo} className="doc-image" />
+            <ImagenConZoom key={src} src={src} alt={titulo} />
           )}
         </div>
 
