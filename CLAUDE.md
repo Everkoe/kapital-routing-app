@@ -208,6 +208,8 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   campo lo elegía él y aprobar escribía en su perfil cualquier clave, también sus revisiones, el CAMO o el
   estado. Pedir otro campo da 400, el valor tiene tope de 300 caracteres, y una solicitud de antes con un
   campo no permitido se puede rechazar pero no aprobar. Si se añade un dato a «Mi perfil», va también ahí.
+  **Desplegado en producción el 2026-10-01** (merge `96f757c`, PR #27, sin migraciones), con el CAMO por
+  hojas, la «Ficha de Conductor», el soltar por cara y la marca de sesión.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
