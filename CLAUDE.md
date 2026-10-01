@@ -182,6 +182,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
 - **El CAMO lo sube solo Administración** (desde el 2026-09-30, pedido del usuario): el Certificado de
   Aptitud Médico Ocupacional que emite la clínica, en la revisión de documentos de la ficha y de Accesos.
+  **Son dos hojas, cada una en su casilla** (`TIPO_DOS_HOJAS`: la hoja 1 en `camo` y la 2 en
+  `camoReverso`, sin archivo «con las dos juntas», a petición del usuario): lo que se suelta, se pega o se
+  elige en una hoja va a esa hoja, sea foto o PDF.
   En el catálogo va con `soloAdministracion` y en el backend en `_DOCUMENTOS_DE_ADMINISTRACION` (una
   prueba compara las dos listas). **No se pide en el alta ni sale en las pantallas del conductor**, el
   servidor no se lo acepta a él (403 por el rol de la sesión, no por `uploaded_by`, que lo declara quien
@@ -190,7 +193,21 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `_perfil_del_alta`: conserva el CAMO y **ya no acepta `revision_docs`**, con el que un conductor podía
   aprobarse sus propios documentos llamando al API. En la misma tanda, el «Comprobante de domicilio» pasó a
   llamarse **«Declaración jurada de domicilio»**; la clave sigue siendo `comprobanteDomicilio`, que es con
-  la que están guardados los archivos ya subidos.
+  la que están guardados los archivos ya subidos. **Desplegado en producción el 2026-09-30** (merge
+  `6824215`, PR #26, sin migraciones): el CAMO y el nombre nuevo están en el paquete servido, y sin sesión
+  subir, revisar, quitar documentos y el alta responden 401.
+- **El «Récord de Conductor» se llama «Ficha de Conductor»** (2026-10-01, pedido del usuario; la clave sigue
+  siendo `recordConductor`). Y **con la fila de «Subir» abierta, cada sitio recibe lo suyo**: lo soltado en
+  la fila va a «Completo», en el botón de delante a delante y en el de detrás a detrás. Para eso las zonas de
+  soltar (`DocumentDropZone`) pueden ir una dentro de otra: manda la más interior, sus eventos no suben a la
+  de fuera y un Ctrl+V lo recoge solo la más interior bajo el cursor (`zonaMasInterior`, por `:hover`).
+  Sin eso, soltar en un botón subía el archivo dos veces. Una cara bloqueada por la imagen completa avisa en
+  vez de subir.
+- **Un conductor solo puede pedir que se le cambie lo que le ofrece «Mi perfil»** (desde el 2026-10-01,
+  `_CAMPOS_SOLICITABLES`, con una prueba que la compara con `modeloPerfil.js` y `DatosConductor.jsx`): el
+  campo lo elegía él y aprobar escribía en su perfil cualquier clave, también sus revisiones, el CAMO o el
+  estado. Pedir otro campo da 400, el valor tiene tope de 300 caracteres, y una solicitud de antes con un
+  campo no permitido se puede rechazar pero no aprobar. Si se añade un dato a «Mi perfil», va también ahí.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -574,6 +591,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   desactivará nada. Una revocación es inmediata en la instancia que la hace y tarda como mucho
   `DB_CACHE_TTL_SECONDS` (45 s) en las demás, igual que antes. Si la tabla no responde, se devuelve **503 y
   nunca 401**: una caída no puede echar a todo el mundo ni dejar entrar a nadie.
+  **El navegador no guarda a la persona, solo que hay sesión** (desde el 2026-10-01,
+  [frontend/src/utils/marcaDeSesion.js](frontend/src/utils/marcaDeSesion.js)): la marca `kapital_sesion`
+  decide si al abrir se espera a `/api/auth/me` («Validando sesión...») o se enseña el login. Antes
+  `kapital_user` guardaba el usuario entero —el de un conductor con su `perfil_conductor`: documento,
+  dirección, teléfonos, nacimiento— y nada lo pintaba: la aplicación espera siempre a `/api/auth/me` y
+  al perfil. El `kapital_user` que quede cuenta como marca y se borra al validar o al cerrar sesión. **No
+  volver a escribir el usuario en `localStorage`**: los cambios del perfil viven en memoria.
   Para comprobar el almacén contra la base real: `scripts/probar_sesiones.py`. **Desplegado en producción
   el 2026-09-27** (merge `bee7f21`, junto con la escritura por diferencias, los endpoints cerrados y el
   tope de intentos); `migrar_sesiones.py --aplicar` no encontró sesiones abiertas en el índice viejo.

@@ -1962,6 +1962,39 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         await self._resolver("telefonoDirecto", "900000000", accion="reject")
         self.assertEqual(backend.conductores_db["K-027"]["telefono"], "922551637")
 
+    async def test_a_request_for_a_field_the_profile_does_not_offer_cannot_be_approved(self):
+        # Una solicitud podía nombrar cualquier campo del perfil —sus revisiones,
+        # el CAMO, el estado— y aprobarla lo escribía. Las que ya estén
+        # pendientes se pueden rechazar, no aprobar.
+        conductor = self._unidad_con_conductor()
+        for campo in ("revision_docs", "camo", "estado"):
+            with self.assertRaises(HTTPException) as caught:
+                await self._resolver(campo, "x")
+            self.assertEqual(caught.exception.status_code, 400, campo)
+            self.assertNotEqual(conductor["perfil_conductor"].get(campo), "x", campo)
+            self.assertEqual(conductor["perfil_conductor"]["solicitudes_cambio"][campo]["status"], "pendiente")
+        await self._resolver("camo", "x", accion="reject")
+        self.assertEqual(conductor["perfil_conductor"]["solicitudes_cambio"]["camo"]["status"], "rechazado")
+        self.assertNotIn("camo", conductor["perfil_conductor"])
+
+    def test_the_requestable_fields_are_the_ones_the_profile_offers(self):
+        """Si la pantalla ofrece un dato que el servidor no admite, la solicitud daría 400."""
+        perfil = Path(__file__).resolve().parents[1] / "src" / "perfil"
+        import re
+        claves = set()
+        modelo = (perfil / "modeloPerfil.js").read_text(encoding="utf-8")
+        for base, por_vehiculo in re.findall(r"clave: [`']([A-Za-z]+)(\$\{n\})?[`']", modelo):
+            claves.add(base)
+            if por_vehiculo:
+                claves.add(f"{base}2")  # el segundo vehículo
+        # Y lo que se pide sin formulario, como habilitar el segundo vehículo.
+        pantalla = (perfil / "DatosConductor.jsx").read_text(encoding="utf-8")
+        claves.update(re.findall(r"onSolicitarCambio\('([A-Za-z0-9_]+)'", pantalla))
+        self.assertIn("placa2", claves)
+        self.assertIn("vehiculo2_habilitado", claves)
+        # El nombre no lo ofrece la pantalla: puede quedar alguna solicitud de antes.
+        self.assertEqual(claves | {"nombres"}, set(backend._CAMPOS_SOLICITABLES))
+
     async def test_export_never_writes_a_formula(self):
         # Buena parte de estos datos los teclea el conductor en su alta: un «=»
         # delante no puede convertirse en una fórmula que se ejecute al abrir.
@@ -4174,19 +4207,45 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             patch.object(backend, "_load_compat_users", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
         ):
-            propio = await self._llamar(
-                "POST", "/api/conductor/resubmit-docs", token_chofer,
-                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
-            self.assertEqual(propio.status_code, 403, "declararse admin no basta")
+            # Tampoco por hojas: la segunda y la de las dos juntas.
+            for campo in ("camo", "camoReverso", "camoCompleto"):
+                propio = await self._llamar(
+                    "POST", "/api/conductor/resubmit-docs", token_chofer,
+                    json={"email": "chofer@k.com", "docs": {campo: camo}, "uploaded_by": "admin"})
+                self.assertEqual(propio.status_code, 403, f"declararse admin no basta ({campo})")
             guardar.assert_not_awaited()
             self.assertNotIn("camo", chofer["perfil_conductor"])
 
             de_admin = await self._llamar(
                 "POST", "/api/conductor/resubmit-docs", token_admin,
-                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
+                json={"email": "chofer@k.com", "docs": {"camo": camo, "camoReverso": camo},
+                      "uploaded_by": "admin"})
         self.assertEqual(de_admin.status_code, 200, de_admin.text)
         self.assertEqual(chofer["perfil_conductor"]["camo"], camo)
+        self.assertEqual(chofer["perfil_conductor"]["camoReverso"], camo)
         self.assertEqual(backend.notifications_db, [], "no hay nada que revisar")
+
+    async def test_a_driver_only_requests_the_fields_the_profile_offers(self):
+        """El campo lo elegía el conductor: podía pedir sus revisiones, el CAMO o su estado."""
+        backend.AUTH_ENFORCED = True
+        chofer, token = await self._sesion("chofer@k.com", rol="Conductor", perfil_conductor={})
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+            patch.object(backend.ws_manager, "broadcast_to_role", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            pedir = lambda campo, valor="x": self._llamar(  # noqa: E731
+                "POST", "/api/conductor/request-update", token,
+                json={"email": "chofer@k.com", "field": campo, "new_value": valor})
+            for campo in ("revision_docs", "camo", "estado", "numDoc", "unidad_id", "solicitudes_cambio"):
+                self.assertEqual((await pedir(campo)).status_code, 400, campo)
+            self.assertEqual((await pedir("direccion", "x" * 1000)).status_code, 400, "sin límite de largo")
+            guardar.assert_not_awaited()
+            for campo in ("telefonoDirecto", "placa2"):
+                self.assertEqual((await pedir(campo, "ABC-123")).status_code, 200, campo)
+        self.assertEqual(set(chofer["perfil_conductor"]["solicitudes_cambio"]), {"telefonoDirecto", "placa2"})
 
     async def test_the_onboarding_never_writes_what_administration_decides(self):
         """El alta reescribe el perfil entero con lo que manda el conductor.
@@ -4339,7 +4398,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
                 ("POST", "/api/conductor/resubmit-docs",
                  {"email": "12345678", "docs": {"dniScaneado": "falso.pdf"}}),
                 ("POST", "/api/conductor/request-update",
-                 {"email": "12345678", "field": "telefono", "new_value": "1"}),
+                 {"email": "12345678", "field": "telefonoDirecto", "new_value": "1"}),
                 ("PUT", "/api/conductor/correo",
                  {"identificador": "12345678", "correo": "atacante@evil.com"}),
                 ("POST", "/api/driver/onboarding",
@@ -5273,13 +5332,17 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
         otra_sede = {"existe": True, "rutas": [{"conductor": "K001", "turno": "06:00", "modalidad": "RECOJO",
                                                 "sede": "OTRA", "agentes": [{"id": "1"}]}]}
+        # «Hoy» fijo: con la fecha del reloj, la prueba caducó el 1 de octubre,
+        # cuando el 30 de septiembre pasó a ser un día ya ejecutado.
         with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 30)),
             patch.object(backend, "_cargar_flota", new=AsyncMock()),
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={"existe": False})),
         ):
             sin_plan = await self._llamar("POST", "/api/programador/plan/proponer", token,
                                           json={"fecha": "2026-09-30"})
         with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 30)),
             patch.object(backend, "_cargar_flota", new=AsyncMock()),
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=otra_sede)),
         ):

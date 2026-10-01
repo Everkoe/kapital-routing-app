@@ -22,6 +22,10 @@
 
 export const TIPO_TARJETA = 'tarjeta';
 export const TIPO_PAPEL = 'papel';
+// Un certificado de dos hojas (el CAMO): la hoja 1 en el campo y la hoja 2 en
+// su `Reverso`, como las caras de una tarjeta, pero sin archivo con las dos
+// juntas: cada hoja se sube en la suya (pedido del usuario).
+export const TIPO_DOS_HOJAS = 'dosHojas';
 
 export const DUENO_CONDUCTOR = 'conductor';
 export const DUENO_VEHICULO = 'vehiculo';
@@ -50,6 +54,30 @@ export const CARA_DELANTE = 'Delante';
 export const CARA_DETRAS = 'Detrás';
 export const CARA_COMPLETO = 'Completo';
 
+/**
+ * Cómo se llaman las caras y qué se dice de ellas, según el documento: un
+ * carnet tiene delante y detrás; un certificado, hojas.
+ */
+const TEXTOS_DE_CARAS = {
+  [TIPO_TARJETA]: {
+    completo: CARA_COMPLETO,
+    delante: CARA_DELANTE,
+    detras: CARA_DETRAS,
+    enUno: 'Documento completo en un solo archivo',
+    separadas: 'Delante y detrás subidos',
+    pistaCompleto: 'ambas caras en una',
+    bloqueada: 'Ya está la imagen completa: no hace falta por caras.',
+  },
+  [TIPO_DOS_HOJAS]: {
+    delante: 'Hoja 1',
+    detras: 'Hoja 2',
+    separadas: 'Hoja 1 y hoja 2 subidas',
+  },
+};
+
+/** Los textos de las caras de un documento, o `null` si es de una sola. */
+export const textosDeCaras = (documento) => TEXTOS_DE_CARAS[documento?.tipo] || null;
+
 export const DOCUMENTOS_CONDUCTOR = [
   // --- Personales ---
   { key: 'dniScaneado', label: 'DNI Escaneado', tipo: TIPO_TARJETA, dueno: DUENO_CONDUCTOR },
@@ -64,7 +92,9 @@ export const DOCUMENTOS_CONDUCTOR = [
   // La clave sigue siendo `comprobanteDomicilio` aunque el documento ya no se
   // llame así: con ella están guardados los archivos que ya se subieron.
   { key: 'comprobanteDomicilio', label: 'Declaración Jurada de Domicilio', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
-  { key: 'recordConductor', label: 'Récord de Conductor', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
+  // Como el domicilio: el nombre cambió (pedido del usuario, 2026-10-01) y la
+  // clave no, porque con ella están guardados los archivos ya subidos.
+  { key: 'recordConductor', label: 'Ficha de Conductor', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'antecedentesPoliciales', label: 'Antecedentes Policiales', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'cv', label: 'Currículum Vitae', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'certificadosTrabajo', label: 'Certificados de Trabajo', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },
@@ -73,12 +103,13 @@ export const DOCUMENTOS_CONDUCTOR = [
   // Lo sube Administración: no se pide en el alta ni sale en las pantallas
   // del conductor, y el servidor no se lo acepta a él
   // (`_DOCUMENTOS_DE_ADMINISTRACION`). Tampoco se aprueba ni se rechaza: lo
-  // pone quien lo revisaría.
+  // pone quien lo revisaría. La clínica entrega dos hojas, y cada una se sube
+  // en la suya, en foto o en PDF.
   {
     key: 'camo',
     label: 'CAMO',
     detalle: 'Certificado de Aptitud Médico Ocupacional',
-    tipo: TIPO_PAPEL,
+    tipo: TIPO_DOS_HOJAS,
     dueno: DUENO_CONDUCTOR,
     soloAdministracion: true,
   },
@@ -98,8 +129,8 @@ export const claveReverso = (key) => `${key}${SUFIJO_REVERSO}`;
 /** Campo hermano donde vive el archivo con ambas caras juntas. */
 export const claveCompleto = (key) => `${key}${SUFIJO_COMPLETO}`;
 
-/** Un documento de dos caras admite reverso; uno de papel, no. */
-export const admiteReverso = (documento) => documento?.tipo === TIPO_TARJETA;
+/** Un documento de dos caras (o de dos hojas) admite reverso; uno de papel, no. */
+export const admiteReverso = (documento) => Boolean(textosDeCaras(documento));
 
 /**
  * Vencimiento de la unidad que corresponde a cada documento.
@@ -148,24 +179,17 @@ export const documentosQueEntregaElConductor = () =>
 
 /** Todas las claves que puede ocupar un documento, reversos incluidos. */
 export const todasLasClaves = () =>
-  DOCUMENTOS_CONDUCTOR.flatMap((documento) =>
-    admiteReverso(documento)
-      ? [documento.key, claveReverso(documento.key), claveCompleto(documento.key)]
-      : [documento.key],
-  );
+  DOCUMENTOS_CONDUCTOR.flatMap((documento) => carasDeDocumento(documento).map((cara) => cara.campo));
 
 /**
  * Etiqueta de una cara concreta. El anverso solo se nombra como tal cuando el
  * documento tiene dos: para un documento de papel, decir «anverso» sobraría.
  */
-const NOMBRE_DE_CARA = {
-  reverso: CARA_DETRAS,
-  completo: CARA_COMPLETO,
-};
-
 export const etiquetaCara = (documento, cara) => {
-  if (!admiteReverso(documento)) return documento.label;
-  return `${documento.label} · ${NOMBRE_DE_CARA[cara] || CARA_DELANTE}`;
+  const textos = textosDeCaras(documento);
+  if (!textos) return documento.label;
+  const nombre = { reverso: textos.detras, completo: textos.completo }[cara] || textos.delante;
+  return `${documento.label} · ${nombre}`;
 };
 
 /**
@@ -176,16 +200,22 @@ export const etiquetaCara = (documento, cara) => {
  * imagen completa en «Delante». Las caras por separado quedan para quien las
  * tiene en dos fotos.
  */
-export const carasDeDocumento = (documento) =>
-  admiteReverso(documento)
-    ? [
-        { campo: claveCompleto(documento.key), nombre: CARA_COMPLETO, opcional: true },
-        { campo: documento.key, nombre: CARA_DELANTE },
-        { campo: claveReverso(documento.key), nombre: CARA_DETRAS, opcional: true },
-      ]
-    : [{ campo: documento.key, nombre: documento.label }];
+export const carasDeDocumento = (documento) => {
+  const textos = textosDeCaras(documento);
+  if (!textos) return [{ campo: documento.key, nombre: documento.label }];
+  const sueltas = [
+    { campo: documento.key, nombre: textos.delante },
+    { campo: claveReverso(documento.key), nombre: textos.detras, opcional: true },
+  ];
+  // Un documento de dos hojas no tiene «las dos juntas»: cada una en la suya.
+  return textos.completo
+    ? [{ campo: claveCompleto(documento.key), nombre: textos.completo, opcional: true }, ...sueltas]
+    : sueltas;
+};
 
-const esCompleto = (cara) => String(cara?.campo || '').endsWith(SUFIJO_COMPLETO);
+/** Si la cara es la del archivo con todo junto. Por el campo: el nombre cambia con el documento. */
+export const esCaraCompleta = (cara) => String(cara?.campo || '').endsWith(SUFIJO_COMPLETO);
+const esCompleto = esCaraCompleta;
 
 /**
  * Si una cara no se puede subir: delante y detrás, mientras haya una imagen

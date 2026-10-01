@@ -11,15 +11,35 @@ import { archivoDePortapapeles, pegadoEnCampoDeTexto } from '../utils/documentoA
  * El contador de profundidad existe porque `dragenter` y `dragleave` también se
  * disparan al pasar sobre los hijos de la tarjeta: sin él, el resaltado
  * parpadearía al mover el cursor por encima del botón o del texto.
+ *
+ * Una zona puede ir dentro de otra (la fila de caras dentro de la tarjeta, y
+ * cada cara dentro de la fila): manda la más interior. Sus eventos no suben a
+ * la de fuera, así que el archivo no se sube dos veces ni se ilumina la que no
+ * lo va a recibir, y un Ctrl+V lo recoge solo la más interior bajo el cursor.
  */
 
 const tieneArchivos = (event) =>
   Array.from(event.dataTransfer?.types || []).includes('Files');
 
-const DocumentDropZone = ({ onFile, disabled = false, className = '', children, label }) => {
+/** La zona más interior que tiene el cursor encima: las de fuera también están en `:hover`. */
+const zonaMasInterior = () => {
+  const bajoElCursor = document.querySelectorAll('[data-zona-documento]:hover');
+  return bajoElCursor[bajoElCursor.length - 1] || null;
+};
+
+const DocumentDropZone = ({
+  onFile,
+  disabled = false,
+  className = '',
+  children,
+  label,
+  // Sin el «Ctrl+V para pegar» de la esquina: en un botón no cabe.
+  sinPista = false,
+}) => {
   const [activa, setActiva] = useState(false);
   const [bajoCursor, setBajoCursor] = useState(false);
   const profundidad = useRef(0);
+  const elemento = useRef(null);
 
   // El callback llega como función nueva en cada render. Guardarlo en una
   // referencia evita que el listener de pegado se desuscriba y resuscriba
@@ -37,6 +57,7 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
   const handleDragEnter = useCallback((event) => {
     if (disabled || !tieneArchivos(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     profundidad.current += 1;
     setActiva(true);
   }, [disabled]);
@@ -45,12 +66,14 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
     if (disabled || !tieneArchivos(event)) return;
     // Sin `preventDefault` en `dragover` el navegador nunca emite `drop`.
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
   }, [disabled]);
 
   const handleDragLeave = useCallback((event) => {
     if (disabled) return;
     event.preventDefault();
+    event.stopPropagation();
     profundidad.current = Math.max(profundidad.current - 1, 0);
     if (profundidad.current === 0) setActiva(false);
   }, [disabled]);
@@ -58,6 +81,7 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
   const handleDrop = useCallback((event) => {
     if (disabled || !tieneArchivos(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     salir();
     // Solo el primero: cada tarjeta representa un documento concreto, y aceptar
     // varios obligaría a adivinar cuál quería el usuario.
@@ -68,9 +92,9 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
   /**
    * Pegar con Ctrl+V sobre la tarjeta que tiene el cursor encima.
    *
-   * El listener se suscribe solo mientras el cursor está sobre esta tarjeta, de
-   * modo que nunca hay más de uno activo y no hace falta un registro global que
-   * decida a quién le toca el pegado.
+   * El listener se suscribe solo mientras el cursor está sobre esta tarjeta.
+   * Con zonas anidadas hay uno por cada zona bajo el cursor, y solo actúa el de
+   * la más interior (`zonaMasInterior`).
    */
   useEffect(() => {
     if (!bajoCursor || disabled) return undefined;
@@ -79,6 +103,9 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
       // Escribir en el aviso al conductor o en el padrón mientras el cursor
       // reposa sobre una tarjeta no debe convertirse en una subida.
       if (pegadoEnCampoDeTexto(event.target)) return;
+      // Con una zona dentro de otra, pega solo la de más adentro.
+      const interior = zonaMasInterior();
+      if (interior && interior !== elemento.current) return;
 
       const archivo = archivoDePortapapeles(event.clipboardData);
       if (!archivo) return;
@@ -93,6 +120,9 @@ const DocumentDropZone = ({ onFile, disabled = false, className = '', children, 
 
   return (
     <div
+      ref={elemento}
+      data-zona-documento=""
+      data-sin-pista={sinPista || undefined}
       className={`${className} doc-dropzone${activa ? ' doc-dropzone-activa' : ''}`.trim()}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}

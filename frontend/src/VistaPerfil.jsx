@@ -41,10 +41,9 @@ const VistaPerfil = ({ usuario, setUsuarioActual, onLogout }) => {
   const esConductor = usuario.rol === 'Conductor';
   const identificador = usuario.identifier || usuario.email || usuario.dni;
 
-  const recordar = (actualizado) => {
-    setUsuarioActual(actualizado);
-    localStorage.setItem('kapital_user', JSON.stringify(actualizado));
-  };
+  // Solo en memoria: el navegador ya no guarda a la persona, solo que hay
+  // sesión (`utils/marcaDeSesion.js`).
+  const recordar = (actualizado) => setUsuarioActual(actualizado);
 
   /**
    * Guarda en el servidor y devuelve `{ ok, error }`. `ademas` es lo que el

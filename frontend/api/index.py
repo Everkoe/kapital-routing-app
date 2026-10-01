@@ -5781,12 +5781,35 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
 
     return {"message": "Documentos actualizados exitosamente", "estado": user.get("estado"), "user": user}
 
+# Lo que un conductor puede pedir que se le cambie: lo que le ofrece «Mi perfil»
+# (`CAMPOS_PERSONALES` y los de cada vehículo en `src/perfil/modeloPerfil.js`;
+# una prueba compara las dos listas). El campo lo elegía él, y aprobar escribía
+# en su perfil cualquier clave: sus revisiones, el CAMO o el estado.
+_CAMPOS_SOLICITABLES = frozenset({
+    "fechaNacimiento", "direccion", "telefonoDirecto", "telefonoEmergencia",
+    *(f"{campo}{vehiculo}" for vehiculo in ("", "2") for campo in (
+        "vehiculoMarca", "vehiculoModelo", "vehiculoAnio", "vehiculoColor", "placa", "capacidadVehiculo",
+    )),
+    # Habilitar el segundo vehículo, que también se pide desde «Mi perfil».
+    "vehiculo2_habilitado",
+    # El nombre lo cambia hoy el propio conductor, pero puede quedar alguna
+    # solicitud de antes, y aprobarla lo lleva también a su unidad.
+    "nombres",
+})
+# Holgado para una dirección con su referencia; sin tope, cualquiera llenaba la fila compartida.
+_LARGO_MAXIMO_SOLICITUD = 300
+
+
 @app.post("/api/conductor/request-update")
 async def request_data_update(payload: UpdateDataRequestPayload, session_token: SessionCookie = None):
     actor = await require_session_owner(
         session_token, actor_fields=_IDENTITY_FIELDS, requested=payload.email,
         resource="los datos de ese conductor",
     )
+    if payload.field not in _CAMPOS_SOLICITABLES:
+        raise HTTPException(status_code=400, detail="Ese dato no se cambia por solicitud.")
+    if len(payload.new_value) > _LARGO_MAXIMO_SOLICITUD:
+        raise HTTPException(status_code=400, detail="El valor es demasiado largo.")
     clave_actor = _clave_de_cuenta(actor) if actor else None
     user = await _load_compat_user(payload.email)
     if not user or user.get("rol") != "Conductor":
@@ -5849,6 +5872,9 @@ async def resolve_data_update(payload: ResolveDataRequestPayload, session_token:
         
     new_value = solicitudes[payload.field]["new_value"]
     unidad_actualizada = None
+    if payload.action == "approve" and payload.field not in _CAMPOS_SOLICITABLES:
+        # Solicitudes de antes del límite: se pueden rechazar, no aprobar.
+        raise HTTPException(status_code=400, detail="Ese dato no se cambia por solicitud: recházala.")
     if payload.action == "approve":
         new_value = _valor_aprobable(payload.field, new_value)
     # Si el guardado falla, nada de lo aprobado se queda en memoria: el

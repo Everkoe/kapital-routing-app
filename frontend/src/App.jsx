@@ -7,6 +7,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
 import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
 import { olvidarUrlsFirmadas } from './utils/documentoStorage';
+import { haySesionRecordada, olvidarSesion, recordarSesion } from './utils/marcaDeSesion';
 import './App.css';
 
 const ADMIN_WS_STATE_EVENT = 'kapital:admin-ws-state';
@@ -838,14 +839,6 @@ const DashboardView = ({ routes, setRoutes, usuarioActual, sessionSaved, onSaveS
 
 
 // --- Componente Raíz ---
-const clearStoredUser = () => {
-  try {
-    localStorage.removeItem('kapital_user');
-  } catch {
-    // Storage can be unavailable in private browsing; the in-memory session
-    // remains unauthenticated in that case.
-  }
-};
 const SESSION_VALIDATION_TIMEOUT_MS = 10000;
 
 function App() {
@@ -853,13 +846,9 @@ function App() {
 
   const [usuarioActual, setUsuarioActual] = useState(null);
   const profileRefreshRef = React.useRef(0);
-  const [isRestoringSession, setIsRestoringSession] = useState(() => {
-    try {
-      return Boolean(localStorage.getItem('kapital_user'));
-    } catch {
-      return false;
-    }
-  });
+  // Con la marca de sesión se espera a /api/auth/me en vez de pintar el login
+  // y quitarlo un instante después (ver `utils/marcaDeSesion.js`).
+  const [isRestoringSession, setIsRestoringSession] = useState(() => haySesionRecordada());
   const [pendingPasswordChangeUser, setPendingPasswordChangeUser] = useState(null);
 
   const [vistaActual, setVistaActual] = useState('dashboard');
@@ -923,7 +912,7 @@ function App() {
   useEffect(() => {
     setSessionExpiredHandler(() => {
       profileRefreshRef.current += 1;
-      clearStoredUser();
+      olvidarSesion();
       setUsuarioActual(null);
       toast.error('Tu sesión expiró. Vuelve a iniciar sesión.');
     });
@@ -936,39 +925,15 @@ function App() {
     const controller = new AbortController();
 
     const restoreSession = async () => {
-      let parsedUser;
-
-      try {
-        const userFromStorage = localStorage.getItem('kapital_user');
-        if (!userFromStorage) {
-          if (!cancelled) setIsRestoringSession(false);
-          return;
-        }
-        parsedUser = JSON.parse(userFromStorage);
-      } catch (err) {
-        clearStoredUser();
-        if (!cancelled) {
-          setUsuarioActual(null);
-          setIsRestoringSession(false);
-        }
-        console.warn('No se pudo leer la sesión almacenada:', err);
-        return;
-      }
-
-      const userKey = parsedUser?.identifier || parsedUser?.email;
-      if (!userKey) {
-        clearStoredUser();
-        if (!cancelled) {
-          setUsuarioActual(null);
-          setIsRestoringSession(false);
-        }
+      if (!haySesionRecordada()) {
+        if (!cancelled) setIsRestoringSession(false);
         return;
       }
 
       try {
-        // La identidad la decide el servidor a partir de la cookie, no
-        // localStorage, que aquí solo indica que este navegador ya inició
-        // sesión alguna vez (la cookie es HttpOnly y JS no puede verla).
+        // La identidad la decide el servidor a partir de la cookie. La marca
+        // solo dice que este navegador inició sesión alguna vez (la cookie es
+        // HttpOnly y JS no puede verla).
         timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
         const identity = await apiFetch('/api/auth/me', { signal: controller.signal });
 
@@ -982,6 +947,11 @@ function App() {
         // continúa con la identidad del servidor en lugar de expulsar.
         const profileKey = identity.identifier || identity.email;
         let profile = null;
+        // Plazo propio. Compartido con /api/auth/me, tras un arranque en frío
+        // lento le quedaban segundos, y si no llegaba lo tapaba el perfil
+        // viejo que guardaba el navegador, que ya no se guarda.
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
         try {
           profile = await apiFetch(`/api/user/profile?email=${encodeURIComponent(profileKey)}`, {
             signal: controller.signal,
@@ -993,14 +963,14 @@ function App() {
         }
 
         if (cancelled) return;
-        const freshUser = { ...parsedUser, ...identity, ...(profile || {}) };
-        localStorage.setItem('kapital_user', JSON.stringify(freshUser));
+        const freshUser = { ...identity, ...(profile || {}) };
+        recordarSesion(freshUser);
         setUsuarioActual(freshUser);
       } catch (err) {
         if (cancelled) return;
-        // A cached user is not a valid session. Remove it so a failed backend
-        // validation cannot leave the app in a stale authenticated state.
-        clearStoredUser();
+        // Sin sesión válida la marca sobra: se borra para que la próxima vez
+        // se vaya directo al login.
+        olvidarSesion();
         setUsuarioActual(null);
         console.warn('Error validando la sesión almacenada:', err);
       } finally {
@@ -1021,7 +991,7 @@ function App() {
     if (userData.needs_password_change) {
       setPendingPasswordChangeUser(userData);
     } else {
-      localStorage.setItem('kapital_user', JSON.stringify(userData));
+      recordarSesion(userData);
       setUsuarioActual(userData);
       // Sin esto, la vista de la sesión anterior sobrevive al cambio de cuenta.
       setVistaActual('dashboard');
@@ -1034,7 +1004,7 @@ function App() {
       if (userKey) {
         const invalidateSession = () => {
           if (refreshRequestId !== profileRefreshRef.current) return;
-          clearStoredUser();
+          olvidarSesion();
           setUsuarioActual(null);
         };
         const controller = new AbortController();
@@ -1051,9 +1021,7 @@ function App() {
           })
           .then(data => {
             if (data && refreshRequestId === profileRefreshRef.current) {
-              const freshUser = { ...userData, ...data };
-              localStorage.setItem('kapital_user', JSON.stringify(freshUser));
-              setUsuarioActual(freshUser);
+              setUsuarioActual({ ...userData, ...data });
             }
           })
           .catch(err => {
@@ -1072,7 +1040,7 @@ function App() {
     // Se revoca en servidor sin esperar: el estado local se limpia igualmente,
     // porque dejar al usuario en la app si el backend no contesta sería peor.
     logoutSession();
-    clearStoredUser();
+    olvidarSesion();
     // Una URL firmada es un permiso con fecha: si en este mismo navegador
     // entra otra persona, no debe heredar las de la anterior.
     olvidarUrlsFirmadas();
