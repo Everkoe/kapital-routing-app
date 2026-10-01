@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { CheckCircle, Clock, Eye, Upload, XCircle } from 'lucide-react';
 import DocumentDropZone from './DocumentDropZone';
 import {
-  CARA_COMPLETO,
+  TIPO_DOS_HOJAS,
   admiteReverso,
   caraBloqueada,
   caraDestinoParaArrastre,
   carasDeDocumento,
+  esCaraCompleta,
   esDeAdministracion,
+  textosDeCaras,
 } from '../constants/documentosConductor';
 
 /**
@@ -22,6 +24,10 @@ import {
  * Arrastrar o pegar sobre la tarjeta va a la imagen completa, salvo que ya se
  * haya empezado por caras sueltas (`caraDestinoParaArrastre`). Con la imagen
  * completa subida, delante y detrás quedan bloqueadas.
+ *
+ * Un documento de dos hojas (el CAMO) enseña una casilla por hoja, y cada una
+ * recibe lo que se le suelta, se le pega o se elige con su botón: lo de la
+ * hoja 1 va a la hoja 1 y lo de la hoja 2 a la hoja 2, sea foto o PDF.
  *
  * Lo que sube Administración (el CAMO) no se aprueba ni se rechaza: lo pone
  * quien lo revisaría, y rechazarlo le pediría al conductor algo que no puede
@@ -66,13 +72,13 @@ const estadoDocumento = (caras, revisiones) => {
  * Un archivo con ambas caras juntas basta por sí solo: no tiene sentido pedir
  * el reverso a quien ya escaneó el documento entero en una hoja.
  */
-const resumenDeCaras = (caras) => {
-  const completo = caras.find((cara) => cara.nombre === CARA_COMPLETO)?.tieneArchivo;
-  if (completo) return 'Documento completo en un solo archivo';
+const resumenDeCaras = (caras, textos) => {
+  const completo = caras.find(esCaraCompleta)?.tieneArchivo;
+  if (completo) return textos.enUno;
 
-  const porSeparado = caras.filter((cara) => cara.nombre !== CARA_COMPLETO);
+  const porSeparado = caras.filter((cara) => !esCaraCompleta(cara));
   const faltan = porSeparado.filter((cara) => !cara.tieneArchivo);
-  if (faltan.length === 0) return 'Delante y detrás subidos';
+  if (faltan.length === 0) return textos.separadas;
 
   const subidas = porSeparado.filter((cara) => cara.tieneArchivo);
   return `Solo ${subidas.map((c) => c.nombre.toLowerCase()).join(' y ')} · falta ${faltan.map((c) => c.nombre.toLowerCase()).join(' y ')}`;
@@ -90,6 +96,8 @@ const DocumentReviewCard = ({
 }) => {
   const [subiendo, setSubiendo] = useState(false);
   const dosCaras = admiteReverso(documento);
+  const textos = textosDeCaras(documento);
+  const porHojas = documento.tipo === TIPO_DOS_HOJAS;
   const deAdministracion = esDeAdministracion(documento);
 
   const caras = carasDeDocumento(documento).map((cara) => ({
@@ -112,9 +120,10 @@ const DocumentReviewCard = ({
 
   return (
     <DocumentDropZone
-      className="review-doc-card"
+      className={`review-doc-card${porHojas ? ' doc-por-hojas' : ''}`}
       label={documento.label}
-      disabled={ocupado}
+      // Por hojas, lo recibe cada casilla: la tarjeta no adivina a cuál iba.
+      disabled={ocupado || porHojas}
       onFile={(file) => onUpload(caraParaArrastre, file)}
     >
       <div className="review-doc-header">
@@ -129,8 +138,36 @@ const DocumentReviewCard = ({
 
       {documento.detalle && <p className="doc-caras-resumen">{documento.detalle}</p>}
 
-      {dosCaras && conArchivo.length > 0 && (
-        <p className="doc-caras-resumen">{resumenDeCaras(caras)}</p>
+      {dosCaras && !porHojas && conArchivo.length > 0 && (
+        <p className="doc-caras-resumen">{resumenDeCaras(caras, textos)}</p>
+      )}
+
+      {porHojas && (
+        <div className="doc-hojas">
+          {caras.map((cara) => (
+            <DocumentDropZone
+              key={cara.campo}
+              className="doc-hoja"
+              label={`${documento.label} · ${cara.nombre}`}
+              disabled={Boolean(cargando?.[cara.campo])}
+              onFile={(file) => onUpload(cara.campo, file)}
+            >
+              <span className="doc-hoja-nombre">{cara.nombre}</span>
+              <span className={`rev-badge ${cara.tieneArchivo ? 'rev-ok' : 'rev-missing'}`}>
+                {cara.tieneArchivo ? <><CheckCircle size={12} /> Subida</> : 'Sin archivo'}
+              </span>
+              <label className="btn-view-doc doc-subir-label">
+                <Upload size={13} /> {cara.tieneArchivo ? 'Reemplazar' : 'Subir'}
+                <input
+                  type="file"
+                  accept={accept}
+                  style={{ display: 'none' }}
+                  onChange={(e) => onUpload(cara.campo, e.target.files[0])}
+                />
+              </label>
+            </DocumentDropZone>
+          ))}
+        </div>
       )}
 
       <div className="review-doc-actions">
@@ -161,7 +198,7 @@ const DocumentReviewCard = ({
           </button>
         )}
 
-        {dosCaras ? (
+        {porHojas ? null : dosCaras ? (
           <button
             type="button"
             className="btn-view-doc"
@@ -213,14 +250,14 @@ const DocumentReviewCard = ({
                 key={cara.campo}
                 className={`btn-view-doc doc-subir-label${bloqueada ? ' doc-cara-bloqueada' : ''}`}
                 aria-disabled={bloqueada}
-                title={bloqueada ? 'Ya está la imagen completa: no hace falta por caras.' : undefined}
+                title={bloqueada ? textos.bloqueada : undefined}
               >
                 <Upload size={13} />
                 {cara.tieneArchivo ? `Reemplazar ${cara.nombre.toLowerCase()}` : `Subir ${cara.nombre.toLowerCase()}`}
-                {cara.nombre === CARA_COMPLETO && !cara.tieneArchivo && (
-                  <span className="doc-cara-opcional">ambas caras en una</span>
+                {esCaraCompleta(cara) && !cara.tieneArchivo && (
+                  <span className="doc-cara-opcional">{textos.pistaCompleto}</span>
                 )}
-                {cara.opcional && cara.nombre !== CARA_COMPLETO && !cara.tieneArchivo && !bloqueada && (
+                {cara.opcional && !esCaraCompleta(cara) && !cara.tieneArchivo && !bloqueada && (
                   <span className="doc-cara-opcional">opcional</span>
                 )}
                 <input
@@ -244,7 +281,9 @@ const DocumentReviewCard = ({
           {deAdministracion
             ? 'Lo sube Administración; al conductor no se le pide.'
             : 'El conductor aún no ha subido este documento.'}
-          {' '}Arrastra el archivo aquí, pégalo con Ctrl+V o usa el botón.
+          {porHojas
+            ? ' Arrastra cada hoja a su casilla, pégala con Ctrl+V o usa su botón.'
+            : ' Arrastra el archivo aquí, pégalo con Ctrl+V o usa el botón.'}
         </p>
       )}
     </DocumentDropZone>

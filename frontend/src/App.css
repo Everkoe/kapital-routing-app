@@ -1400,6 +1400,31 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
  * reservar el hueco, el contenido daría un salto cada vez.
  */
 .review-doc-card.doc-dropzone { padding-bottom: 26px; }
+/* Por hojas, lo que se pega lo recibe cada casilla: la tarjeta no reserva franja. */
+.review-doc-card.doc-dropzone.doc-por-hojas { padding-bottom: 12px; }
+
+/* El CAMO: una casilla por hoja, y cada una recibe lo que se le suelta o pega. */
+.doc-hojas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.doc-hoja {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 24px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+}
+
+.doc-hoja-nombre {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
 .doc-dropzone[data-pegable]::after {
   content: 'Ctrl+V para pegar';

@@ -6,6 +6,7 @@ import {
   DUENO_VEHICULO,
   TIPO_PAPEL,
   TIPO_TARJETA,
+  TIPO_DOS_HOJAS,
   admiteReverso,
   CARA_COMPLETO,
   campoDeVencimiento,
@@ -20,6 +21,7 @@ import {
   documentosPorDueno,
   documentosQueEntregaElConductor,
   esDeAdministracion,
+  textosDeCaras,
   etiquetaCara,
   todasLasClaves,
 } from '../src/constants/documentosConductor.js';
@@ -41,12 +43,12 @@ test('un reverso nunca choca con la clave de otro documento', () => {
   }
 });
 
-test('solo los documentos de tarjeta admiten segunda cara', () => {
+test('solo las tarjetas y los de dos hojas admiten segunda cara', () => {
   const conReverso = DOCUMENTOS_CONDUCTOR.filter(admiteReverso).map((d) => d.key);
 
   assert.deepEqual(
     conReverso.sort(),
-    ['dniScaneado', 'licenciaConducir', 'lunasPolarizadas', 'tarjetaPropiedad'].sort(),
+    ['camo', 'dniScaneado', 'licenciaConducir', 'lunasPolarizadas', 'tarjetaPropiedad'].sort(),
   );
   for (const documento of DOCUMENTOS_CONDUCTOR) {
     if (documento.tipo === TIPO_PAPEL) {
@@ -74,7 +76,7 @@ test('conserva los campos que el wizard ya manejaba', () => {
 
 test('cada documento declara tipo y dueño válidos', () => {
   for (const documento of DOCUMENTOS_CONDUCTOR) {
-    assert.ok([TIPO_TARJETA, TIPO_PAPEL].includes(documento.tipo), documento.key);
+    assert.ok([TIPO_TARJETA, TIPO_PAPEL, TIPO_DOS_HOJAS].includes(documento.tipo), documento.key);
     assert.ok([DUENO_CONDUCTOR, DUENO_VEHICULO].includes(documento.dueno), documento.key);
     assert.ok(documento.label?.trim(), `${documento.key} sin etiqueta`);
   }
@@ -250,7 +252,7 @@ test('el CAMO lo sube Administración y al conductor no se le ofrece', () => {
   const camo = documentoPorClave('camo');
 
   assert.ok(camo, 'el documento existe');
-  assert.equal(camo.tipo, TIPO_PAPEL, 'una hoja, o un PDF con las que tenga');
+  assert.equal(camo.tipo, TIPO_DOS_HOJAS, 'dos hojas, cada una en su foto o su PDF');
   assert.equal(camo.dueno, DUENO_CONDUCTOR, 'va con los del conductor en la ficha');
   assert.equal(esDeAdministracion(camo), true);
   assert.match(camo.detalle, /Aptitud Médico Ocupacional/);
@@ -265,4 +267,28 @@ test('el resto de documentos los sigue entregando el conductor', () => {
   assert.equal(documentosQueEntregaElConductor().length, DOCUMENTOS_CONDUCTOR.length - 1);
   assert.equal(esDeAdministracion(documentoPorClave('dniScaneado')), false);
   assert.equal(esDeAdministracion(null), false);
+});
+
+test('el CAMO son dos hojas sueltas, cada una en su sitio', () => {
+  // Pedido del usuario: la clínica entrega dos hojas, y cada foto o PDF se
+  // sube en la suya. Sin «las dos juntas»: lo arrastrado a la hoja 1 va a la
+  // hoja 1, y lo de la hoja 2 a la hoja 2.
+  const camo = documentoPorClave('camo');
+  const caras = carasDeDocumento(camo);
+
+  assert.deepEqual(caras.map((c) => c.campo), ['camo', 'camoReverso']);
+  assert.deepEqual(caras.map((c) => c.nombre), ['Hoja 1', 'Hoja 2']);
+  assert.equal(etiquetaCara(camo, 'reverso'), 'CAMO · Hoja 2');
+  assert.equal(textosDeCaras(camo).separadas, 'Hoja 1 y hoja 2 subidas');
+  assert.equal(todasLasClaves().includes('camoCompleto'), false);
+  // Ninguna bloquea a la otra.
+  const llenas = caras.map((cara) => ({ ...cara, tieneArchivo: true }));
+  assert.equal(llenas.some((cara) => caraBloqueada(cara, llenas)), false);
+});
+
+test('un carnet sigue con delante, detrás y completo', () => {
+  const dni = documentoPorClave('dniScaneado');
+  assert.deepEqual(carasDeDocumento(dni).map((c) => c.nombre), [CARA_COMPLETO, 'Delante', 'Detrás']);
+  assert.equal(etiquetaCara(dni, 'reverso'), 'DNI Escaneado · Detrás');
+  assert.equal(textosDeCaras(documentoPorClave('cv')), null, 'un papel no tiene caras');
 });

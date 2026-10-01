@@ -182,6 +182,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
 - **El CAMO lo sube solo Administración** (desde el 2026-09-30, pedido del usuario): el Certificado de
   Aptitud Médico Ocupacional que emite la clínica, en la revisión de documentos de la ficha y de Accesos.
+  **Son dos hojas, cada una en su casilla** (`TIPO_DOS_HOJAS`: la hoja 1 en `camo` y la 2 en
+  `camoReverso`, sin archivo «con las dos juntas», a petición del usuario): lo que se suelta, se pega o se
+  elige en una hoja va a esa hoja, sea foto o PDF.
   En el catálogo va con `soloAdministracion` y en el backend en `_DOCUMENTOS_DE_ADMINISTRACION` (una
   prueba compara las dos listas). **No se pide en el alta ni sale en las pantallas del conductor**, el
   servidor no se lo acepta a él (403 por el rol de la sesión, no por `uploaded_by`, que lo declara quien

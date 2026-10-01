@@ -4174,18 +4174,22 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             patch.object(backend, "_load_compat_users", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
         ):
-            propio = await self._llamar(
-                "POST", "/api/conductor/resubmit-docs", token_chofer,
-                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
-            self.assertEqual(propio.status_code, 403, "declararse admin no basta")
+            # Tampoco por hojas: la segunda y la de las dos juntas.
+            for campo in ("camo", "camoReverso", "camoCompleto"):
+                propio = await self._llamar(
+                    "POST", "/api/conductor/resubmit-docs", token_chofer,
+                    json={"email": "chofer@k.com", "docs": {campo: camo}, "uploaded_by": "admin"})
+                self.assertEqual(propio.status_code, 403, f"declararse admin no basta ({campo})")
             guardar.assert_not_awaited()
             self.assertNotIn("camo", chofer["perfil_conductor"])
 
             de_admin = await self._llamar(
                 "POST", "/api/conductor/resubmit-docs", token_admin,
-                json={"email": "chofer@k.com", "docs": {"camo": camo}, "uploaded_by": "admin"})
+                json={"email": "chofer@k.com", "docs": {"camo": camo, "camoReverso": camo},
+                      "uploaded_by": "admin"})
         self.assertEqual(de_admin.status_code, 200, de_admin.text)
         self.assertEqual(chofer["perfil_conductor"]["camo"], camo)
+        self.assertEqual(chofer["perfil_conductor"]["camoReverso"], camo)
         self.assertEqual(backend.notifications_db, [], "no hay nada que revisar")
 
     async def test_the_onboarding_never_writes_what_administration_decides(self):
