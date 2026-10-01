@@ -13,27 +13,38 @@ test('las duraciones se leen en minutos y en horas', () => {
   assert.equal(duracionLegible(65.4), '1 h 05');
 });
 
-test('un RECOJO dice a qué hora salir para llegar al turno, con lo medido', () => {
+test('un RECOJO da la duración y a qué hora salir, cada una con lo medido debajo', () => {
   const texto = describirEstimacion(recojo, '00:00');
-  assert.equal(texto.principal, '1 h 01');
-  assert.equal(texto.banda, 'entre 37 min y 1 h 30 (acertó el 80% en la prueba)');
-  assert.equal(texto.accion, 'Salir antes de las 22:30 para estar en la sede antes de las 00:00 (se logró el 87% en la prueba)');
+  assert.equal(texto.duracion, '1 h 01');
+  assert.equal(texto.rango, 'Entre 37 min y 1 h 30; acierta el 80% de las veces.');
+  assert.deepEqual(texto.hora, {
+    etiqueta: 'Salir antes de',
+    hora: '22:30',
+    detalle: 'Para estar en la sede antes de las 00:00; así se llegó a tiempo el 87% de las veces.',
+  });
   assert.equal(texto.aviso, null);
   assert.equal(texto.entrenadoEl, '2026-09-29');
 });
 
 test('una SALIDA dice hacia qué hora termina de repartir', () => {
   const salida = { ...recojo, salir_antes: undefined, a_tiempo: undefined, ultima_entrega: '23:05' };
-  assert.equal(describirEstimacion(salida, '22:01').accion, 'Última entrega hacia las 23:05');
+  const { hora } = describirEstimacion(salida, '22:01');
+  assert.equal(hora.etiqueta, 'Última entrega hacia');
+  assert.equal(hora.hora, '23:05');
 });
 
-test('con pocos casos avisa, con el error que se midió en ese caso', () => {
+test('sin hora de salida ni de entrega, solo la duración', () => {
+  const sinHora = { ...recojo, salir_antes: undefined };
+  assert.equal(describirEstimacion(sinHora).hora, null);
+});
+
+test('con pocos casos avisa, con lo que se desvió en ese caso', () => {
   const pocos = { ...recojo, casos: 3, confianza: 'baja', error_medio: 21.8 };
   assert.equal(describirEstimacion(pocos).aviso,
-    'Solo 3 servicios de esta ruta a esta hora: con tan pocos, el error medio en la prueba fue de 22 min.');
+    'Pocos datos: solo 3 servicios de esta ruta a esta hora, así que puede desviarse unos 22 min.');
   const ninguno = { ...pocos, casos: 0 };
-  assert.match(describirEstimacion(ninguno).aviso, /^Ningún servicio de esta ruta a esta hora/);
-  assert.match(describirEstimacion({ ...pocos, casos: 1 }).aviso, /^Solo 1 servicio de/);
+  assert.match(describirEstimacion(ninguno).aviso, /^Sin servicios de esta ruta a esta hora/);
+  assert.match(describirEstimacion({ ...pocos, casos: 1 }).aviso, /solo 1 servicio de/);
 });
 
 test('sin estimación, o con cifras que faltan, no se enseña nada', () => {
@@ -46,6 +57,6 @@ test('sin estimación, o con cifras que faltan, no se enseña nada', () => {
 test('sin medición de la prueba no inventa el porcentaje', () => {
   const sinPrueba = { ...recojo, acierto_banda: null, a_tiempo: null };
   const texto = describirEstimacion(sinPrueba, '06:00');
-  assert.equal(texto.banda, 'entre 37 min y 1 h 30');
-  assert.equal(texto.accion, 'Salir antes de las 22:30 para estar en la sede antes de las 06:00');
+  assert.equal(texto.rango, 'Entre 37 min y 1 h 30.');
+  assert.equal(texto.hora.detalle, 'Para estar en la sede antes de las 06:00.');
 });

@@ -11,7 +11,6 @@ import {
   History,
   MapPin,
   RotateCcw,
-  Sparkles,
   UserMinus,
   UserPlus,
   Truck,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import { comprobarDestino } from '../model/arrastrePlan.js';
 import { describirEstimacion } from '../model/estimacionDuracion.js';
+import EstimacionIA from './EstimacionIA.jsx';
 import { distinctDocuments, markDuplicates } from '../model/serviceModel.js';
 import { ServiceStateBadge } from './estados.jsx';
 import PreviewAction from './PreviewAction.jsx';
@@ -421,45 +421,17 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
               {service.duracion ? (
                 <dd>
                   {Math.round(service.duracion.p50)} min
-                  <small className="pw-detail-nota">
-                    {' '}· hasta {Math.round(service.duracion.p90)} min en el 10% peor
-                    {' '}· {service.duracion.casos} casos
+                  <small className="pw-detail-bajo">
+                    hasta {Math.round(service.duracion.p90)} min en el 10% peor · {service.duracion.casos} casos
                   </small>
                 </dd>
               ) : (
-                <dd className="pw-muted">Sin casos suficientes en el histórico</dd>
+                <dd className="pw-detail-vacio">Sin casos suficientes en el histórico</dd>
               )}
             </div>
-            {estimacion && (
-              <div className="pw-detail-item pw-detail-estimacion">
-                <dt title={estimacion.entrenadoEl
-                  ? `Modelo entrenado el ${estimacion.entrenadoEl} con el histórico de servicios`
-                  : 'Modelo entrenado con el histórico de servicios'}>
-                  <Sparkles size={12} aria-hidden="true" /> Estimación de la IA
-                </dt>
-                <dd>
-                  {estimacion.principal}
-                  <small className="pw-detail-nota"> · {estimacion.banda}</small>
-                  {estimacion.accion && (
-                    <small className="pw-detail-linea">{estimacion.accion}</small>
-                  )}
-                  {estimacion.aviso && (
-                    <small className="pw-detail-linea pw-detail-aviso">
-                      <AlertTriangle size={12} aria-hidden="true" /> {estimacion.aviso}
-                    </small>
-                  )}
-                </dd>
-              </div>
-            )}
-            <div className="pw-detail-item">
-              <dt>Orden de recogida</dt>
-              <dd className="pw-muted">
-                {onOrdenar
-                  ? 'El del plan: arrastra las filas para cambiarlo, o a otro servicio para mover a alguien'
-                  : 'Por la hora real del histórico'}
-              </dd>
-            </div>
           </dl>
+
+          <EstimacionIA estimacion={estimacion} />
 
           {service.modificado && (
             <p className="pw-notice" data-tone="warn">
@@ -482,6 +454,11 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
           <ServiceMap agentes={service.agentes} titulo={service.id} plan={Boolean(onOrdenar)} />
 
           <h4 className="pw-detail-heading">Agentes del servicio ({service.agentCount})</h4>
+          <p className="pw-detail-ayuda">
+            {onOrdenar
+              ? 'Arrastra una fila para cambiar el orden de recogida, o a otro servicio para mover a esa persona.'
+              : 'En el orden real de recogida, según la hora del histórico.'}
+          </p>
 
           {distinctDocuments(service.agentes) < service.agentCount && (
             <p className="pw-notice" data-tone="warn">

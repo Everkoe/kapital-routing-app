@@ -25,26 +25,42 @@ export const duracionLegible = (minutos) => {
 
 const avisoDePocosCasos = (casos, errorMedio) => {
   const error = numero(errorMedio);
-  const cola = error === null ? '' : `: con tan pocos, el error medio en la prueba fue de ${Math.round(error)} min`;
+  const cola = error === null ? '' : `, así que puede desviarse unos ${Math.round(error)} min`;
   if (!casos) {
-    return `Ningún servicio de esta ruta a esta hora en el histórico; se apoya en rutas parecidas${cola}.`;
+    return `Sin servicios de esta ruta a esta hora en el histórico: se apoya en rutas parecidas${cola}.`;
   }
-  return `Solo ${casos} ${casos === 1 ? 'servicio' : 'servicios'} de esta ruta a esta hora${cola}.`;
+  return `Pocos datos: solo ${casos} ${casos === 1 ? 'servicio' : 'servicios'} de esta ruta a esta hora${cola}.`;
 };
 
-const accionDelServicio = (estimacion, turno) => {
+/** La segunda cifra: a qué hora salir (RECOJO) o hacia cuándo termina (SALIDA). */
+const horaDelServicio = (estimacion, turno) => {
   if (estimacion.salir_antes) {
     const aTiempo = numero(estimacion.a_tiempo);
-    const destino = turno ? ` para estar en la sede antes de las ${turno}` : ' para llegar a su hora';
-    return `Salir antes de las ${estimacion.salir_antes}${destino}`
-      + (aTiempo === null ? '' : ` (se logró el ${aTiempo}% en la prueba)`);
+    return {
+      etiqueta: 'Salir antes de',
+      hora: estimacion.salir_antes,
+      detalle: [
+        turno ? `Para estar en la sede antes de las ${turno}` : 'Para llegar a su hora',
+        aTiempo === null ? null : `así se llegó a tiempo el ${aTiempo}% de las veces`,
+      ].filter(Boolean).join('; ') + '.',
+    };
   }
-  if (estimacion.ultima_entrega) return `Última entrega hacia las ${estimacion.ultima_entrega}`;
+  if (estimacion.ultima_entrega) {
+    return {
+      etiqueta: 'Última entrega hacia',
+      hora: estimacion.ultima_entrega,
+      detalle: 'Cuando deja a la última persona.',
+    };
+  }
   return null;
 };
 
 /**
- * Los textos de la estimación de un servicio, o `null` si no hay.
+ * Lo que se enseña de la estimación de un servicio, o `null` si no hay.
+ *
+ * Va en piezas y no en frases porque la pantalla las pone en sitios distintos:
+ * dos cifras grandes —la duración y la hora— con su explicación debajo, y el
+ * aviso aparte. Todo en una línea se leía amontonado.
  *
  * `turno` es la hora del servicio («06:00»): en un RECOJO es la hora de
  * entrada a la sede, que es a lo que hay que llegar.
@@ -57,10 +73,10 @@ export const describirEstimacion = (estimacion, turno = null) => {
   if (minutos === null || desde === null || hasta === null) return null;
   const acierto = numero(estimacion.acierto_banda);
   return {
-    principal: duracionLegible(minutos),
-    banda: `entre ${duracionLegible(desde)} y ${duracionLegible(hasta)}`
-      + (acierto === null ? '' : ` (acertó el ${acierto}% en la prueba)`),
-    accion: accionDelServicio(estimacion, turno),
+    duracion: duracionLegible(minutos),
+    rango: `Entre ${duracionLegible(desde)} y ${duracionLegible(hasta)}`
+      + (acierto === null ? '.' : `; acierta el ${acierto}% de las veces.`),
+    hora: horaDelServicio(estimacion, turno),
     aviso: estimacion.confianza === 'baja'
       ? avisoDePocosCasos(numero(estimacion.casos) ?? 0, estimacion.error_medio) : null,
     entrenadoEl: estimacion.entrenado_el || null,

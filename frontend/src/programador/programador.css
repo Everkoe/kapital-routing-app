@@ -1179,19 +1179,90 @@
    al límite. */
 .pw-detail-nota { color: var(--kapital-text-secondary); font-size: 0.76rem; }
 
-/* La estimación del modelo ocupa la fila entera: lleva banda, hora de salida y,
-   con pocos casos, el aviso con el error medido. */
-.pw-detail-estimacion { grid-column: 1 / -1; }
-.pw-detail-estimacion dt { display: inline-flex; align-items: center; gap: 4px; }
-.pw-detail-linea {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+/* El margen de la duración medida, debajo de la cifra y no a su lado: en la
+   misma línea se partía en tres renglones y la cifra se perdía. */
+.pw-detail-bajo {
+  display: block;
   margin-top: 2px;
-  color: var(--kapital-text-secondary);
   font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--kapital-text-secondary);
 }
-.pw-detail-aviso { color: var(--kapital-accent-orange); }
+
+.pw-detail-vacio { color: var(--kapital-text-secondary); font-size: 0.84rem; }
+
+/* Cómo se usa la tabla de agentes, en una línea sobre ella. */
+.pw-detail-ayuda {
+  margin: -4px 0 10px;
+  font-size: 0.8rem;
+  color: var(--kapital-text-secondary);
+}
+
+/* La estimación de la IA, como una sección más de la ficha —igual que «Dónde
+   viven»—: dos cifras grandes con lo medido debajo y el aviso aparte. Como una
+   línea más se leía amontonada, y como tarjeta con otro fondo, borde redondeado
+   y título de color desentonaba con el resto (lo dijo el usuario). */
+.pw-estimacion {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.pw-estimacion-titulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+  cursor: help;
+}
+
+.pw-estimacion-titulo svg { color: var(--kapital-text-secondary); }
+
+.pw-estimacion-cifras {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 28px;
+}
+
+.pw-estimacion-cifra { display: flex; flex-direction: column; gap: 2px; }
+
+.pw-estimacion-etiqueta {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-estimacion-valor {
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--kapital-text-primary);
+}
+
+.pw-estimacion-detalle {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--kapital-text-secondary);
+}
+
+/* El aviso, en el gris del resto: solo el icono lo marca. */
+.pw-estimacion-aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--kapital-text-secondary);
+}
+
+.pw-estimacion-aviso svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--kapital-accent-orange);
+}
 
 /* --- Mapa del servicio ---------------------------------------------------- */
 
