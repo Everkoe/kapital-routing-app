@@ -196,6 +196,13 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   la que están guardados los archivos ya subidos. **Desplegado en producción el 2026-09-30** (merge
   `6824215`, PR #26, sin migraciones): el CAMO y el nombre nuevo están en el paquete servido, y sin sesión
   subir, revisar, quitar documentos y el alta responden 401.
+- **El «Récord de Conductor» se llama «Ficha de Conductor»** (2026-10-01, pedido del usuario; la clave sigue
+  siendo `recordConductor`). Y **con la fila de «Subir» abierta, cada sitio recibe lo suyo**: lo soltado en
+  la fila va a «Completo», en el botón de delante a delante y en el de detrás a detrás. Para eso las zonas de
+  soltar (`DocumentDropZone`) pueden ir una dentro de otra: manda la más interior, sus eventos no suben a la
+  de fuera y un Ctrl+V lo recoge solo la más interior bajo el cursor (`zonaMasInterior`, por `:hover`).
+  Sin eso, soltar en un botón subía el archivo dos veces. Una cara bloqueada por la imagen completa avisa en
+  vez de subir.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con

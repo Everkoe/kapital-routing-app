@@ -5277,13 +5277,17 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
         otra_sede = {"existe": True, "rutas": [{"conductor": "K001", "turno": "06:00", "modalidad": "RECOJO",
                                                 "sede": "OTRA", "agentes": [{"id": "1"}]}]}
+        # «Hoy» fijo: con la fecha del reloj, la prueba caducó el 1 de octubre,
+        # cuando el 30 de septiembre pasó a ser un día ya ejecutado.
         with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 30)),
             patch.object(backend, "_cargar_flota", new=AsyncMock()),
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={"existe": False})),
         ):
             sin_plan = await self._llamar("POST", "/api/programador/plan/proponer", token,
                                           json={"fecha": "2026-09-30"})
         with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 30)),
             patch.object(backend, "_cargar_flota", new=AsyncMock()),
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=otra_sede)),
         ):
