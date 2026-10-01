@@ -156,10 +156,14 @@ const DocumentReviewCard = ({
               label={`${documento.label} · ${cara.nombre}`}
               disabled={Boolean(cargando?.[cara.campo])}
               onFile={(file) => onUpload(cara.campo, file)}
+              // La pista la pone la tarjeta: en la casilla no cabe.
+              sinPista
             >
-              <span className="doc-hoja-nombre">{cara.nombre}</span>
-              <span className={`rev-badge ${cara.tieneArchivo ? 'rev-ok' : 'rev-missing'}`}>
-                {cara.tieneArchivo ? <><CheckCircle size={12} /> Subida</> : 'Sin archivo'}
+              <span className="doc-hoja-cabecera">
+                <span className="doc-hoja-nombre">{cara.nombre}</span>
+                <span className={`rev-badge ${cara.tieneArchivo ? 'rev-ok' : 'rev-missing'}`}>
+                  {cara.tieneArchivo ? <><CheckCircle size={12} /> Subida</> : 'Sin archivo'}
+                </span>
               </span>
               <label className="btn-view-doc doc-subir-label">
                 <Upload size={13} /> {cara.tieneArchivo ? 'Reemplazar' : 'Subir'}

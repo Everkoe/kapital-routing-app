@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import * as Iconos from 'lucide-react';
-import { AlertTriangle, Calendar, Inbox, RotateCcw, Search, X } from 'lucide-react';
+import {
+  Activity, AlertTriangle, AlignLeft, Calendar, ChevronLeft, ChevronRight, Download, FileText, Hash, Inbox,
+  ListFilter, Mail, Package, RotateCcw, Search, User, Users, X,
+} from 'lucide-react';
+import { ICONOS_DE_ACTIVIDAD } from './constants/iconosDeActividad';
 import toast from 'react-hot-toast';
 import { apiFetch } from './utils/apiClient';
 import DrawerLateral from './components/DrawerLateral';
@@ -32,7 +35,7 @@ const ESPERA_BUSQUEDA_MS = 350;
 const FILTROS_VACIOS = { q: '', tipo: '', actor: '', desde: '', hasta: '' };
 
 const IconoDeTipo = ({ tipo, size = 16 }) => {
-  const Icono = Iconos[ICONO_POR_TIPO[tipo]] || Iconos.Activity;
+  const Icono = ICONOS_DE_ACTIVIDAD[ICONO_POR_TIPO[tipo]] || Activity;
   return <Icono size={size} aria-hidden="true" />;
 };
 
@@ -48,12 +51,12 @@ const Skeleton = ({ ancho = '100%', alto = 14 }) => (
  */
 const datosDelEvento = (evento) => [
   { clave: 'fecha', Icono: Calendar, etiqueta: 'Fecha y hora', valor: fechaLegible(evento.created_at) },
-  { clave: 'actor', Icono: Iconos.User, etiqueta: 'Responsable', valor: evento.actor_name || '—' },
-  evento.actor_email && { clave: 'correo', Icono: Iconos.Mail, etiqueta: 'Correo', valor: evento.actor_email },
-  evento.entity_label && { clave: 'elemento', Icono: Iconos.Package, etiqueta: 'Elemento afectado', valor: evento.entity_label },
-  evento.entity_type && { clave: 'tipo', Icono: Iconos.FileText, etiqueta: 'Tipo de evento', valor: evento.entity_type },
-  evento.description && { clave: 'descripcion', Icono: Iconos.AlignLeft, etiqueta: 'Descripción', valor: evento.description },
-  { clave: 'id', Icono: Iconos.Hash, etiqueta: 'Identificador', valor: evento.id, mono: true },
+  { clave: 'actor', Icono: User, etiqueta: 'Responsable', valor: evento.actor_name || '—' },
+  evento.actor_email && { clave: 'correo', Icono: Mail, etiqueta: 'Correo', valor: evento.actor_email },
+  evento.entity_label && { clave: 'elemento', Icono: Package, etiqueta: 'Elemento afectado', valor: evento.entity_label },
+  evento.entity_type && { clave: 'tipo', Icono: FileText, etiqueta: 'Tipo de evento', valor: evento.entity_type },
+  evento.description && { clave: 'descripcion', Icono: AlignLeft, etiqueta: 'Descripción', valor: evento.description },
+  { clave: 'id', Icono: Hash, etiqueta: 'Identificador', valor: evento.id, mono: true },
 ].filter(Boolean);
 
 const HistorialActividad = () => {
@@ -137,9 +140,9 @@ const HistorialActividad = () => {
   const hasta = Math.min(datos ? datos.pagina * datos.limite : 0, resumen?.total || 0);
 
   const indicadores = [
-    { clave: 'total', Icono: Iconos.FileText, valor: resumen?.total, etiqueta: 'eventos' },
+    { clave: 'total', Icono: FileText, valor: resumen?.total, etiqueta: 'eventos' },
     { clave: 'hoy', Icono: Calendar, valor: resumen?.hoy, etiqueta: 'hoy' },
-    { clave: 'responsables', Icono: Iconos.Users, valor: resumen?.responsables, etiqueta: 'responsables' },
+    { clave: 'responsables', Icono: Users, valor: resumen?.responsables, etiqueta: 'responsables' },
   ];
 
   return (
@@ -174,7 +177,7 @@ const HistorialActividad = () => {
         </label>
 
         <label className="historial-campo">
-          <Iconos.ListFilter size={15} aria-hidden="true" />
+          <ListFilter size={15} aria-hidden="true" />
           <select
             value={filtros.tipo}
             aria-label="Filtrar por tipo de evento"
@@ -186,7 +189,7 @@ const HistorialActividad = () => {
         </label>
 
         <label className="historial-campo">
-          <Iconos.User size={15} aria-hidden="true" />
+          <User size={15} aria-hidden="true" />
           <select
             value={filtros.actor}
             aria-label="Filtrar por responsable"
@@ -223,7 +226,7 @@ const HistorialActividad = () => {
         )}
         {eventos.length > 0 && (
           <button type="button" className="historial-exportar" onClick={exportar}>
-            <Iconos.Download size={15} /> Exportar
+            <Download size={15} /> Exportar
           </button>
         )}
       </div>
@@ -310,7 +313,7 @@ const HistorialActividad = () => {
                   disabled={datos.pagina <= 1 || cargando}
                   onClick={() => setPagina(p => Math.max(1, p - 1))}
                 >
-                  <Iconos.ChevronLeft size={14} aria-hidden="true" /> Anterior
+                  <ChevronLeft size={14} aria-hidden="true" /> Anterior
                 </button>
 
                 {paginasVisibles(datos.pagina, datos.paginas).map((numero, i) => (
@@ -337,7 +340,7 @@ const HistorialActividad = () => {
                   disabled={datos.pagina >= datos.paginas || cargando}
                   onClick={() => setPagina(p => p + 1)}
                 >
-                  Siguiente <Iconos.ChevronRight size={14} aria-hidden="true" />
+                  Siguiente <ChevronRight size={14} aria-hidden="true" />
                 </button>
               </nav>
             </div>

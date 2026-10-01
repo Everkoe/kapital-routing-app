@@ -208,6 +208,8 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   campo lo elegía él y aprobar escribía en su perfil cualquier clave, también sus revisiones, el CAMO o el
   estado. Pedir otro campo da 400, el valor tiene tope de 300 caracteres, y una solicitud de antes con un
   campo no permitido se puede rechazar pero no aprobar. Si se añade un dato a «Mi perfil», va también ahí.
+  **Desplegado en producción el 2026-10-01** (merge `96f757c`, PR #27, sin migraciones), con el CAMO por
+  hojas, la «Ficha de Conductor», el soltar por cara y la marca de sesión.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
@@ -785,6 +787,34 @@ Lo que se revisó cuando el usuario preguntó si la aplicación aguantará a muc
   debería esperar 90 s), la vía es Supabase Realtime con canales que solo lleven «hay novedades» y el
   dato por el API con sesión; exige publicar la clave pública del proyecto en el frontend, cosa que hoy
   se evita a propósito.
+
+## 2 ter. Velocidad de la página (medido el 2026-10-01)
+
+- **El paquete inicial pasó de 1.543 KB a 244 KB** (de 437 a 77 KB comprimido). Es lo que descarga y
+  ejecuta todo el mundo antes de ver nada, también el conductor desde el teléfono. Llevaba tres cosas que no
+  hacían falta al abrir:
+  - **los más de mil iconos de lucide-react** (624 KB), porque el historial hacía
+    `import * as Iconos from 'lucide-react'` para buscarlos por nombre. Ahora los importa uno a uno
+    ([iconosDeActividad.js](frontend/src/constants/iconosDeActividad.js)), y `tests/test_iconos.mjs`
+    falla si algún archivo vuelve a importarlos todos;
+  - **xlsx** (275 KB), que ahora se carga al exportar ([utils/excel.js](frontend/src/utils/excel.js),
+    que avisa si no llega);
+  - **recharts** (250 KB), por dos gráficos del tablero heredado que casi nunca se pintan: van en
+    `GraficosDelTablero.jsx`, cargado al vuelo.
+
+  Para ver qué pesa cada paquete: `vite build --sourcemap` y repartir el chunk por módulos.
+- **El logo pesaba 422 KB** (740×751) para pintarse a 30–85 px: ahora es de 256 px y 41 KB.
+- **Al abrir, solo el conductor espera a su perfil**: a los demás roles `/api/user/profile` no les añade
+  nada que usen, y era una petición más en cadena antes de ver la aplicación.
+- **Sin `backdrop-filter` en los fondos oscuros de las ventanas ni en la barra inferior del conductor**: se
+  recalcula al desplazar y da tirones en equipos y teléfonos modestos. Con el fondo casi negro no se veía.
+- Lo que no se puede bajar sin cambiar de plan: cada petición desde Lima cuesta ~0,33 s aunque el servidor
+  no haga nada (ida y vuelta hasta iad1 y la conexión segura). Las funciones de Vercel (iad1, Washington)
+  y la base (us-east-2, Ohio) ya están al lado. Por eso conviene **no encadenar peticiones**. La del
+  histórico tras el plan en `useBoardData` sí va en cadena, a propósito: si el día tiene plan, el histórico
+  no se descarga.
+- Buscar en la mesa del Programador cuesta 5–43 ms por tecla con 135 servicios: no es lo que se nota.
+  En desarrollo cada petición sale dos veces por el `StrictMode` de React; en producción, una.
 
 ## 3. Stack Tecnológico
 

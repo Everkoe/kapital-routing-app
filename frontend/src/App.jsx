@@ -1,11 +1,10 @@
 // App.jsx - Trigger Vercel Deploy 
 import React, { useState, useMemo, useEffect } from 'react';
-import * as XLSX from 'xlsx';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { exportarLibro } from './utils/excel';
 import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download, UploadCloud } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
-import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
+import { ApiError, apiFetch, apiRequest, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
 import { olvidarUrlsFirmadas } from './utils/documentoStorage';
 import { haySesionRecordada, olvidarSesion, recordarSesion } from './utils/marcaDeSesion';
 import './App.css';
@@ -28,6 +27,7 @@ const RETRYABLE_ADMIN_STATUS_CODES = new Set([402, 408, 429, 500, 502, 503, 504]
 export { GlobalLoader };
 
 const LiveMap = React.lazy(() => import('./LiveMap'));
+const GraficosDelTablero = React.lazy(() => import('./components/GraficosDelTablero'));
 const FlotaView = React.lazy(() => import('./FlotaView'));
 const DriverPortal = React.lazy(() => import('./DriverPortal'));
 const GerentePortal = React.lazy(() => import('./GerentePortal'));
@@ -463,7 +463,6 @@ const KPIDashboard = ({ routes }) => {
     ];
   }, [routes]);
   
-  const COLORS = ['#10B981', '#f59e0b', '#334155'];
 
   return ( 
     <div style={{display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '20px'}}>
@@ -474,33 +473,9 @@ const KPIDashboard = ({ routes }) => {
         <KPICard title="Tasa de Optimización" value={`${kpis.tasaOptimizacion}%`} color="#14b8a6" />
       </div> 
       {routes.length > 0 && (
-      <div style={{display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '20px'}}>
-        <div className="card" style={{flex: '2 1 400px', minWidth: '280px', height: '340px'}}>
-          <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Demanda por Zona</h3>
-          <ResponsiveContainer width="100%" height="80%">
-            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 25 }}>
-              <XAxis dataKey="name" stroke="var(--kapital-text-secondary)" tick={{fontSize: 10}} angle={-35} textAnchor="end" interval={0} />
-              <YAxis stroke="var(--kapital-text-secondary)" tick={{fontSize: 11}} />
-              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)', borderRadius: '8px'}} />
-              <Bar dataKey="pasajeros" fill="#38bdf8" name="Pasajeros" radius={[4,4,0,0]} barSize={24} animationDuration={1000} animationEasing="ease-out" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="card" style={{flex: '1 1 280px', minWidth: '280px', height: '340px'}}>
-           <h3 style={{marginTop: 0, padding: '15px 20px', borderBottom: '1px solid var(--kapital-border)'}}>Progreso de Asignación</h3>
-           <ResponsiveContainer width="100%" height="80%">
-            <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={5} dataKey="value" animationDuration={1000} animationEasing="ease-out">
-                {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip contentStyle={{backgroundColor: 'var(--kapital-card-bg)', border: '1px solid var(--kapital-border)', borderRadius: '8px'}} />
-              <Legend wrapperStyle={{fontSize:"12px"}} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+        <React.Suspense fallback={null}>
+          <GraficosDelTablero chartData={chartData} pieData={pieData} />
+        </React.Suspense>
       )}
     </div>
   ); 
@@ -674,11 +649,9 @@ const DashboardView = ({ routes, setRoutes, usuarioActual, sessionSaved, onSaveS
   const handleExportToExcel = async () => {
     if (routes.length === 0) return;
     const flatData = routes.flatMap(route => route.agentes.map(agente => ({ 'Conductor': route.conductor, 'Micro-Zona': route.micro_zona, 'Horario': route.horario, 'DNI': agente.id, 'Nombre': agente.nombre, 'Dirección': agente.direccion })));
-    const worksheet = XLSX.utils.json_to_sheet(flatData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Rutas");
-    XLSX.writeFile(workbook, "Rutas_Export.xlsx");
-    toast.success('Exportación a Excel generada.');
+    if (await exportarLibro([{ nombre: 'Rutas', filas: flatData }], 'Rutas_Export.xlsx')) {
+      toast.success('Exportación a Excel generada.');
+    }
   };
 
   const handleClearBoard = async () => {
@@ -943,22 +916,26 @@ function App() {
         if (cancelled) return;
 
         // El perfil trae `perfil_conductor`, que /api/auth/me no incluye y que
-        // renderVista necesita. Si falla, la sesión sigue siendo válida: se
-        // continúa con la identidad del servidor en lugar de expulsar.
+        // el portal del conductor necesita. Si falla, la sesión sigue siendo
+        // válida: se continúa con la identidad del servidor en lugar de expulsar.
+        // A los demás roles no les añade nada que usen —todo lo demás viene ya
+        // en /api/auth/me—, así que no se les hace esperar a una segunda
+        // petición antes de ver la aplicación.
         const profileKey = identity.identifier || identity.email;
         let profile = null;
-        // Plazo propio. Compartido con /api/auth/me, tras un arranque en frío
-        // lento le quedaban segundos, y si no llegaba lo tapaba el perfil
-        // viejo que guardaba el navegador, que ya no se guarda.
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
-        try {
-          profile = await apiFetch(`/api/user/profile?email=${encodeURIComponent(profileKey)}`, {
-            signal: controller.signal,
-          });
-        } catch (profileErr) {
-          if (profileErr?.name !== 'AbortError') {
-            console.warn('Sesión válida pero no se pudo cargar el perfil:', profileErr);
+        if (identity.rol === 'Conductor') {
+          // Plazo propio. Compartido con /api/auth/me, tras un arranque en frío
+          // lento le quedaban segundos.
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => controller.abort(), SESSION_VALIDATION_TIMEOUT_MS);
+          try {
+            profile = await apiFetch(`/api/user/profile?email=${encodeURIComponent(profileKey)}`, {
+              signal: controller.signal,
+            });
+          } catch (profileErr) {
+            if (profileErr?.name !== 'AbortError') {
+              console.warn('Sesión válida pero no se pudo cargar el perfil:', profileErr);
+            }
           }
         }
 
@@ -1122,11 +1099,18 @@ function App() {
       let nextDelay = ADMIN_POLL_INTERVAL_MS;
 
       try {
-        const res = await fetch(`/api/notifications?last_id=${lastNotifIdRef.current || 0}`, {
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          if (RETRYABLE_ADMIN_STATUS_CODES.has(res.status)) {
+        let res;
+        try {
+          // Por el cliente compartido: con la sesión caducada, el siguiente
+          // sondeo lleva al login desde cualquier pantalla. Con `fetch` directo
+          // el 401 se ignoraba y la pantalla abierta acababa diciendo «Datos
+          // del sistema no disponibles», como si se hubiera caído el servicio.
+          res = await apiRequest(`/api/notifications?last_id=${lastNotifIdRef.current || 0}`, {
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (!(error instanceof ApiError)) throw error;
+          if (RETRYABLE_ADMIN_STATUS_CODES.has(error.status)) {
             backoffMs = backoffMs > 0
               ? Math.min(backoffMs * 2, ADMIN_POLL_BACKOFF_MAX_MS)
               : ADMIN_POLL_BACKOFF_BASE_MS;

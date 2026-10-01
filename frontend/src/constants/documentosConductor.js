@@ -177,6 +177,38 @@ export const esDeAdministracion = (documento) => Boolean(documento?.soloAdminist
 export const documentosQueEntregaElConductor = () =>
   DOCUMENTOS_CONDUCTOR.filter((documento) => !esDeAdministracion(documento));
 
+/**
+ * El orden de la revisión, el que pidió el usuario (2026-10-01): de tres en
+ * tres, como se ven en la ficha. Lo que no está aquí va detrás, en el orden del
+ * catálogo.
+ */
+export const ORDEN_DE_REVISION = [
+  'recordConductor', 'comprobanteDomicilio', 'dniScaneado',
+  'licenciaConducir', 'antecedentesPoliciales', 'tarjetaPropiedad',
+  'revisionTecnica', 'soat',
+];
+
+/**
+ * Los documentos de la revisión, en el orden en que se pintan: los de
+ * `ORDEN_DE_REVISION`, el resto y, al final, lo que sube Administración.
+ *
+ * El CAMO va el último porque es lo último que se añade y porque su tarjeta,
+ * con dos hojas, es más alta que las demás: en medio estiraba su fila y
+ * descolocaba las de al lado.
+ */
+export const documentosDeLaRevision = () => {
+  const posicion = (documento) => {
+    const indice = ORDEN_DE_REVISION.indexOf(documento.key);
+    return indice === -1 ? ORDEN_DE_REVISION.length : indice;
+  };
+  // `filter` da una copia, y a igualdad de posición `sort` (estable) deja el
+  // orden del catálogo.
+  const enOrden = DOCUMENTOS_CONDUCTOR
+    .filter((documento) => !esDeAdministracion(documento))
+    .sort((a, b) => posicion(a) - posicion(b));
+  return { enOrden, deAdministracion: DOCUMENTOS_CONDUCTOR.filter(esDeAdministracion) };
+};
+
 /** Todas las claves que puede ocupar un documento, reversos incluidos. */
 export const todasLasClaves = () =>
   DOCUMENTOS_CONDUCTOR.flatMap((documento) => carasDeDocumento(documento).map((cara) => cara.campo));

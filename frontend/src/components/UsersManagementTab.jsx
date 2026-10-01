@@ -19,7 +19,6 @@ const ConfirmModal = ({ isOpen, config, onConfirm, onCancel }) => {
       position: 'fixed', inset: 0, zIndex: 9999,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.65)',
-      backdropFilter: 'blur(8px)',
       animation: 'fadeInOverlay 0.2s ease',
     }}>
       <style>{`
@@ -397,7 +396,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       <ConfirmModal isOpen={modal.isOpen} config={modal.config} onConfirm={modal.onConfirm} onCancel={closeModal} />
       <ContrasenaProvisional datos={provisional} onCerrar={() => setProvisional(null)} />
       {driverModal.isOpen && driverModal.user && (
-        <div onClick={closeDriverModal} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div onClick={closeDriverModal} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '16px', padding: '30px', maxWidth: '980px', width: '92%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
             <h3 style={{ marginTop: 0, borderBottom: '1px solid var(--border-color)', paddingBottom: '15px' }}>Revisión de Perfil: {driverModal.user.nombre}</h3>
 
@@ -452,7 +451,7 @@ const UsersManagementTab = ({ usuarioActual, initialTab = 'Todos' }) => {
       )}
 
       {padronModal.isOpen && (
-        <div onClick={() => setPadronModal({ isOpen: false, email: null, padron: '' })} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div onClick={() => setPadronModal({ isOpen: false, email: null, padron: '' })} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-secondary, #1a1d2e)', border: '1px solid var(--border-color, #2e303a)', borderRadius: '16px', padding: '32px 40px', maxWidth: '480px', width: '90%', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
               <div style={{ background: 'rgba(16, 185, 129, 0.12)', padding: '14px', borderRadius: '50%' }}>

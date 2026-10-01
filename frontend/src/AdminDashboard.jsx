@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Shield, Users, CarFront, FileWarning, Activity, CheckCircle, AlertCircle, Clock, ChevronRight, Bell, UserCircle, Truck, FileText, List, Layers, Bike } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList } from 'recharts';
 import { GlobalLoader } from './components/GlobalLoader';
+import { apiFetch } from './utils/apiClient';
 import { fechaLegible } from './constants/tiposDeActividad';
 import { countFleetDocumentStatuses, getDocumentStatus } from './utils/flotaDocumentStatus';
 import './App.css';
@@ -55,23 +56,18 @@ const ROLE_DISPLAY = {
 
 const DASHBOARD_LOAD_TIMEOUT_MS = 12000;
 
+/**
+ * Por el cliente compartido: con la sesión caducada lleva al login con su
+ * aviso. Con `fetch` directo el 401 acababa en «Datos del sistema no
+ * disponibles … Sesión inválida o expirada», que parecía una caída.
+ */
 const fetchJson = async (url, fallbackMessage, signal) => {
-  const response = await fetch(url, { cache: 'no-store', signal });
-  const text = await response.text();
-  let payload;
-
   try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = {};
+    return (await apiFetch(url, { signal })) ?? {};
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.isSessionExpired) throw error;
+    throw new Error(fallbackMessage ? `${fallbackMessage}: ${error.message}` : error.message, { cause: error });
   }
-
-  if (!response.ok) {
-    const detail = payload.detail || payload.message || text || `HTTP ${response.status}`;
-    throw new Error(`${fallbackMessage}: ${detail}`);
-  }
-
-  return payload;
 };
 
 export default function AdminDashboard({ onNavigate, usuario }) {
@@ -129,7 +125,8 @@ export default function AdminDashboard({ onNavigate, usuario }) {
           setLoadError('');
         }
       } catch (err) {
-        if (!cancelled) {
+        // La sesión caducada ya la atiende el cliente: vuelve al login.
+        if (!cancelled && !err?.isSessionExpired) {
           const message = err?.name === 'AbortError'
             ? 'El servicio de datos tardó demasiado en responder.'
             : err instanceof Error ? err.message : 'Error desconocido al cargar los datos.';
