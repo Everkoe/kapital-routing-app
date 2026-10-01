@@ -1441,6 +1441,16 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 
 /* Mientras se arrastra, el aviso de soltar manda sobre el de pegar. */
 .doc-dropzone-activa[data-pegable]::after { content: none; }
+/* En un botón no cabe; su borde ya dice que es él quien recibe. */
+.doc-dropzone[data-sin-pista]::after { content: none; }
+/* Con una zona dentro bajo el cursor, la pista es de esa: la de fuera calla. */
+.doc-dropzone[data-pegable]:has(.doc-dropzone[data-pegable])::after { content: none; }
+
+/* Delante y detrás, cada una su zona dentro de la fila: el aviso de soltar las cubre enteras. */
+.doc-cara-zona { border-radius: 8px; display: inline-flex; }
+.doc-cara-zona .doc-dropzone-aviso { font-size: 0.72rem; padding: 2px 6px; }
+/* La fila de caras recibe lo que va a «Completo»: necesita sitio para su aviso. */
+.doc-caras-subida.doc-dropzone { border-radius: 8px; padding: 8px 8px 22px; }
 
 /* Un documento en Storage está cargando hasta que llega su URL firmada. */
 .doc-viewer-cargando {

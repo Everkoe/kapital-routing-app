@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CheckCircle, Clock, Eye, Upload, XCircle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import DocumentDropZone from './DocumentDropZone';
 import {
   TIPO_DOS_HOJAS,
@@ -23,7 +24,10 @@ import {
  *
  * Arrastrar o pegar sobre la tarjeta va a la imagen completa, salvo que ya se
  * haya empezado por caras sueltas (`caraDestinoParaArrastre`). Con la imagen
- * completa subida, delante y detrás quedan bloqueadas.
+ * completa subida, delante y detrás quedan bloqueadas. Con la fila de «Subir»
+ * abierta, cada sitio recibe lo suyo (pedido del usuario): lo soltado en la
+ * fila va a «Completo», en el botón de delante a delante y en el de detrás a
+ * detrás.
  *
  * Un documento de dos hojas (el CAMO) enseña una casilla por hoja, y cada una
  * recibe lo que se le suelta, se le pega o se elige con su botón: lo de la
@@ -113,6 +117,7 @@ const DocumentReviewCard = ({
   const ocupado = caras.some((cara) => cargando?.[cara.campo]);
 
   const caraParaArrastre = caraDestinoParaArrastre(caras);
+  const campoCompleto = caras.find(esCaraCompleta)?.campo;
 
   const revisarTodas = (estadoNuevo) => {
     conArchivo.forEach((cara) => onReview(cara.campo, estadoNuevo));
@@ -242,10 +247,15 @@ const DocumentReviewCard = ({
       </div>
 
       {dosCaras && subiendo && (
-        <div className="doc-caras-subida">
+        <DocumentDropZone
+          className="doc-caras-subida"
+          label={`${documento.label} · ${textos.completo}`}
+          disabled={ocupado}
+          onFile={(file) => onUpload(campoCompleto, file)}
+        >
           {caras.map((cara) => {
             const bloqueada = caraBloqueada(cara, caras);
-            return (
+            const boton = (
               <label
                 key={cara.campo}
                 className={`btn-view-doc doc-subir-label${bloqueada ? ' doc-cara-bloqueada' : ''}`}
@@ -272,8 +282,22 @@ const DocumentReviewCard = ({
                 />
               </label>
             );
+            // «Completo» es la fila entera; delante y detrás, cada una su botón.
+            if (esCaraCompleta(cara)) return boton;
+            return (
+              <DocumentDropZone
+                key={cara.campo}
+                className="doc-cara-zona"
+                label={cara.nombre.toLowerCase()}
+                sinPista
+                disabled={Boolean(cargando?.[cara.campo])}
+                onFile={(file) => (bloqueada ? toast.error(textos.bloqueada) : onUpload(cara.campo, file))}
+              >
+                {boton}
+              </DocumentDropZone>
+            );
           })}
-        </div>
+        </DocumentDropZone>
       )}
 
       {conArchivo.length === 0 && (
