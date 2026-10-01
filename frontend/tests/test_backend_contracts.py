@@ -5027,6 +5027,20 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cuenta["needs_password_change"])
         self.assertEqual(backend.almacen_intentos.filas, [], "acertar olvida el intento")
 
+    async def test_the_profile_without_a_session_does_not_tell_which_accounts_exist(self):
+        """Sin sesión daba 404 si la cuenta no existía y 401 si existía."""
+        backend.AUTH_ENFORCED = True
+        self._cuenta_con_clave()
+        with patch.object(backend, "reload_db", new=AsyncMock()):
+            respuestas = [
+                await self._llamar("GET", f"/api/user/profile?email={cuenta}")
+                for cuenta in ("chofer@k.com", "nadie@k.com")
+            ] + [
+                await self._llamar("PUT", "/api/user/profile", json={"identifier": cuenta, "nombre": "x"})
+                for cuenta in ("chofer@k.com", "nadie@k.com")
+            ]
+        self.assertEqual([r.status_code for r in respuestas], [401, 401, 401, 401])
+
     async def test_nothing_readable_is_stored_about_a_failed_attempt(self):
         with patch.object(backend, "reload_db", new=AsyncMock()):
             await self._entrar("74538840", "x", ip="198.51.100.9")

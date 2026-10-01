@@ -4239,6 +4239,9 @@ async def change_password(req: ChangePasswordRequest, request: Request = None):
 
 @app.get("/api/user/profile")
 async def get_profile(email: str, session_token: SessionCookie = None):
+    # La sesión, antes de buscar la cuenta: al revés, sin sesión daba 404 si la
+    # cuenta no existía y 401 si existía, y eso dice qué DNI o correos la tienen.
+    await require_request_actor(session_token)
     if _is_compat_storage() and not _full_cache_is_fresh():
         user = await _load_compat_user(email)
     else:
@@ -4263,6 +4266,9 @@ async def get_profile(email: str, session_token: SessionCookie = None):
 @app.put("/api/user/profile")
 async def update_profile(update_data: UsuarioUpdate, request: Request = None,
                          session_token: SessionCookie = None):
+    # La sesión primero, por lo mismo que en la lectura: si no, el 404 delata
+    # qué cuentas existen.
+    await require_request_actor(session_token)
     await reload_db()
     user = get_user_by_identifier(update_data.identifier)
     if not user:
