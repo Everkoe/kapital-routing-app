@@ -600,6 +600,12 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   2026-10-01: con una sesión ajena abierta se podía probar la actual sin límite. Y una actual equivocada
   da **400, no 401**: el 401 es «la sesión ya no sirve», y el cliente cerraba la sesión de quien se
   equivocaba al teclear. Cualquier endpoint con sesión que compruebe una contraseña, igual.
+  Y **el perfil pide la sesión antes de buscar la cuenta** (`GET` y `PUT /api/user/profile`): al revés,
+  sin sesión daba 404 si la cuenta no existía y 401 si existía, y se podía averiguar desde fuera qué
+  DNI o correos tienen cuenta. Al añadir un endpoint que busque una cuenta por lo que manda el cliente,
+  comprobar la sesión primero. Lo mismo tenía `GET /api/admin/users`, y peor: sin sesión **cargaba todas
+  las cuentas** (~255 KB de transferencia por llamada) antes de responder 403 o 401, que además decía si
+  el correo era de Administración. Ahora pide sesión y rol antes de leer nada.
 - **«Mi perfil» rehecho** (2026-10-01, pedido del usuario: «muy básico, no se ve profesional»):
   [src/perfil/](frontend/src/perfil/) con la lógica aparte y probada (`modeloPerfil.js`). Cabecera con
   foto, nombre, rol, cuenta y estado; los datos que no se editan van como texto y no como cajas grises; la

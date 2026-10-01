@@ -5041,6 +5041,21 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             ]
         self.assertEqual([r.status_code for r in respuestas], [401, 401, 401, 401])
 
+    async def test_the_user_list_asks_for_a_session_before_loading_every_account(self):
+        """Sin sesión cargaba todas las cuentas y el 403 o el 401 decía si el correo era de Administración."""
+        backend.AUTH_ENFORCED = True
+        backend.usuarios_db["jefa@k.com"] = {"identifier": "jefa@k.com", "rol": "Administración"}
+        self._cuenta_con_clave()
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()) as recargar,
+            patch.object(backend, "_load_compat_users", new=AsyncMock()) as cargar,
+        ):
+            respuestas = [await self._llamar("GET", f"/api/admin/users?email={cuenta}")
+                          for cuenta in ("jefa@k.com", "chofer@k.com", "nadie@k.com")]
+        self.assertEqual([r.status_code for r in respuestas], [401, 401, 401])
+        cargar.assert_not_awaited()
+        recargar.assert_not_awaited()
+
     async def test_nothing_readable_is_stored_about_a_failed_attempt(self):
         with patch.object(backend, "reload_db", new=AsyncMock()):
             await self._entrar("74538840", "x", ip="198.51.100.9")

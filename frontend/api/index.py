@@ -4600,6 +4600,10 @@ async def listar_actividad(
 # --- Endpoints de Administración (Aprobación de Usuarios) ---
 @app.get("/api/admin/users")
 async def get_all_users(email: str, session_token: SessionCookie = None):
+    # La sesión y el rol, antes de leer nada. Al revés, cualquiera sin sesión
+    # hacía cargar todas las cuentas (~255 KB de transferencia por llamada) y la
+    # respuesta —403 o 401— decía si el correo era de Administración.
+    await require_request_actor(session_token, allowed_roles=_ADMIN_ROLES)
     if _is_compat_storage() and not _full_cache_is_fresh():
         # The admin table needs all users, but not the route/passenger board.
         await _load_compat_users()
