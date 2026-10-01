@@ -190,7 +190,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   `_perfil_del_alta`: conserva el CAMO y **ya no acepta `revision_docs`**, con el que un conductor podía
   aprobarse sus propios documentos llamando al API. En la misma tanda, el «Comprobante de domicilio» pasó a
   llamarse **«Declaración jurada de domicilio»**; la clave sigue siendo `comprobanteDomicilio`, que es con
-  la que están guardados los archivos ya subidos.
+  la que están guardados los archivos ya subidos. **Desplegado en producción el 2026-09-30** (merge
+  `6824215`, PR #26, sin migraciones): el CAMO y el nombre nuevo están en el paquete servido, y sin sesión
+  subir, revisar, quitar documentos y el alta responden 401.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
