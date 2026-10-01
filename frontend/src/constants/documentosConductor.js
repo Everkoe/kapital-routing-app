@@ -69,6 +69,19 @@ export const DOCUMENTOS_CONDUCTOR = [
   { key: 'cv', label: 'Currículum Vitae', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR },
   { key: 'certificadosTrabajo', label: 'Certificados de Trabajo', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },
   { key: 'referenciasLaborales', label: 'Referencias Laborales', tipo: TIPO_PAPEL, dueno: DUENO_CONDUCTOR, opcional: true },
+  // El certificado médico que emite la clínica (pedido del usuario, 2026-09-30).
+  // Lo sube Administración: no se pide en el alta ni sale en las pantallas
+  // del conductor, y el servidor no se lo acepta a él
+  // (`_DOCUMENTOS_DE_ADMINISTRACION`). Tampoco se aprueba ni se rechaza: lo
+  // pone quien lo revisaría.
+  {
+    key: 'camo',
+    label: 'CAMO',
+    detalle: 'Certificado de Aptitud Médico Ocupacional',
+    tipo: TIPO_PAPEL,
+    dueno: DUENO_CONDUCTOR,
+    soloAdministracion: true,
+  },
   // El cuestionario de manejo defensivo no está: no es un papel que se suba
   // sino el test del alta (`QuizManejoDefensivo`), y como documento salía en
   // la ficha con «Sin archivo» y un botón de subir. Nadie subió nunca uno.
@@ -125,6 +138,13 @@ export const documentoPorClave = (key) =>
 
 export const documentosPorDueno = (dueno) =>
   DOCUMENTOS_CONDUCTOR.filter((documento) => documento.dueno === dueno);
+
+/** Si lo sube Administración y no el conductor (el CAMO). */
+export const esDeAdministracion = (documento) => Boolean(documento?.soloAdministracion);
+
+/** Lo que el conductor ve y entrega desde su cuenta: todo menos lo de Administración. */
+export const documentosQueEntregaElConductor = () =>
+  DOCUMENTOS_CONDUCTOR.filter((documento) => !esDeAdministracion(documento));
 
 /** Todas las claves que puede ocupar un documento, reversos incluidos. */
 export const todasLasClaves = () =>

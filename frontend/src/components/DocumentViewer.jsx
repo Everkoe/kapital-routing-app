@@ -119,8 +119,10 @@ const DocumentViewer = ({
         {confirmando && (
           <div className="doc-viewer-confirmar" role="alertdialog" aria-label="Confirmar la eliminación">
             <p>
-              ¿Eliminar <strong>{titulo}</strong>? Se borra el archivo, y el conductor tendrá que volver
-              a entregarlo.
+              ¿Eliminar <strong>{titulo}</strong>?
+              {documento.deAdministracion
+                ? ' Se borra el archivo.'
+                : ' Se borra el archivo, y el conductor tendrá que volver a entregarlo.'}
             </p>
             <div className="doc-viewer-confirmar-botones">
               <button type="button" className="btn-secondary" onClick={() => setConfirmando(false)} disabled={eliminando}>
@@ -161,7 +163,10 @@ const DocumentViewer = ({
           ) : !disponible ? (
             <div className="doc-viewer-error">
               <h4>Documento no disponible</h4>
-              <p>El archivo no se cargó correctamente. Pide al conductor que lo vuelva a subir.</p>
+              <p>
+                El archivo no se cargó correctamente.
+                {documento.deAdministracion ? ' Vuelve a subirlo.' : ' Pide al conductor que lo vuelva a subir.'}
+              </p>
             </div>
           ) : pdf ? (
             <div className="doc-viewer-pdf">

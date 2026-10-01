@@ -7,6 +7,7 @@ import {
   caraBloqueada,
   caraDestinoParaArrastre,
   carasDeDocumento,
+  esDeAdministracion,
 } from '../constants/documentosConductor';
 
 /**
@@ -21,12 +22,17 @@ import {
  * Arrastrar o pegar sobre la tarjeta va a la imagen completa, salvo que ya se
  * haya empezado por caras sueltas (`caraDestinoParaArrastre`). Con la imagen
  * completa subida, delante y detrás quedan bloqueadas.
+ *
+ * Lo que sube Administración (el CAMO) no se aprueba ni se rechaza: lo pone
+ * quien lo revisaría, y rechazarlo le pediría al conductor algo que no puede
+ * subir. Basta con decir si está.
  */
 
 const ESTADOS = {
   aprobado: { Icon: CheckCircle, clase: 'rev-ok', texto: 'Aprobado' },
   rechazado: { Icon: XCircle, clase: 'rev-no', texto: 'Rechazado' },
   pendiente: { Icon: Clock, clase: 'rev-pending', texto: 'Pendiente' },
+  subido: { Icon: CheckCircle, clase: 'rev-ok', texto: 'Subido' },
 };
 
 const fuenteDeArchivo = (fileData) => {
@@ -84,6 +90,7 @@ const DocumentReviewCard = ({
 }) => {
   const [subiendo, setSubiendo] = useState(false);
   const dosCaras = admiteReverso(documento);
+  const deAdministracion = esDeAdministracion(documento);
 
   const caras = carasDeDocumento(documento).map((cara) => ({
     ...cara,
@@ -92,7 +99,9 @@ const DocumentReviewCard = ({
   }));
 
   const conArchivo = caras.filter((cara) => cara.tieneArchivo);
-  const estado = estadoDocumento(caras, revisiones);
+  const estado = deAdministracion
+    ? (conArchivo.length > 0 ? ESTADOS.subido : null)
+    : estadoDocumento(caras, revisiones);
   const ocupado = caras.some((cara) => cargando?.[cara.campo]);
 
   const caraParaArrastre = caraDestinoParaArrastre(caras);
@@ -118,6 +127,8 @@ const DocumentReviewCard = ({
         )}
       </div>
 
+      {documento.detalle && <p className="doc-caras-resumen">{documento.detalle}</p>}
+
       {dosCaras && conArchivo.length > 0 && (
         <p className="doc-caras-resumen">{resumenDeCaras(caras)}</p>
       )}
@@ -129,6 +140,9 @@ const DocumentReviewCard = ({
             className="btn-view-doc"
             onClick={() => onView({
               name: documento.label,
+              // El visor no le dice que «el conductor tendrá que volver a
+              // entregarlo» a lo que nunca entrega el conductor.
+              deAdministracion,
               // El visor recibe todas las caras y resuelve dentro cuál mostrar,
               // para no llenar la tarjeta de un botón «Ver» por cara.
               caras: caras.map((cara) => ({
@@ -168,7 +182,7 @@ const DocumentReviewCard = ({
           </label>
         )}
 
-        {conArchivo.length > 0 && (
+        {conArchivo.length > 0 && !deAdministracion && (
           <>
             <button
               type="button"
@@ -227,8 +241,10 @@ const DocumentReviewCard = ({
 
       {conArchivo.length === 0 && (
         <p className="review-doc-missing">
-          El conductor aún no ha subido este documento. Arrastra el archivo aquí,
-          pégalo con Ctrl+V o usa el botón.
+          {deAdministracion
+            ? 'Lo sube Administración; al conductor no se le pide.'
+            : 'El conductor aún no ha subido este documento.'}
+          {' '}Arrastra el archivo aquí, pégalo con Ctrl+V o usa el botón.
         </p>
       )}
     </DocumentDropZone>

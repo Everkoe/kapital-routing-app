@@ -180,6 +180,17 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   blanco y subir un documento desde ahí no sabía su carpeta—, y un conductor sin unidad recibe lo que sube
   Administración en su carpeta personal (`_carpeta_para_la_subida`). **Desplegado en producción el
   2026-09-29** (merge `7b32b44`, PR #20, sin migraciones).
+- **El CAMO lo sube solo Administración** (desde el 2026-09-30, pedido del usuario): el Certificado de
+  Aptitud Médico Ocupacional que emite la clínica, en la revisión de documentos de la ficha y de Accesos.
+  En el catálogo va con `soloAdministracion` y en el backend en `_DOCUMENTOS_DE_ADMINISTRACION` (una
+  prueba compara las dos listas). **No se pide en el alta ni sale en las pantallas del conductor**, el
+  servidor no se lo acepta a él (403 por el rol de la sesión, no por `uploaded_by`, que lo declara quien
+  llama), **no se aprueba ni se rechaza** (400: rechazarlo le pediría algo que no puede subir) y quitarlo no
+  le manda aviso. El alta reescribe el perfil entero con lo que manda el conductor, así que ahora pasa por
+  `_perfil_del_alta`: conserva el CAMO y **ya no acepta `revision_docs`**, con el que un conductor podía
+  aprobarse sus propios documentos llamando al API. En la misma tanda, el «Comprobante de domicilio» pasó a
+  llamarse **«Declaración jurada de domicilio»**; la clave sigue siendo `comprobanteDomicilio`, que es con
+  la que están guardados los archivos ya subidos.
 - **Tras escribir `app_state` desde un script, el backend en marcha sigue sirviendo lo viejo.** Mantiene
   la flota y los usuarios en memoria (`conductores_db`, `usuarios_db`) y no relee mientras su caché siga
   fresca, así que la pantalla enseña el estado anterior y parece que la escritura no funcionó. Pasó con
