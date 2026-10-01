@@ -1151,7 +1151,8 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 /* DOC VIEWER MODAL (Global) */
 .doc-viewer-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+  /* Sin desenfoque: con el fondo casi negro no se ve, y recalcularlo al desplazar daba tirones. */
+  background: rgba(0,0,0,0.8);
   display: flex; align-items: center; justify-content: center;
   z-index: 9999; padding: 20px;
 }
@@ -1921,15 +1922,16 @@ select.campo-pendiente {
   opacity: 1;
   transform: scale(1.1);
 }
+/* Sin desenfoque detrás: la ficha del conductor es larga, y recalcularlo al
+   desplazarla daba tirones en equipos modestos. */
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.65);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(4px);
 }
 .modal-content {
   background: var(--kapital-card-bg);
@@ -2033,7 +2035,8 @@ select.campo-pendiente {
 /* DOC VIEWER MODAL */
 .doc-viewer-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+  /* Sin desenfoque: con el fondo casi negro no se ve, y recalcularlo al desplazar daba tirones. */
+  background: rgba(0,0,0,0.8);
   display: flex; align-items: center; justify-content: center;
   z-index: 9999; padding: 20px;
 }

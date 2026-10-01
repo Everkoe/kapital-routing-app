@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import { exportarLibro } from './utils/excel';
 import './App.css';
 
 const VistaReportes = () => {
@@ -24,7 +24,7 @@ const VistaReportes = () => {
     fetchReportes();
   }, []);
 
-  const handleExport = (registro) => {
+  const handleExport = async (registro) => {
     const flatData = registro.rutas.flatMap(route => 
       route.agentes.map(agente => ({
         'Fecha Turno': registro.fecha,
@@ -37,10 +37,10 @@ const VistaReportes = () => {
         'Estado': agente.estado || 'Asignado'
       }))
     );
-    const worksheet = XLSX.utils.json_to_sheet(flatData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte");
-    XLSX.writeFile(workbook, `Reporte_Kapital_${registro.fecha.replace(/[: ]/g, '_')}.xlsx`);
+    await exportarLibro(
+      [{ nombre: 'Reporte', filas: flatData }],
+      `Reporte_Kapital_${registro.fecha.replace(/[: ]/g, '_')}.xlsx`,
+    );
   };
 
   if (isLoading) return <div className="loading-indicator">Cargando reportes...</div>;

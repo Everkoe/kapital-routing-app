@@ -3,7 +3,7 @@ import {
   AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Sparkles, Trash2, Undo2, Upload,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import * as XLSX from 'xlsx';
+import { exportarLibro } from '../utils/excel';
 import { apiFetch } from '../utils/apiClient';
 import { buildPendingAgents } from './model/serviceModel.js';
 import { resultadoDeLaEdicion } from './model/resultadoEdicion.js';
@@ -423,7 +423,7 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
     setDesde('');
   }, []);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     // La exportación es una entrega del plan, no una captura de la vista.
     // Aunque haya filtros activos, el archivo incluye todos los servicios y
     // una hoja aparte con quienes siguen pendientes de colocar.
@@ -456,14 +456,11 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
       return;
     }
 
-    const book = XLSX.utils.book_new();
-    if (rows.length > 0) {
-      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), 'Programación');
-    }
-    if (pendingRows.length > 0) {
-      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(pendingRows), 'Pendientes');
-    }
-    XLSX.writeFile(book, `programacion_${OPERACION}_${fecha || dia || 'sin-fecha'}.xlsx`);
+    const exportado = await exportarLibro(
+      [{ nombre: 'Programación', filas: rows }, { nombre: 'Pendientes', filas: pendingRows }],
+      `programacion_${OPERACION}_${fecha || dia || 'sin-fecha'}.xlsx`,
+    );
+    if (!exportado) return;
     const filtrosActivos = Object.entries(filters).some(([clave, valor]) => (
       clave === 'query' ? Boolean(String(valor || '').trim()) : valor !== '__all__'
     ));

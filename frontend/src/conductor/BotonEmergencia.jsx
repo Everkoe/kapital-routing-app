@@ -43,8 +43,9 @@ const BotonEmergencia = ({ usuario, unidad, servicio, conTexto = false }) => {
         <Siren size={22} />
         {conTexto && 'Emergencia'}
       </button>
-      {/* Al `body`: la barra inferior lleva `backdrop-filter`, que encierra a
-          cualquier hijo `position: fixed` dentro de ella, y la hoja no se veía. */}
+      {/* Al `body`: la barra inferior llevaba `backdrop-filter`, que encierra a
+          cualquier hijo `position: fixed` dentro de ella, y la hoja no se veía.
+          Ya no lo lleva, pero así la hoja no depende de dónde esté el botón. */}
       {abierto && createPortal(
         <div className="cd-velo cd-portal-capa" role="presentation" onClick={() => !enviando && setAbierto(false)}>
           <div className="cd-hoja" role="dialog" aria-modal="true" aria-labelledby="cd-sos-titulo"

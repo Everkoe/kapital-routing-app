@@ -674,8 +674,10 @@
   bottom: 0;
   z-index: 40;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--kapital-bg) 88%, transparent);
-  backdrop-filter: blur(10px);
+  /* Opaca y sin desenfoque: va fija sobre la lista que se desplaza, y un
+     desenfoque se recalcula en cada fotograma, que en un teléfono modesto se
+     nota como tirones al hacer scroll. */
+  background: var(--kapital-bg);
   border-top: 1px solid var(--kapital-border);
 }
 
