@@ -1207,6 +1207,8 @@
   flex-direction: column;
   gap: 10px;
   margin: 0 0 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--kapital-border);
 }
 
 .pw-estimacion-titulo {
@@ -1219,13 +1221,26 @@
 
 .pw-estimacion-titulo svg { color: var(--kapital-text-secondary); }
 
+/* Las dos cifras juntas y con una línea fina entre ellas: repartidas a lo ancho
+   quedaba cada una en un extremo y no se leían como una sola estimación. */
 .pw-estimacion-cifras {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px 28px;
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 12px;
 }
 
-.pw-estimacion-cifra { display: flex; flex-direction: column; gap: 2px; }
+.pw-estimacion-cifra {
+  display: flex;
+  flex: 0 1 340px;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 24px;
+}
+
+.pw-estimacion-cifra + .pw-estimacion-cifra {
+  padding-left: 24px;
+  border-left: 1px solid var(--kapital-border);
+}
 
 .pw-estimacion-etiqueta {
   font-size: 0.74rem;
