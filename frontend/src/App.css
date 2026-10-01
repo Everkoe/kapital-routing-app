@@ -1176,11 +1176,25 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
 .close-btn-inline:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
 /* Quitar un archivo mal subido, desde el visor (solo en la revisión de Administración). */
 .doc-viewer-acciones { display: flex; align-items: center; gap: 8px; }
+.doc-viewer-bajar,
 .doc-viewer-eliminar,
 .doc-viewer-eliminar-si {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
   padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
   transition: opacity 0.15s ease, background 0.15s ease;
+}
+.doc-viewer-bajar {
+  background: transparent; color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+}
+.doc-viewer-bajar:hover:not(:disabled) { background: var(--accent-bg, rgba(56,189,248,0.1)); }
+.doc-viewer-bajar:disabled { opacity: 0.6; cursor: wait; }
+.doc-viewer-header { gap: 12px; }
+.doc-viewer-header h3 { min-width: 0; overflow-wrap: anywhere; }
+/* En el teléfono no caben el título y tres botones con texto: quedan los iconos. */
+@media (max-width: 480px) {
+  .doc-viewer-texto { display: none; }
+  .doc-viewer-acciones { gap: 6px; }
 }
 .doc-viewer-eliminar {
   background: transparent; color: var(--kapital-accent-red);
@@ -1343,6 +1357,51 @@ button:disabled { background: var(--kapital-border) !important; color: #64748b !
   text-align: center;
   color: var(--text-primary);
 }
+
+/* --- Zoom de la imagen del visor (ImagenConZoom) ------------------------- */
+
+.doc-zoom { position: relative; width: 100%; height: 100%; }
+
+/* La imagen ocupa lo que dejan la cabecera, las caras y el pie. Con su alto
+   fijo (el 80% de la pantalla, como el visor entero) se salía por abajo: el
+   visor la recortaba, y con ella los botones del zoom. */
+.doc-viewer-body:has(.doc-zoom) { height: auto; flex: 1; min-height: 0; }
+
+.doc-zoom-marco {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  cursor: zoom-in;
+  user-select: none;
+}
+/* Ampliada, un dedo arrastra la imagen en vez de desplazar la página. */
+.doc-zoom-marco.ampliada { cursor: grab; touch-action: none; }
+.doc-zoom-marco.arrastrando { cursor: grabbing; }
+
+.doc-zoom-marco .doc-image {
+  transform-origin: center center;
+  transition: transform 0.12s ease-out;
+}
+/* Arrastrando, la imagen sigue al cursor sin retraso. */
+.doc-zoom-marco.arrastrando .doc-image { transition: none; }
+
+.doc-zoom-controles {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px; border-radius: 10px;
+  background: var(--kapital-card-bg); border: 1px solid var(--kapital-border);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+}
+.doc-zoom-controles button {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--kapital-text-primary);
+  font-family: inherit; font-size: 0.78rem; font-weight: 600;
+  cursor: pointer; transition: background 0.15s ease;
+}
+.doc-zoom-controles button:hover:not(:disabled) { background: var(--accent-bg, rgba(56,189,248,0.1)); }
+.doc-zoom-controles button:disabled { opacity: 0.4; cursor: default; }
+.doc-zoom-porcentaje { min-width: 54px; }
 
 .doc-viewer-pdf { display: flex; flex-direction: column; align-items: center; gap: 20px; }
 .doc-viewer-pdf svg { color: var(--primary-color); }
