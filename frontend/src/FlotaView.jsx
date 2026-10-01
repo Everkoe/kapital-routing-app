@@ -449,13 +449,8 @@ const FlotaView = ({ usuario, initialBase }) => {
     setIsConductorModalOpen(true);
     setIsLoadingConductor(true);
     try {
-      const res = await fetch(`/api/conductor/info/${unidadId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setConductorInfo(data);
-      } else {
-        setConductorInfo(null);
-      }
+      // Por el cliente compartido: con la sesión caducada, al login.
+      setConductorInfo(await apiFetch(`/api/conductor/info/${unidadId}`));
     } catch (e) {
       console.error(e);
       setConductorInfo(null);
@@ -472,12 +467,12 @@ const FlotaView = ({ usuario, initialBase }) => {
   const fetchFlota = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/flota');
-      if (!response.ok) throw new Error('Error fetching fleet data');
-      const data = await response.json();
-      setFlota(data.flota);
+      // Por el cliente compartido: con la sesión caducada lleva al login en vez
+      // de quedarse en un error que parece una caída.
+      const data = await apiFetch('/api/flota');
+      setFlota(data?.flota || []);
     } catch (err) {
-      setError(err.message);
+      if (!err?.isSessionExpired) setError(err.message);
     } finally {
       setIsLoading(false);
     }

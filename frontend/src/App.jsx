@@ -4,7 +4,7 @@ import { exportarLibro } from './utils/excel';
 import { History, Activity, Shield, ShieldCheck, MapPin, Truck, Smartphone, AlertTriangle, Key, LayoutDashboard, Settings, UserCircle, Save, LogOut, Navigation, Clock, CheckCircle2, FileText, CheckCircle, Search, Eye, Filter, User, Moon, Sun, Camera, X, Edit3, PlusCircle, MinusCircle, XCircle, CheckSquare, Calendar, Circle, Image as ImageIcon, Maximize2, Play, Check, Download, UploadCloud } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 import { GlobalLoader } from './components/GlobalLoader';
-import { apiFetch, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
+import { ApiError, apiFetch, apiRequest, logoutSession, setSessionExpiredHandler } from './utils/apiClient';
 import { olvidarUrlsFirmadas } from './utils/documentoStorage';
 import { haySesionRecordada, olvidarSesion, recordarSesion } from './utils/marcaDeSesion';
 import './App.css';
@@ -1099,11 +1099,18 @@ function App() {
       let nextDelay = ADMIN_POLL_INTERVAL_MS;
 
       try {
-        const res = await fetch(`/api/notifications?last_id=${lastNotifIdRef.current || 0}`, {
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          if (RETRYABLE_ADMIN_STATUS_CODES.has(res.status)) {
+        let res;
+        try {
+          // Por el cliente compartido: con la sesión caducada, el siguiente
+          // sondeo lleva al login desde cualquier pantalla. Con `fetch` directo
+          // el 401 se ignoraba y la pantalla abierta acababa diciendo «Datos
+          // del sistema no disponibles», como si se hubiera caído el servicio.
+          res = await apiRequest(`/api/notifications?last_id=${lastNotifIdRef.current || 0}`, {
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (!(error instanceof ApiError)) throw error;
+          if (RETRYABLE_ADMIN_STATUS_CODES.has(error.status)) {
             backoffMs = backoffMs > 0
               ? Math.min(backoffMs * 2, ADMIN_POLL_BACKOFF_MAX_MS)
               : ADMIN_POLL_BACKOFF_BASE_MS;
