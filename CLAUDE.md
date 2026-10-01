@@ -356,6 +356,10 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **Desplegado en producción el 2026-09-30** (merge `e0eef72`, PR #22, sin migraciones): `GET /api`
     sigue con `estimacion_duracion: true` y, sin sesión, proponer y aplicar responden 401. Que `pyvroom`
     cargue dentro de la función solo se ve al calcular una propuesta con sesión: `GET /api` no lo dice.
+    **Comprobado en producción el 2026-09-30** con la sesión del usuario, sin aplicar: el plan del 26/9
+    dio 42 → 21 unidades en lo que se reorganiza (51 → 46 en la sede), 67,8 → 51,2 h, a bordo mediana
+    33 → 38 min y máximo 142 → 80, 6 sin sitio y 52 servicios intactos por 83 personas sin ubicar,
+    calculado en **2,3 s** dentro de Vercel.
 - **El orden de recogida se arrastra** (desde 2026-09-26): sobre un plan, cada fila de la tabla del servicio
   lleva el asa de seis puntos y dos flechas —arrastrar con trackpad es impreciso y con teclado imposible—, y
   se guarda al soltar con `ordenar`. El orden nuevo se enseña al instante y vuelve atrás si el guardado
