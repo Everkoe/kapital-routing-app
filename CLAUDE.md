@@ -138,7 +138,9 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   nacían sin ella y no salían en el Excel de ninguna. El grupo sigue a la base (`_grupo_para`): en
   Remisse y en Sharf es la propia base; en masivo, TP, KONECTA o TP/KONECTA. En una cuenta sin
   `perfil_conductor` —el conductor no pasó el alta en la aplicación—, **llenar un dato personal desde la
-  ficha se lo crea**, y como su existencia es lo que decide que el alta está hecha (`profileComplete`), la
+  ficha se lo crea**, y **subirle un documento también** (`resubmit-docs`, desde el 2026-10-02: con los
+  importados, que no tienen perfil, daba «El conductor no tiene perfil configurado» y el documento no se
+  guardaba; el conductor sin perfil sigue entrando por su alta). Como su existencia es lo que decide que el alta está hecha (`profileComplete`), la
   aplicación ya no le pide el formulario: es Administración haciéndolo por él, y la ficha lo avisa. Lo
   del vehículo, sin perfil, se queda solo en la unidad. Al aprobar a
   un conductor en una unidad, su teléfono pasa a la unidad aunque ya tuviera uno (era el del anterior).

@@ -5720,16 +5720,27 @@ async def resubmit_driver_docs(payload: ResubmitDocsPayload, session_token: Sess
     _exigir_su_cuenta(actor, clave_actor, user, "No tienes acceso a los documentos de ese conductor.")
     await reload_notifications()
 
+    de_admin = getattr(payload, 'uploaded_by', 'conductor') == 'admin'
     perfil = user.get("perfil_conductor")
     if not perfil:
-        raise HTTPException(status_code=400, detail="El conductor no tiene perfil configurado.")
+        # Los conductores importados de las bases nunca pasaron el alta y no
+        # tienen perfil, así que subirles un documento desde la ficha daba «El
+        # conductor no tiene perfil configurado». Administración da de alta a
+        # quien no se maneja con la aplicación —la ficha lo avisa: «lo que
+        # llenes aquí queda como su alta»—, y su primer documento le crea el
+        # perfil, como un dato personal. El conductor sin perfil, en cambio,
+        # entra por su alta, que es la que se lo crea.
+        es_administracion = (actor.get("rol") in _ADMIN_ROLES) if actor is not None else de_admin
+        if not es_administracion:
+            raise HTTPException(status_code=400, detail="Completa primero tu alta en la aplicación.")
+        perfil = {}
+        user["perfil_conductor"] = perfil
 
     revision_docs = perfil.get("revision_docs", {})
 
     # Con el SOAT, la licencia o la revisión técnica va su fecha de vencimiento:
     # obligatoria cuando los sube el conductor. Administración pone la suya en
     # la ficha, junto al documento.
-    de_admin = getattr(payload, 'uploaded_by', 'conductor') == 'admin'
     fechas = _fechas_del_perfil(payload.docs, {} if de_admin else payload.docs)
     documentos = {k: v for k, v in payload.docs.items() if k not in _DOCUMENTO_DE_LA_FECHA}
 
