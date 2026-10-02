@@ -93,6 +93,16 @@ class Unidad:
     desde: int  # minutos desde el origen: cuándo puede empezar
     hasta: int
     ocupado: List[Tuple[int, int]] = field(default_factory=list)
+    # Las horas que trabaja ese día —el minuto de cada 'HH:00', en los mismos
+    # minutos que `Parada.turno`—, o `None` si todas. Lo configura el
+    # Programador en su Flota: un turno de una hora que no trabaja no se le da.
+    turnos: Optional[List[int]] = None
+
+    def trabaja(self, turno: int) -> bool:
+        if self.turnos is None:
+            return True
+        # Dentro de esa hora: de HH:00 a HH:59.
+        return any(0 <= (turno - t) % (24 * 60) < 60 for t in self.turnos)
 
 
 @dataclass
@@ -253,7 +263,8 @@ def _resolver_bloque(vroom, km, bloque, estado: _Estado, reglas: Reglas, objetiv
 
     modalidad, turno = bloque[0].modalidad, bloque[0].turno
     ventana = _ventana_del_bloque(modalidad, turno, reglas)
-    unidades = [u for u in estado.disponibles(*ventana) if u.codigo not in excluir]
+    unidades = [u for u in estado.disponibles(*ventana)
+                if u.codigo not in excluir and u.trabaja(turno)]
     if not unidades:
         return [], [], [p.id for p in bloque], 0.0, []
     # Submatriz: la sede, los domicilios del turno y dónde está cada unidad; y un

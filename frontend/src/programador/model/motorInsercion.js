@@ -160,7 +160,7 @@ const compararCandidatos = (a, b) => {
  * sin saber si falta una unidad o sobra una restricción.
  */
 export const proponer = (pendiente, services, { maxOpciones = MAX_OPCIONES } = {}) => {
-  const descartes = { otraSede: 0, llenos: 0, yaEsta: 0 };
+  const descartes = { otraSede: 0, llenos: 0, yaEsta: 0, noDisponible: 0 };
   const turno = texto(pendiente?.turno);
   const modalidad = texto(pendiente?.modalidad).toUpperCase();
   if (!turno || !modalidad) {
@@ -177,6 +177,12 @@ export const proponer = (pendiente, services, { maxOpciones = MAX_OPCIONES } = {
   for (const service of services || []) {
     if (!service?.asignado || service.modalidad !== modalidad) continue;
     if (!mismoTurno(service.turno, turno)) continue;
+    // Su unidad descansa ese día o no trabaja ese turno (lo configura el
+    // Programador en su Flota): no se le propone a nadie.
+    if (service.noDisponible) {
+      descartes.noDisponible += 1;
+      continue;
+    }
     if (service.agentes.some((a) => texto(a?.id) === dni)) {
       descartes.yaEsta += 1;
       continue;

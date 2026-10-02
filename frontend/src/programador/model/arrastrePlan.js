@@ -11,8 +11,9 @@ import {
  * precisamente para las excepciones que el motor no resuelve.
  *
  * - *No se deja*: otro sentido —un recojo no va en una salida—, otra sede
- *   —ninguno de los 5.959 servicios del histórico mezcla sedes— ni un
- *   servicio donde la persona ya va.
+ *   —ninguno de los 5.959 servicios del histórico mezcla sedes—, un servicio
+ *   donde la persona ya va, ni una unidad que ese día no trabaja ese turno
+ *   (su disponibilidad, que se cambia desde el propio aviso).
  * - *Se deja con aviso*, que se confirma antes de guardar: otro turno (quien
  *   entra a las 06:00 llegaría a otra hora, y el motor no lo propone nunca) y
  *   pasarse de la capacidad (tres unidades han llevado más de lo que declaran,
@@ -68,6 +69,14 @@ export const comprobarDestino = (persona, destino) => {
   if (!destino.asignado) return NO_SE_PUEDE('Ese servicio no tiene unidad.');
   if ((destino.agentes || []).some((a) => texto(a?.id) === persona.dni)) {
     return NO_SE_PUEDE(`${nombreDe(persona)} ya va en este servicio.`);
+  }
+  // Su unidad no trabaja en ese turno ese día. No se deja, pero soltarla abre
+  // el aviso con el atajo para cambiar su disponibilidad (`bloqueo`).
+  if (destino.noDisponible) {
+    return {
+      ...NO_SE_PUEDE(destino.noDisponible),
+      bloqueo: { unidad: destino.conductor, turno: destino.turno },
+    };
   }
 
   const modalidad = texto(persona.modalidad).toUpperCase();

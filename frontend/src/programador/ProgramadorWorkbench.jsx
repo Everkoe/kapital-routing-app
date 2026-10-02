@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CalendarPlus, ClipboardList, History, Inbox, Sparkles, Trash2, Undo2, Upload,
+  AlertTriangle, CalendarPlus, CalendarX2, ClipboardList, History, Inbox, Sparkles, Trash2, Undo2,
+  Upload, UserMinus,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { exportarLibro } from '../utils/excel';
@@ -28,6 +29,8 @@ import ConfirmarArrastre from './components/ConfirmarArrastre.jsx';
 import CrearProgramacion from './components/CrearProgramacion.jsx';
 import MoverAgente from './components/MoverAgente.jsx';
 import PropuestaIA from './components/PropuestaIA.jsx';
+import BloqueoNoDisponible from './components/BloqueoNoDisponible.jsx';
+import DisponibilidadUnidad from './components/DisponibilidadUnidad.jsx';
 import { useArrastrePlan } from './useArrastrePlan.js';
 import { VENTANA_OPERATIVA } from './model/operacion.js';
 import './programador.css';
@@ -141,6 +144,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
   const [desde, setDesde] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [openServiceId, setOpenServiceId] = useState(null);
+  // La unidad cuya disponibilidad se está cambiando desde la mesa.
+  const [editandoDisponibilidad, setEditandoDisponibilidad] = useState(null);
 
   const options = useMemo(() => {
     const base = filterOptions(services);
@@ -261,9 +266,14 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         body: JSON.stringify(desde ? { fecha: dia, desde } : { fecha: dia }),
       }), 'No se pudo crear la programación.');
       if (r?.sin_historico) throw new Error('No hay histórico del que partir.');
+      // Lo copiado puede llevar a quien ese día descansa: el servidor ya los
+      // pasó a pendientes, y se dice cuántos.
+      const fuera = Number(r?.no_disponibles?.personas) || 0;
       toast.success(r.ya_existia
         ? 'Ese día ya tenía programación.'
-        : `${r.creadas} asignaciones copiadas del ${formatoFecha(r.sembrado_desde)}.`, { id: aviso });
+        : `${r.creadas} asignaciones copiadas del ${formatoFecha(r.sembrado_desde)}.`
+          + (fuera ? ` ${fuera} ${fuera === 1 ? 'pasajero pasó' : 'pasajeros pasaron'} a pendientes `
+            + 'porque su unidad no está disponible.' : ''), { id: aviso });
       await refresh();
     } catch (fallo) {
       toast.error(fallo?.message || 'No se pudo crear la programación.', { id: aviso });
@@ -354,6 +364,37 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
 
   // Mover gente a mano: arrastrando entre servicios y pendientes, o con «Mover».
   const arrastrePlan = useArrastrePlan({ editar, pendientesMotor });
+
+  // Servicios de unidades que ese día no trabajan en su turno. Al crear el día
+  // y al guardar una disponibilidad sus pasajeros ya pasan solos a pendientes;
+  // esto recoge lo que se haya colado (un plan creado antes, por ejemplo).
+  const noDisponibles = useMemo(() => services.filter((s) => s.noDisponible), [services]);
+  const pasajerosNoDisponibles = noDisponibles.reduce((n, s) => n + s.agentCount, 0);
+
+  const pasarNoDisponibles = useCallback(async () => {
+    setGuardando(true);
+    const aviso = toast.loading('Pasando a pendientes…');
+    try {
+      const r = await apiFetch('/api/programador/plan/no-disponibles', {
+        method: 'POST', json: { fecha: fecha || dia },
+      });
+      const personas = Number(r?.personas) || 0;
+      toast.success(personas
+        ? `${personas} ${personas === 1 ? 'pasajero pasó' : 'pasajeros pasaron'} a pendientes para ir en otra unidad.`
+        : 'No había nadie en unidades no disponibles.', { id: aviso });
+      await refresh();
+    } catch (fallo) {
+      toast.error(fallo?.message || 'No se pudo pasar a pendientes.', { id: aviso });
+    } finally {
+      setGuardando(false);
+    }
+  }, [dia, fecha, refresh]);
+
+  const { cerrarBloqueo } = arrastrePlan;
+  const modificarDisponibilidad = useCallback((unidad) => {
+    cerrarBloqueo();
+    setEditandoDisponibilidad(unidad);
+  }, [cerrarBloqueo]);
 
   // La propuesta que se ve se calculó suponiendo que los demás pendientes
   // también entraban. Al asignar solo a una persona se recalcula contra el
@@ -558,6 +599,24 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
         )
       )}
 
+      {modo === 'plan' && noDisponibles.length > 0 && (
+        <p className="pw-notice" data-tone="danger">
+          <CalendarX2 size={16} aria-hidden="true" />
+          <span>
+            {noDisponibles.length === 1 ? 'Un servicio tiene' : `${noDisponibles.length} servicios tienen`}
+            {' '}la unidad no disponible ese día ({pasajerosNoDisponibles}{' '}
+            {pasajerosNoDisponibles === 1 ? 'pasajero' : 'pasajeros'}). Tienen que ir en otra unidad.
+          </span>
+          <span className="pw-notice-acciones">
+            <button type="button" className="pw-btn pw-btn-sm" onClick={pasarNoDisponibles}
+              disabled={guardando}>
+              <UserMinus size={14} aria-hidden="true" />
+              Pasarlos a pendientes
+            </button>
+          </span>
+        </p>
+      )}
+
       {/* Deshacer va aquí y no en un aviso que se va solo: si alguien lo
           busca un minuto después, tiene que seguir estando. */}
       {modo === 'plan' && deshacerIA?.dia === dia && (
@@ -674,6 +733,8 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
                   onArrastrar={modo === 'plan' && !guardando ? arrastrePlan.empezarDesdeServicio : null}
                   onSoltar={modo === 'plan' ? arrastrePlan.soltarEn : null}
                   onMover={modo === 'plan' ? arrastrePlan.abrirMover : null}
+                  onPasarNoDisponibles={modo === 'plan' && !guardando ? pasarNoDisponibles : null}
+                  onEditarDisponibilidad={modo === 'plan' ? setEditandoDisponibilidad : null}
                 />
               ))}
           </div>
@@ -702,6 +763,22 @@ const ProgramadorWorkbench = ({ onIrACargar }) => {
           onConfirmar={arrastrePlan.confirmar}
           onCancelar={arrastrePlan.cancelarConfirmacion}
         />
+
+        <BloqueoNoDisponible
+          bloqueo={arrastrePlan.bloqueado}
+          onModificar={modificarDisponibilidad}
+          onCerrar={cerrarBloqueo}
+        />
+
+        {editandoDisponibilidad && (
+          <DisponibilidadUnidad
+            unidad={editandoDisponibilidad}
+            fechaFoco={fecha || dia}
+            onCerrar={() => setEditandoDisponibilidad(null)}
+            // Si tocó este día, sus pasajeros ya pasaron a pendientes: se relee.
+            onGuardado={refresh}
+          />
+        )}
 
         <ConfirmarPlan
           abierto={confirmarBorrar}

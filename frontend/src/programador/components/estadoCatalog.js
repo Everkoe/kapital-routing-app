@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, CheckCircle2, CircleDashed, Info, MapPin, Undo2, UserPlus,
+  AlertTriangle, CalendarX2, CheckCircle2, CircleDashed, Info, MapPin, Undo2, UserPlus,
 } from 'lucide-react';
 
 /**
@@ -42,6 +42,9 @@ export const NOVELTY_REASONS = {
   // Quien el Programador sacó de su servicio para recolocarlo. No es una baja:
   // viaja, solo que todavía no tiene coche. La línea de detalle dice en cuál iba.
   devuelto: { label: 'Por recolocar', tone: 'warn', Icon: Undo2 },
+  // Su unidad descansa ese día o no trabaja ese turno (la disponibilidad que
+  // configura el Programador). Tampoco es una baja: viaja, en otro coche.
+  no_disponible: { label: 'Unidad no disponible', tone: 'danger', Icon: CalendarX2 },
 };
 
 export const SERVICE_STATE_KEYS = Object.keys(SERVICE_STATES);

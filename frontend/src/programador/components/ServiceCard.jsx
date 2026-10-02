@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Building,
+  CalendarCog,
+  CalendarX2,
   Check,
   ChevronDown,
   ChevronRight,
@@ -314,7 +316,8 @@ const AgentTable = ({
 
 const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
                       onRetirar, onReponer, onOrdenar, historical,
-                      arrastre = null, onArrastrar, onSoltar, onMover }) => {
+                      arrastre = null, onArrastrar, onSoltar, onMover,
+                      onPasarNoDisponibles, onEditarDisponibilidad }) => {
   const via = sentido(service.horario);
   const detailId = `pw-detail-${service.id}`;
   const estimacion = describirEstimacion(service.estimacion, service.turno);
@@ -333,7 +336,9 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
       data-soltar={soltar} data-encima={(encima && soltar) ? 'true' : undefined}
       onDragOver={destino ? (e) => {
         if (encimaDe !== arrastre) setEncimaDe(arrastre);
-        if (destino.permitido) {
+        // Una unidad no disponible tampoco acepta a nadie, pero se deja soltar
+        // para que salga el aviso con el atajo a su disponibilidad.
+        if (destino.permitido || destino.bloqueo) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
         }
@@ -344,7 +349,7 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
       onDrop={destino ? (e) => {
         e.preventDefault();
         setEncimaDe(null);
-        if (destino.permitido) onSoltar(service);
+        if (destino.permitido || destino.bloqueo) onSoltar(service);
       } : undefined}>
       {nota && (
         <span className="pw-soltar-nota" data-tono={soltar} aria-hidden="true">{nota}</span>
@@ -386,6 +391,12 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
                 : `Entró o salió gente respecto ${comparadoCon ? `al ${comparadoCon}` : 'al día cargado anterior'}.`}>
               <History size={11} aria-hidden="true" />
               {service.cambio?.servicio_nuevo ? 'Servicio nuevo' : 'Cambió'}
+            </span>
+          )}
+          {service.noDisponible && (
+            <span className="pw-tag pw-tag-no-disponible" title={service.noDisponible}>
+              <CalendarX2 size={11} aria-hidden="true" />
+              No disponible
             </span>
           )}
           <ServiceStateBadge estado={service.estado} />
@@ -432,6 +443,28 @@ const ServiceCard = ({ service, ordinal, isOpen, onToggle, comparadoCon,
           </dl>
 
           <EstimacionIA estimacion={estimacion} />
+
+          {service.noDisponible && (
+            <p className="pw-notice" data-tone="danger">
+              <CalendarX2 size={16} aria-hidden="true" />
+              <span>{service.noDisponible} Sus pasajeros tienen que ir en otra unidad.</span>
+              <span className="pw-notice-acciones">
+                {onPasarNoDisponibles && (
+                  <button type="button" className="pw-btn pw-btn-sm" onClick={onPasarNoDisponibles}>
+                    <UserMinus size={14} aria-hidden="true" />
+                    Pasar a pendientes
+                  </button>
+                )}
+                {onEditarDisponibilidad && (
+                  <button type="button" className="pw-btn pw-btn-sm"
+                    onClick={() => onEditarDisponibilidad(service.conductor)}>
+                    <CalendarCog size={14} aria-hidden="true" />
+                    Modificar disponibilidad
+                  </button>
+                )}
+              </span>
+            </p>
+          )}
 
           {service.modificado && (
             <p className="pw-notice" data-tone="warn">

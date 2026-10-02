@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../utils/apiClient.js';
 import { buildServices, indexFleet } from '../model/serviceModel.js';
+import { marcarNoDisponibles } from '../model/disponibilidad.js';
 
 /**
  * Carga compartida del tablero para todas las secciones del Programador.
@@ -99,6 +100,10 @@ const fetchBoard = async (dia) => {
     diasProgramables: Array.isArray(plan?.dias_programables)
       ? plan.dias_programables : [],
     diasConPlan: Array.isArray(plan?.dias_con_plan) ? plan.dias_con_plan : [],
+    // Qué unidades no trabajan todo ese día. Solo cuenta sobre un plan: lo
+    // ejecutado ya pasó y no se reasigna.
+    disponibilidad: plan?.existe && plan?.disponibilidad && typeof plan.disponibilidad === 'object'
+      ? plan.disponibilidad : {},
     fleet: indexFleet(fleet),
     loadedAt: Date.now(),
   };
@@ -144,7 +149,7 @@ export const resetBoardCache = () => {
 const vacio = {
   modo: 'historico', routes: [], fleet: {}, fecha: null, comparadoCon: null,
   sembradoDesde: null, pendientes: [], dias: [], diasProgramables: [],
-  diasConPlan: [], loadedAt: null,
+  diasConPlan: [], disponibilidad: {}, loadedAt: null,
 };
 
 export const useBoardData = (dia = '') => {
@@ -190,8 +195,8 @@ export const useBoardData = (dia = '') => {
   }, [run]);
 
   const services = useMemo(
-    () => buildServices(state.routes, state.fleet),
-    [state.routes, state.fleet],
+    () => marcarNoDisponibles(buildServices(state.routes, state.fleet), state.disponibilidad),
+    [state.routes, state.fleet, state.disponibilidad],
   );
 
   return { ...state, services, refresh };
