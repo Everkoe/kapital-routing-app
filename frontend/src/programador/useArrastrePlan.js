@@ -27,6 +27,9 @@ export const useArrastrePlan = ({ editar, pendientesMotor }) => {
   const [arrastre, setArrastre] = useState(null);
   const [porConfirmar, setPorConfirmar] = useState(null);
   const [moviendo, setMoviendo] = useState(null);
+  // Soltada en una unidad que no trabaja ese turno: el aviso de que no se
+  // puede, con el atajo para cambiar su disponibilidad.
+  const [bloqueado, setBloqueado] = useState(null);
 
   const empezarDesdeServicio = useCallback((service, agente) => {
     const persona = agente ? personaDeServicio(service, agente) : null;
@@ -49,7 +52,12 @@ export const useArrastrePlan = ({ editar, pendientesMotor }) => {
     const persona = arrastre;
     setArrastre(null);
     const comprobado = comprobarDestino(persona, destino);
-    if (!comprobado.permitido) return;
+    if (!comprobado.permitido) {
+      if (comprobado.bloqueo) {
+        setBloqueado({ persona, destino, motivo: comprobado.motivo, ...comprobado.bloqueo });
+      }
+      return;
+    }
     if (comprobado.avisos.length > 0) {
       setPorConfirmar({ persona, destino, avisos: comprobado.avisos });
       return;
@@ -64,6 +72,7 @@ export const useArrastrePlan = ({ editar, pendientesMotor }) => {
   }, [porConfirmar, aplicar]);
 
   const cancelarConfirmacion = useCallback(() => setPorConfirmar(null), []);
+  const cerrarBloqueo = useCallback(() => setBloqueado(null), []);
 
   const dejarPendiente = useCallback((persona) => {
     if (!persona?.origen) return Promise.resolve(false);
@@ -95,6 +104,8 @@ export const useArrastrePlan = ({ editar, pendientesMotor }) => {
     arrastre,
     porConfirmar,
     moviendo,
+    bloqueado,
+    cerrarBloqueo,
     empezarDesdeServicio,
     empezarDesdePendiente,
     terminar,

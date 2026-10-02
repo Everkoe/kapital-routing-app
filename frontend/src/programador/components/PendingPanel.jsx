@@ -41,6 +41,9 @@ const porQueNoCabe = ({ descartes, total }) => {
   const motivos = [];
   if (descartes.llenos) motivos.push(`${descartes.llenos} ${descartes.llenos === 1 ? 'lleno' : 'llenos'}`);
   if (descartes.otraSede) motivos.push(`${descartes.otraSede} a otra sede`);
+  if (descartes.noDisponible) {
+    motivos.push(`${descartes.noDisponible} con la unidad no disponible`);
+  }
   if (motivos.length === 0 && total === 0) return 'No hay ningún servicio de su turno y sentido.';
   return `Servicios de su turno: ${motivos.join(', ')}.`;
 };

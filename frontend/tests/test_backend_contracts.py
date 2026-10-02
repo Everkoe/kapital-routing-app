@@ -4580,6 +4580,8 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 9, 28)),
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
                 "fecha": "2026-09-29", "creadas": 396, "sembrado_desde": "2026-09-22"})) as base,
+            patch.object(backend, "_retirar_no_disponibles", new=AsyncMock(
+                return_value={"personas": 0, "servicios": []})),
             patch.object(backend, "persist_users_only", new=AsyncMock()),
         ):
             respuesta = await self._llamar(
@@ -4588,6 +4590,218 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertTrue(base.await_args.args[1]["rehacer"])
         self.assertEqual(backend.actividad_db[0]["action_type"], "Programación rehecha")
+
+    # --- Disponibilidad de las unidades (descansos y turnos) --------------------
+
+    async def test_only_the_programador_saves_the_availability_of_a_unit(self):
+        """«Solo programador» (el usuario): ni Administración ni el conductor."""
+        backend.AUTH_ENFORCED = True
+        _, programador = await self._sesion("prog@k.com", rol="Programador de rutas")
+        _, admin = await self._sesion("admin@k.com", rol="Administración")
+        _, chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="K-027")
+        cuerpo = {"unidad": "K-027", "semana": {"7": []}}
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(
+                return_value={"unidad": "K027", "personas": 0, "retiradas": []})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            de_admin = await self._llamar("POST", "/api/programador/disponibilidad", admin, json=cuerpo)
+            de_chofer = await self._llamar("POST", "/api/programador/disponibilidad", chofer, json=cuerpo)
+            sin_sesion = await self._llamar("POST", "/api/programador/disponibilidad", None, json=cuerpo)
+            bueno = await self._llamar("POST", "/api/programador/disponibilidad", programador, json=cuerpo)
+        self.assertEqual(de_admin.status_code, 403)
+        self.assertEqual(de_chofer.status_code, 403)
+        self.assertEqual(sin_sesion.status_code, 401)
+        self.assertEqual(bueno.status_code, 200)
+        base.assert_awaited_once()
+        nombre, argumentos = base.await_args.args
+        self.assertEqual(nombre, "guardar_disponibilidad")
+        # La unidad va por su clave normalizada, que es con la que se cruza el plan.
+        self.assertEqual(argumentos["p_unidad"], "K027")
+        self.assertEqual(argumentos["p_semana"], {"7": []})
+        self.assertEqual(argumentos["p_hoy"], "2026-10-02")
+        self.assertEqual(backend.actividad_db[0]["action_type"], "Disponibilidad cambiada")
+
+    async def test_saving_availability_checks_what_it_gets_before_touching_the_base(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        malos = [
+            {"semana": {"7": []}},                                         # sin unidad
+            {"unidad": "K-027"},                                           # nada que guardar
+            {"unidad": "K-027", "semana": {"9": []}},
+            {"unidad": "K-027", "fechas": [{"fecha": "2026-10-01", "turnos": []}]},  # ya pasó
+            {"unidad": "K-027", "fechas": [{"fecha": "2026-10-04", "turnos": ["25:00"]}]},
+        ]
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock()) as base,
+        ):
+            for malo in malos:
+                with self.subTest(malo=malo):
+                    respuesta = await self._llamar("POST", "/api/programador/disponibilidad", token, json=malo)
+                    self.assertEqual(respuesta.status_code, 400)
+        base.assert_not_awaited()
+
+    async def test_saving_availability_says_how_many_went_to_pendientes(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        resultado = {"unidad": "K027", "personas": 5, "retiradas": [
+            {"fecha": "2026-10-04", "personas": 5, "servicios": [
+                {"vehiculo": "K027", "turno": "03:00", "modalidad": "RECOJO", "personas": 5}]}]}
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=resultado)),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar("POST", "/api/programador/disponibilidad", token, json={
+                "unidad": "K-027", "fechas": [{"fecha": "2026-10-04", "turnos": [], "nota": "Vacaciones"}]})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["personas"], 5)
+        self.assertIn("5 pasajeros a pendientes", backend.actividad_db[0]["description"])
+
+    async def test_without_migration_018_saving_availability_says_what_is_missing(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        caida = HTTPException(status_code=503, detail="Servicio no disponible.")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=caida)),
+        ):
+            respuesta = await self._llamar("POST", "/api/programador/disponibilidad", token,
+                                           json={"unidad": "K-027", "semana": {"7": []}})
+        self.assertEqual(respuesta.status_code, 503)
+        self.assertIn("018", respuesta.json()["detail"])
+
+    async def test_reading_availability_brings_the_turnos_of_the_operation_in_order(self):
+        backend.AUTH_ENFORCED = True
+        _, programador = await self._sesion("prog@k.com", rol="Programador de rutas")
+        _, admin = await self._sesion("admin@k.com", rol="Administración")
+        datos = {"semanal": [{"unidad": "K027", "dia": 7, "turnos": []}], "fechas": [],
+                 "dias_con_plan": ["2026-10-03"],
+                 "turnos": [{"turno": "22:01", "veces": 400}, {"turno": "22:00", "veces": 20},
+                            {"turno": "03:00", "veces": 90}]}
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=lambda *a, **k: dict(datos))) as base,
+        ):
+            del_programador = await self._llamar("GET", "/api/programador/disponibilidad", programador)
+            de_admin = await self._llamar("GET", "/api/programador/disponibilidad", admin)
+        self.assertEqual(del_programador.status_code, 200)
+        cuerpo = del_programador.json()
+        self.assertEqual(cuerpo["turnos"], ["22:00", "03:00"])
+        self.assertEqual(cuerpo["hoy"], "2026-10-02")
+        self.assertTrue(cuerpo["puede_editar"])
+        # Administración la ve, pero no la cambia.
+        self.assertFalse(de_admin.json()["puede_editar"])
+        nombre, argumentos = base.await_args.args
+        self.assertEqual(nombre, "leer_disponibilidad")
+        self.assertEqual(argumentos["p_desde"], "2026-10-02")
+        self.assertEqual(argumentos["p_turnos_desde"], "2026-08-18")
+
+    async def test_the_plan_tells_which_units_do_not_work_all_day(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        reglas = {"K027": {"turnos": [], "origen": "fecha", "nota": None}}
+
+        async def base(nombre, cuerpo, **_):
+            if nombre == "disponibilidad_del_dia":
+                return reglas
+            return {"fecha": "2026-10-04", "existe": True, "rutas": [], "dias_con_plan": []}
+
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=base)):
+            respuesta = await self._llamar("GET", "/api/programador/plan?fecha=2026-10-04", token)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["disponibilidad"], reglas)
+
+    async def test_without_migration_018_the_plan_still_opens(self):
+        """Una base sin la 018 no puede dejar al Programador sin su mesa."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+
+        async def base(nombre, cuerpo, **_):
+            if nombre == "disponibilidad_del_dia":
+                raise HTTPException(status_code=503, detail="Servicio no disponible.")
+            return {"fecha": "2026-10-04", "existe": True, "rutas": [], "dias_con_plan": []}
+
+        with patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=base)):
+            respuesta = await self._llamar("GET", "/api/programador/plan?fecha=2026-10-04", token)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["disponibilidad"], {})
+
+    async def test_nobody_is_put_in_a_unit_that_does_not_work_that_turno(self):
+        """«Avisa que no se va a poder»: el servidor tampoco lo deja."""
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        reglas = {"K027": {"turnos": ["03:00"], "origen": "semana", "nota": None}}
+        llamadas = []
+
+        async def base(nombre, cuerpo, **_):
+            llamadas.append(nombre)
+            if nombre == "disponibilidad_del_dia":
+                return reglas
+            return {"fecha": "2026-10-04", "aplicados": 1, "ignorados": 0}
+
+        mover = {"accion": "mover", "dni": "1",
+                 "desde": {"vehiculo": "K028", "turno": "06:00", "modalidad": "RECOJO"},
+                 "hacia": {"vehiculo": "K027", "turno": "06:00", "modalidad": "RECOJO"}}
+        agregar_bien = {"accion": "agregar", "dni": "2", "vehiculo": "K027", "turno": "03:00",
+                        "modalidad": "RECOJO"}
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=base)),
+        ):
+            rechazado = await self._llamar("POST", "/api/programador/plan/editar", token,
+                                           json={"fecha": "2026-10-04", "cambios": [mover]})
+            aceptado = await self._llamar("POST", "/api/programador/plan/editar", token,
+                                          json={"fecha": "2026-10-04", "cambios": [agregar_bien]})
+        self.assertEqual(rechazado.status_code, 409)
+        self.assertIn("K027 solo trabaja a las 03:00", rechazado.json()["detail"])
+        self.assertEqual(aceptado.status_code, 200)
+        self.assertEqual(llamadas.count("editar_programacion"), 1)
+
+    async def test_creating_a_plan_moves_the_passengers_of_resting_units_to_pendientes(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        llamadas = []
+
+        async def base(nombre, cuerpo, **_):
+            llamadas.append(nombre)
+            if nombre == "retirar_no_disponibles":
+                return {"fecha": "2026-10-04", "personas": 6, "servicios": [
+                    {"vehiculo": "K027", "turno": "03:00", "modalidad": "RECOJO", "personas": 6}]}
+            return {"fecha": "2026-10-04", "creadas": 396, "sembrado_desde": "2026-09-27"}
+
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=base)),
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar("POST", "/api/programador/plan/sembrar", token,
+                                           json={"fecha": "2026-10-04"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(llamadas, ["sembrar_programacion", "retirar_no_disponibles"])
+        self.assertEqual(respuesta.json()["no_disponibles"]["personas"], 6)
+        self.assertIn("6 pasajeros a pendientes", backend.actividad_db[0]["description"])
+
+    async def test_the_button_moves_to_pendientes_what_slipped_into_resting_units(self):
+        backend.AUTH_ENFORCED = True
+        _, token = await self._sesion("prog@k.com", rol="Programador de rutas")
+        with (
+            patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
+            patch.object(backend, "_rpc_programador", new=AsyncMock(
+                return_value={"fecha": "2026-10-04", "personas": 2, "servicios": []})) as base,
+            patch.object(backend, "persist_users_only", new=AsyncMock()),
+        ):
+            respuesta = await self._llamar("POST", "/api/programador/plan/no-disponibles", token,
+                                           json={"fecha": "2026-10-04"})
+            sin_sesion = await self._llamar("POST", "/api/programador/plan/no-disponibles", None,
+                                            json={"fecha": "2026-10-04"})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(sin_sesion.status_code, 401)
+        base.assert_awaited_once_with("retirar_no_disponibles", {"dia": "2026-10-04"}, write=True)
+        self.assertEqual(backend.actividad_db[0]["action_type"],
+                         "Pasados a pendientes por unidad no disponible")
 
     def test_a_day_already_run_or_with_marks_is_neither_deleted_nor_redone(self):
         for codigo in ("dia_pasado", "con_marcas", "sin_programacion"):
@@ -5309,6 +5523,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
              "micro_zona": "BLL", "agentes": [agente]}]}
         with (
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value=plan)) as base,
+            patch.object(backend, "_disponibilidad_del_dia", new=AsyncMock(return_value={})),
             patch.object(backend, "_cargar_flota", new=AsyncMock()),
             patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
         ):
@@ -5390,6 +5605,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(backend, "_rpc_programador", new=AsyncMock(return_value={
                 "fecha": "2026-09-30", "existe": True, "rutas": rutas, "dias_con_plan": []})),
+            patch.object(backend, "_disponibilidad_del_dia", new=AsyncMock(return_value={})),
             patch.object(backend.estimador_duracion, "estimar", side_effect=estimaciones) as estimar,
         ):
             respuesta = await self._llamar("GET", "/api/programador/plan?fecha=2026-09-30", token)

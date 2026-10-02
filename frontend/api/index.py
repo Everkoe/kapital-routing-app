@@ -5,9 +5,10 @@ import pandas as pd
 # endpoint y el script de carga masiva, y porque este archivo ya pasa de las
 # seis mil lineas.
 try:
-    from api import (escritura_estado, estimador_duracion, historico_intranet, intentos_acceso,
-                     novedades_intranet, propuesta_ia, ruteo_vroom, sesiones)
+    from api import (disponibilidad, escritura_estado, estimador_duracion, historico_intranet,
+                     intentos_acceso, novedades_intranet, propuesta_ia, ruteo_vroom, sesiones)
 except ImportError:  # ejecucion desde dentro de `api/`
+    import disponibilidad
     import escritura_estado
     import estimador_duracion
     import propuesta_ia
@@ -6806,9 +6807,14 @@ async def leer_plan(fecha: Optional[str] = None, session_token: SessionCookie = 
     """
     await require_admin_session(session_token)
     dia = _dia_o_hoy(fecha)
-    plan = await _rpc_programador("leer_programacion", {"dia": dia})
+    # A la vez y no en cadena: cada viaje a la base cuesta ~0,3 s desde Lima.
+    plan, reglas = await asyncio.gather(
+        _rpc_programador("leer_programacion", {"dia": dia}), _disponibilidad_del_dia(dia))
     if isinstance(plan, dict):
         plan["dias_programables"] = _dias_programables(plan.get("dias_con_plan"))
+        # Qué unidades no trabajan todo ese día: la mesa marca sus servicios y
+        # el motor no las propone.
+        plan["disponibilidad"] = reglas
         # En un hilo: la primera vez que una instancia estima un plan entero
         # tarda ~0,7 s de cálculo, y en el bucle bloquearía las demás peticiones.
         await asyncio.to_thread(_con_estimaciones, plan, dia)
@@ -6848,12 +6854,19 @@ async def sembrar_plan(cuerpo: Dict[str, Any] = Body(...),
         "rehacer": bool(cuerpo.get("rehacer")),
     }, write=True)
     if resultado.get("creadas"):
+        # Lo copiado del día de origen puede llevar a quien ese día descansa:
+        # sus pasajeros pasan a pendientes para buscarles otro coche.
+        retiro = await _retirar_no_disponibles(dia)
+        resultado["no_disponibles"] = retiro
+        personas = int(retiro.get("personas") or 0)
         registrar_actividad(
             "Programación rehecha" if cuerpo.get("rehacer") else "Programación creada",
             actor=actor, entity_type="programacion",
             entity_id=dia,
             entity_label=f"{resultado['creadas']} asignaciones",
-            description=(f"Sembrada desde el {resultado.get('sembrado_desde')}."),
+            description=(f"Sembrada desde el {resultado.get('sembrado_desde')}."
+                         + (f" {personas} pasajeros a pendientes por unidad no disponible."
+                            if personas else "")),
         )
         await persist_users_only()
     return resultado
@@ -6895,6 +6908,7 @@ async def editar_plan(cuerpo: Dict[str, Any] = Body(...),
     if not isinstance(cambios, list) or not cambios:
         raise HTTPException(status_code=400, detail="No hay ningún cambio que guardar.")
     dia = await _dia_mutable(cuerpo.get("fecha"))
+    await _exigir_unidades_disponibles(dia, cambios)
     return await _rpc_programador("editar_programacion", {
         "dia": dia, "cambios": cambios,
     }, write=True)
@@ -6905,8 +6919,12 @@ async def editar_plan(cuerpo: Dict[str, Any] = Body(...),
 MAX_CAMBIOS_PROPUESTA = 5000
 
 
-def _proponer(plan: Dict[str, Any], capacidades: Dict[str, Optional[int]], objetivo: str) -> Optional[Dict[str, Any]]:
-    problema = propuesta_ia.construir(plan, lambda codigo: capacidades.get(_clave_de_vehiculo(codigo)))
+def _proponer(plan: Dict[str, Any], capacidades: Dict[str, Optional[int]], objetivo: str,
+              reglas: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    problema = propuesta_ia.construir(
+        plan, lambda codigo: capacidades.get(_clave_de_vehiculo(codigo)),
+        # La IA no le da a una unidad un turno que no trabaja.
+        turnos_de=lambda codigo: disponibilidad.turnos_permitidos(reglas or {}, _clave_de_vehiculo(codigo)))
     if problema is None:
         return None
     propuesta = ruteo_vroom.proponer(problema.km, problema.paradas, problema.unidades, objetivo)
@@ -6927,7 +6945,8 @@ async def proponer_plan(cuerpo: Dict[str, Any] = Body(...), session_token: Sessi
     if objetivo not in propuesta_ia.OBJETIVOS:
         raise HTTPException(status_code=400, detail="El objetivo debe ser «unidades» o «tiempo».")
     dia = await _dia_mutable(cuerpo.get("fecha"))
-    plan = await _rpc_programador("leer_programacion", {"dia": dia})
+    plan, reglas = await asyncio.gather(
+        _rpc_programador("leer_programacion", {"dia": dia}), _disponibilidad_del_dia(dia))
     if not isinstance(plan, dict) or not plan.get("existe"):
         raise HTTPException(status_code=409, detail="Ese día todavía no tiene programación.")
     # La duración estimada de cada servicio sirve para saber cuánto ocupa lo que no se toca.
@@ -6936,7 +6955,7 @@ async def proponer_plan(cuerpo: Dict[str, Any] = Body(...), session_token: Sessi
     capacidades = {_clave_de_vehiculo(padron): _capacidad_declarada(unidad.get("capacidad"))
                    for padron, unidad in conductores_db.items() if isinstance(unidad, dict)}
     try:
-        resultado = await asyncio.to_thread(_proponer, plan, capacidades, objetivo)
+        resultado = await asyncio.to_thread(_proponer, plan, capacidades, objetivo, reglas)
     except ImportError as exc:
         print(f"[Kapital] VROOM no está instalado: {exc}")
         raise HTTPException(status_code=503, detail="La IA de rutas no está disponible ahora.") from exc
@@ -6964,6 +6983,8 @@ async def aplicar_propuesta(cuerpo: Dict[str, Any] = Body(...), session_token: S
         raise HTTPException(status_code=400, detail="Eso no es una propuesta de la IA.")
     dia = await _dia_mutable(cuerpo.get("fecha"))
     deshacer = bool(cuerpo.get("deshacer"))
+    # La disponibilidad pudo cambiar desde que se calculó la propuesta.
+    await _exigir_unidades_disponibles(dia, cambios)
     resultado = await _rpc_programador("editar_programacion", {"dia": dia, "cambios": cambios}, write=True)
     movidas = sum(1 for c in cambios if c.get("accion") == "mover")
     registrar_actividad(
@@ -6974,6 +6995,173 @@ async def aplicar_propuesta(cuerpo: Dict[str, Any] = Body(...), session_token: S
                      f"(lo que cambió en el plan desde que se calculó)."),
     )
     await persist_users_only()
+    return resultado
+
+
+# --- Disponibilidad de las unidades -------------------------------------------
+#
+# Qué días descansa cada conductor y en qué turnos trabaja. La configura solo el
+# Programador desde su Flota (decisión del usuario, 2026-10-02), la guarda la
+# base (supabase/018) y las reglas están en `disponibilidad.py`. Quien no está
+# disponible no recibe gente: ni del motor, ni de la IA, ni a mano.
+
+_ROLES_DISPONIBILIDAD = ("Programador de rutas",)
+
+# Hasta cuándo se lee y se deja apuntar: unas vacaciones se avisan con tiempo.
+DIAS_DISPONIBILIDAD = 90
+
+# De cuánto histórico salen los turnos que se pueden marcar.
+DIAS_DE_TURNOS = 45
+
+_SIN_DISPONIBILIDAD = ("No se pudo leer o guardar la disponibilidad. Si es la primera vez, "
+                       "falta aplicar en Supabase la migración 018.")
+
+
+async def _rpc_disponibilidad(nombre: str, cuerpo: Dict[str, Any], *, write: bool = False) -> Any:
+    """Como `_rpc_programador`, pero diciendo qué falta si la base no responde."""
+    try:
+        return await _rpc_programador(nombre, cuerpo, write=write)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise HTTPException(status_code=503, detail=_SIN_DISPONIBILIDAD) from exc
+        raise
+
+
+async def _disponibilidad_del_dia(dia: str) -> Dict[str, Any]:
+    """Las unidades con alguna restricción ese día, o `{}`.
+
+    Si la base no responde —o aún no tiene la 018—, el plan se sigue viendo y
+    editando como antes en vez de caerse: queda en el log.
+    """
+    try:
+        reglas = await _rpc_programador("disponibilidad_del_dia", {"dia": dia})
+    except HTTPException as exc:
+        print(f"[Kapital] Disponibilidad del {dia} no disponible: {exc.detail}")
+        return {}
+    return reglas if isinstance(reglas, dict) else {}
+
+
+async def _retirar_no_disponibles(dia: str) -> Dict[str, Any]:
+    """Pasa a pendientes a quien va en una unidad que no trabaja en su turno."""
+    try:
+        resultado = await _rpc_programador("retirar_no_disponibles", {"dia": dia}, write=True)
+    except HTTPException as exc:
+        print(f"[Kapital] No se revisó la disponibilidad del {dia}: {exc.detail}")
+        return {"fecha": dia, "personas": 0, "servicios": [], "error": exc.detail}
+    return resultado if isinstance(resultado, dict) else {"fecha": dia, "personas": 0, "servicios": []}
+
+
+async def _exigir_unidades_disponibles(dia: str, cambios: List[Any]) -> None:
+    """Rechaza (409) una tanda que lleva a alguien a una unidad que no trabaja.
+
+    La pantalla ya lo impide; esto cubre una pantalla vieja o una llamada directa.
+    """
+    llevan = disponibilidad.destinos(cambios)
+    if not llevan:
+        return
+    reglas = await _disponibilidad_del_dia(dia)
+    for destino in llevan:
+        nombre = str(destino.get("vehiculo") or "")
+        motivo = disponibilidad.motivo_no_disponible(
+            reglas, _clave_de_vehiculo(nombre), nombre, destino.get("turno"))
+        if motivo:
+            raise HTTPException(status_code=409, detail=(
+                f"{motivo} No se le puede asignar gente: cambia su disponibilidad en Flota."))
+
+
+@app.get("/api/programador/disponibilidad")
+async def leer_disponibilidad(session_token: SessionCookie = None):
+    """La disponibilidad de toda la flota, para la Flota del Programador.
+
+    Trae la semana habitual de cada unidad, las fechas concretas de hoy a
+    `hasta`, los turnos que se pueden marcar (los de la operación) y qué días
+    tienen ya plan, para avisar de que guardar los tocará.
+    """
+    actor = await require_admin_session(session_token)
+    hoy = _hoy_en_lima()
+    hasta = hoy + timedelta(days=DIAS_DISPONIBILIDAD)
+    datos = await _rpc_disponibilidad("leer_disponibilidad", {
+        "p_desde": hoy.isoformat(), "p_hasta": hasta.isoformat(),
+        "p_turnos_desde": (hoy - timedelta(days=DIAS_DE_TURNOS)).isoformat(),
+    })
+    if not isinstance(datos, dict):
+        datos = {}
+    datos["turnos"] = disponibilidad.turnos_de_la_operacion(datos.get("turnos") or [])
+    datos["hoy"] = hoy.isoformat()
+    datos["hasta"] = hasta.isoformat()
+    datos["puede_editar"] = actor is None or actor.get("rol") in _ROLES_DISPONIBILIDAD
+    return datos
+
+
+@app.post("/api/programador/disponibilidad")
+async def guardar_disponibilidad(cuerpo: Dict[str, Any] = Body(...),
+                                 session_token: SessionCookie = None):
+    """Guarda cuándo descansa una unidad y en qué turnos trabaja.
+
+    `semana`: `{"1": [...] | null, …}` (1 lunes … 7 domingo; lista vacía,
+    descansa; `null`, trabaja todo). `fechas`: `[{"fecha", "turnos", "nota"}]`,
+    con `turnos` lista, `null` (trabaja todo ese día) o «semana» (volver a su
+    semana). Si toca un día ya programado, los pasajeros que esa unidad ya no
+    puede llevar pasan a pendientes en el acto, y la respuesta dice cuántos.
+    """
+    actor = await require_any_session(session_token)
+    if actor is not None and actor.get("rol") not in _ROLES_DISPONIBILIDAD:
+        raise HTTPException(status_code=403, detail=(
+            "Solo el Programador de rutas configura la disponibilidad de los conductores."))
+    nombre = str(cuerpo.get("unidad") or "").strip()
+    clave = _clave_de_vehiculo(nombre)
+    if not clave:
+        raise HTTPException(status_code=400, detail="Indica la unidad.")
+    hoy = _hoy_en_lima()
+    hasta = hoy + timedelta(days=DIAS_DISPONIBILIDAD)
+    try:
+        semana = disponibilidad.validar_semana(cuerpo.get("semana"))
+        fechas = disponibilidad.validar_fechas(cuerpo.get("fechas"), hoy, hasta)
+    except disponibilidad.EntradaInvalida as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if semana is None and not fechas:
+        raise HTTPException(status_code=400, detail="No hay ningún cambio que guardar.")
+    resultado = await _rpc_disponibilidad("guardar_disponibilidad", {
+        "p_unidad": clave, "p_semana": semana, "p_fechas": fechas,
+        "p_hoy": hoy.isoformat(), "p_hasta": hasta.isoformat(),
+        "p_por": _clave_de_cuenta(actor) if actor else None,
+    }, write=True)
+    personas = int((resultado or {}).get("personas") or 0)
+    partes = []
+    if semana is not None:
+        partes.append("semana habitual")
+    if fechas:
+        partes.append(f"{len(fechas)} fecha(s)")
+    registrar_actividad(
+        "Disponibilidad cambiada", actor=actor, entity_type="flota",
+        entity_id=clave, entity_label=nombre or clave,
+        description=(f"Cambió: {' y '.join(partes)}."
+                     + (f" {personas} pasajeros a pendientes por no estar disponible."
+                        if personas else "")),
+    )
+    await persist_users_only()
+    return resultado
+
+
+@app.post("/api/programador/plan/no-disponibles")
+async def pasar_no_disponibles_a_pendientes(cuerpo: Dict[str, Any] = Body(...),
+                                            session_token: SessionCookie = None):
+    """Pasa a pendientes a los pasajeros de las unidades que ese día no trabajan.
+
+    Normalmente ya lo hacen solos el crear la programación y el guardar una
+    disponibilidad; esto es el botón de la mesa para lo que se haya colado.
+    """
+    actor = await require_admin_session(session_token)
+    dia = await _dia_mutable(cuerpo.get("fecha"))
+    resultado = await _rpc_disponibilidad("retirar_no_disponibles", {"dia": dia}, write=True)
+    personas = int((resultado or {}).get("personas") or 0)
+    if personas:
+        registrar_actividad(
+            "Pasados a pendientes por unidad no disponible", actor=actor,
+            entity_type="programacion", entity_id=dia, entity_label=f"{personas} pasajeros",
+            description="Iban en unidades que ese día no trabajan en su turno.",
+        )
+        await persist_users_only()
     return resultado
 
 

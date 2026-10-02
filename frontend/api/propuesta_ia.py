@@ -58,6 +58,13 @@ def minuto_del_turno(turno: Any) -> Optional[int]:
     return horas * 60 + minutos + ORIGEN
 
 
+def _en_minutos(turnos: Optional[Sequence[str]]) -> Optional[List[int]]:
+    """Los turnos permitidos de una unidad, en los minutos de `minuto_del_turno`."""
+    if turnos is None:
+        return None
+    return [m for m in (minuto_del_turno(t) for t in turnos) if m is not None]
+
+
 def hora(minutos: float) -> str:
     total = int(round(minutos)) - ORIGEN
     total %= 24 * 60
@@ -125,8 +132,13 @@ def _sede_del_plan(rutas: Sequence[Mapping[str, Any]]) -> Optional[str]:
 
 
 def construir(plan: Mapping[str, Any], capacidad_de: Callable[[str], Optional[int]],
-              reglas: rv.Reglas = rv.Reglas()) -> Optional[Problema]:
-    """El problema de VROOM a partir del plan, o `None` si no hay nada que proponer."""
+              reglas: rv.Reglas = rv.Reglas(),
+              turnos_de: Callable[[str], Optional[List[str]]] = lambda codigo: None) -> Optional[Problema]:
+    """El problema de VROOM a partir del plan, o `None` si no hay nada que proponer.
+
+    `turnos_de` dice qué turnos ('HH:MM') trabaja cada unidad ese día, o
+    `None` si todos (la disponibilidad que configura el Programador).
+    """
     rutas = [r for r in (plan.get("rutas") or []) if isinstance(r, Mapping)]
     sede = _sede_del_plan(rutas)
     if sede is None:
@@ -171,8 +183,10 @@ def construir(plan: Mapping[str, Any], capacidad_de: Callable[[str], Optional[in
         return None
     unidades = [rv.Unidad(codigo, capacidad_de(codigo) or llevado.get(codigo) or CAPACIDAD_POR_DEFECTO,
                           min(ventanas) - HOLGURA_HORARIO, max(ventanas) + HOLGURA_HORARIO,
-                          ocupado.get(codigo, []))
+                          ocupado.get(codigo, []), _en_minutos(turnos_de(codigo)))
                 for codigo, ventanas in horario.items()]
+    # Quien descansa ese día no entra; sus pasajeros ya están en pendientes.
+    unidades = [u for u in unidades if u.turnos is None or u.turnos]
     return Problema(sede, rv.matriz_km(coordenadas), paradas, unidades, actuales, personas,
                     orden_actual, intactos, sin_ubicar)
 

@@ -453,6 +453,37 @@ Plataforma B2B de gestión de flotas, conductores y ruteo logístico. Conecta:
   - **Desplegado en producción el 2026-09-30** (merge `964c258`, PR #24), con la 017 aplicada antes por el
     usuario y `probar_funciones_plan.py` en verde contra ella (35/35); sin sesión, editar, proponer y
     aplicar siguen en 401.
+- **Cada conductor tiene su disponibilidad: qué días descansa y en qué turnos trabaja** (desde el
+  2026-10-02, pedido del usuario; [supabase/018_disponibilidad_unidades.sql](supabase/018_disponibilidad_unidades.sql),
+  [api/disponibilidad.py](frontend/api/disponibilidad.py) y
+  [model/disponibilidad.js](frontend/src/programador/model/disponibilidad.js), que tienen que coincidir).
+  - **Quién la cambia.** Solo el **Programador de rutas**, en su Flota: «Configurar» en cada unidad. El
+    resto de roles la ve.
+  - **Dos niveles.** Su **semana habitual** (`disponibilidad_semanal`: «descansa los domingos»,
+    «los lunes solo 03:00») y **fechas concretas** (`disponibilidad_fechas`), que mandan sobre la semana.
+    Hay también un «descanso de varios días» para vacaciones.
+  - **Qué guarda.** En las dos, `turnos` vacío es «descansa» y con turnos es «solo esos». En una fecha,
+    `null` es «trabaja todo», que anula su semana ese día.
+  - **Turnos.** Los botones salen del histórico reciente y del plan (`turnos_de_la_operacion`), no de una
+    lista escrita: hoy van de 22:00 a 07:00 «y después habrá más». 22:01 cuenta como 22:00.
+  - **Clave.** Va por la clave normalizada de la unidad, igual que el cruce con el plan.
+  - **Quien no está disponible no recibe gente.** En todas estas vías:
+    - **Al crear un día** (`sembrar`), el backend llama a `retirar_no_disponibles`. Pasan a pendientes,
+      motivo `no_disponible` y sin baja, los pasajeros de una unidad en un turno que no trabaja.
+    - **Al guardar una disponibilidad** que toca un día ya programado, lo mismo en la misma transacción.
+      Decisión del usuario: «si una unidad no está disponible por cualquier razón, deben reasignarse a
+      pendientes». La ventana avisa antes de qué días programados toca.
+    - **El motor y la IA.** El motor de inserción no los propone. La IA (VROOM) no le da a una unidad un
+      turno que no trabaja (`Unidad.turnos`, en los minutos de `minuto_del_turno`).
+    - **A mano**, arrastrando o con «Mover», no se deja: sale el aviso «no se va a poder» con el botón
+      «Modificar disponibilidad», como pidió el usuario.
+    - **El servidor** rechaza con 409 un `agregar` o `mover` a esa unidad, también al aplicar una
+      propuesta de la IA.
+    - **La mesa** marca en rojo lo que se haya colado y tiene «Pasar a pendientes»
+      (`POST /api/programador/plan/no-disponibles`).
+  - **Sin la 018**, el plan se ve y se edita como antes, y la Flota avisa de que falta la migración.
+  - **Contra la base:** `scripts/probar_disponibilidad.py` (`--con-migracion` antes de aplicarla), dentro
+    de una transacción que se deshace (22/22 el 2026-10-02).
 - **Un domicilio sin resolver no es el (0, 0).** El mapa del servicio filtraba con
   `Number.isFinite(Number(x))`, y `Number(null)` vale 0: cada agente sin ubicación se pintaba en el golfo de
   Guinea y el mapa se alejaba a medio mundo. Con 352 personas aún sin ubicar pasaba en casi cualquier
