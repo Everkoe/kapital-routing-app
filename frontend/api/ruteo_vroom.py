@@ -93,17 +93,16 @@ class Unidad:
     desde: int  # minutos desde el origen: cuándo puede empezar
     hasta: int
     ocupado: List[Tuple[int, int]] = field(default_factory=list)
-    # Los turnos que trabaja ese día, en los mismos minutos que `Parada.turno`,
-    # o `None` si todos. Lo configura el Programador en su Flota: un turno que
-    # no trabaja no se le da.
+    # Las horas que trabaja ese día —el minuto de cada 'HH:00', en los mismos
+    # minutos que `Parada.turno`—, o `None` si todas. Lo configura el
+    # Programador en su Flota: un turno de una hora que no trabaja no se le da.
     turnos: Optional[List[int]] = None
 
     def trabaja(self, turno: int) -> bool:
         if self.turnos is None:
             return True
-        dia = 24 * 60
-        return any(min(abs(turno - t) % dia, dia - abs(turno - t) % dia) <= TOLERANCIA_TURNO
-                   for t in self.turnos)
+        # Dentro de esa hora: de HH:00 a HH:59.
+        return any(0 <= (turno - t) % (24 * 60) < 60 for t in self.turnos)
 
 
 @dataclass

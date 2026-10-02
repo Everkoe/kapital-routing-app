@@ -4,9 +4,14 @@ turnos trabaja.
 La guarda la base (`supabase/018_disponibilidad_unidades.sql`), que también
 resuelve la de cada día (`disponibilidad_del_dia`) y saca del plan a quien no
 puede llevar (`retirar_no_disponibles`). Aquí está lo que el backend necesita
-alrededor: validar lo que manda la pantalla, ordenar los turnos de la
-operación y decir, ante un cambio del plan, si la unidad de destino trabaja
-en ese turno y por qué no.
+alrededor: validar lo que manda la pantalla, decir qué turnos se pueden marcar
+y, ante un cambio del plan, si la unidad de destino trabaja en ese turno y por
+qué no.
+
+**Los turnos van por horas** (019): `'03:00'` es el turno de las 3 y vale para
+cualquier servicio de 03:00 a 03:59 —22:00 y 22:01, 00:30 y 00:40—, que es como
+lo piensa el usuario («de 12, 1, 2, 3, 4, 5»). Del histórico salían 49 turnos
+distintos, muchos variantes de la misma hora o que casi nunca se usan.
 
 Una regla del día es `{"turnos": [...], "origen", "nota"}`: `turnos` vacío es
 «descansa» y con turnos es «solo esos». Las unidades que trabajan todo no
@@ -20,15 +25,10 @@ import re
 from datetime import date
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-# 22:00 y 22:01 son el mismo turno: la intranet escribe las salidas con «:01».
-# Igual que `TOLERANCIA_TURNO_MIN` en el motor y `_mismo_turno` en Postgres.
-TOLERANCIA_TURNO_MIN = 1
-MINUTOS_DIA = 24 * 60
-
 # La jornada de la operación empieza de noche (las salidas de las 22:00) y
-# acaba por la mañana. Ordenar los turnos desde el mediodía los deja en el
+# acaba por la mañana. Ordenar las horas desde el mediodía las deja en el
 # orden en que se trabajan: 22:00, 23:00, 00:00 … 07:00.
-INICIO_DE_LA_JORNADA = 12 * 60
+INICIO_DE_LA_JORNADA = 12
 
 _TURNO = re.compile(r"^(\d{1,2}):(\d{2})$")
 _FECHA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -40,58 +40,50 @@ class EntradaInvalida(ValueError):
     """Lo que manda la pantalla no tiene la forma esperada."""
 
 
-def canonico(turno: Any) -> Optional[str]:
-    """'3:00' → '03:00'. `None` si no es una hora válida."""
+def hora(turno: Any) -> Optional[int]:
+    """La hora de un turno 'HH:MM' (de 0 a 23), o `None` si no es una hora válida."""
     coincide = _TURNO.match(str(turno or "").strip())
     if not coincide:
         return None
     horas, minutos = int(coincide.group(1)), int(coincide.group(2))
     if horas > 23 or minutos > 59:
         return None
-    return f"{horas:02d}:{minutos:02d}"
+    return horas
 
 
-def minutos(turno: Any) -> Optional[int]:
-    limpio = canonico(turno)
-    if limpio is None:
-        return None
-    horas, mins = limpio.split(":")
-    return int(horas) * 60 + int(mins)
+def de_la_hora(turno: Any) -> Optional[str]:
+    """El turno de la hora a la que pertenece: '3:40' → '03:00'."""
+    valor = hora(turno)
+    return None if valor is None else f"{valor:02d}:00"
 
 
-def mismo_turno(a: Any, b: Any, tolerancia: int = TOLERANCIA_TURNO_MIN) -> bool:
-    ma, mb = minutos(a), minutos(b)
-    if ma is None or mb is None:
-        return False
-    diferencia = abs(ma - mb) % MINUTOS_DIA
-    return min(diferencia, MINUTOS_DIA - diferencia) <= tolerancia
+def misma_hora(a: Any, b: Any) -> bool:
+    ha, hb = hora(a), hora(b)
+    return ha is not None and ha == hb
 
 
 def _en_la_jornada(turno: str) -> int:
-    return (minutos(turno) - INICIO_DE_LA_JORNADA) % MINUTOS_DIA
+    return (hora(turno) - INICIO_DE_LA_JORNADA) % 24
 
 
-def turnos_de_la_operacion(filas: Iterable[Mapping[str, Any]]) -> List[str]:
-    """Los turnos que se pueden marcar, sin repetir 22:00 y 22:01.
+def ordenar(turnos: Iterable[str]) -> List[str]:
+    return sorted(turnos, key=_en_la_jornada)
 
-    Salen de la base (`turnos_de_la_operacion`: `[{"turno", "veces"}]`). De dos
-    turnos a un minuto se queda el de la hora en punto —es como se piensa el
-    turno, «el de las 10»— o, si ninguno lo es, el más frecuente.
+
+def turnos_de_la_operacion(filas: Iterable[Mapping[str, Any]], minimo: int = 1) -> List[str]:
+    """Las horas que se pueden marcar: las que la operación usa de verdad.
+
+    Salen de la base (`turnos_de_la_operacion`: `[{"turno", "veces"}]`),
+    agrupadas por hora. Solo entran las que llegan a `minimo` pasajeros en el
+    periodo: así las horas que casi nunca se usan no llenan la pantalla. Las
+    demás se pueden marcar igual con «Ver todas las horas».
     """
-    grupos: List[Dict[str, Any]] = []
-    for fila in sorted(filas or [], key=lambda f: -int(f.get("veces") or 0)):
-        turno = canonico(fila.get("turno"))
-        if turno is None:
-            continue
-        veces = int(fila.get("veces") or 0)
-        grupo = next((g for g in grupos if mismo_turno(g["turno"], turno)), None)
-        if grupo is None:
-            grupos.append({"turno": turno, "veces": veces})
-            continue
-        grupo["veces"] += veces
-        if turno.endswith(":00") and not grupo["turno"].endswith(":00"):
-            grupo["turno"] = turno
-    return sorted((g["turno"] for g in grupos), key=_en_la_jornada)
+    por_hora: Dict[str, int] = {}
+    for fila in filas or []:
+        turno = de_la_hora(fila.get("turno"))
+        if turno is not None:
+            por_hora[turno] = por_hora.get(turno, 0) + int(fila.get("veces") or 0)
+    return ordenar(t for t, veces in por_hora.items() if veces >= minimo)
 
 
 def _turnos(valor: Any, donde: str) -> List[str]:
@@ -99,12 +91,12 @@ def _turnos(valor: Any, donde: str) -> List[str]:
         raise EntradaInvalida(f"{donde}: los turnos deben ser una lista.")
     limpios = []
     for turno in valor:
-        limpio = canonico(turno)
+        limpio = de_la_hora(turno)
         if limpio is None:
             raise EntradaInvalida(f"{donde}: «{turno}» no es una hora (HH:MM).")
         if limpio not in limpios:
             limpios.append(limpio)
-    return sorted(limpios, key=_en_la_jornada)
+    return ordenar(limpios)
 
 
 def validar_semana(valor: Any) -> Optional[Dict[str, Optional[List[str]]]]:
@@ -161,17 +153,17 @@ def validar_fechas(valor: Any, hoy: date, hasta: date) -> List[Dict[str, Any]]:
 
 def _lista(turnos: List[str]) -> str:
     """«22:00, 03:00 y 04:00», en el orden de la jornada (la base los da por orden alfabético)."""
-    orden = sorted(turnos, key=lambda t: _en_la_jornada(t) if minutos(t) is not None else 0)
+    orden = ordenar(t for t in turnos if hora(t) is not None)
     if len(orden) == 1:
         return orden[0]
     return ", ".join(orden[:-1]) + " y " + orden[-1]
 
 
 def trabaja_en(regla: Optional[Mapping[str, Any]], turno: Any) -> bool:
-    """Si con esa regla del día la unidad trabaja en ese turno."""
+    """Si con esa regla del día la unidad trabaja en ese turno (por su hora)."""
     if not regla:
         return True
-    return any(mismo_turno(turno, t) for t in regla.get("turnos") or [])
+    return any(misma_hora(turno, t) for t in regla.get("turnos") or [])
 
 
 def motivo_no_disponible(disponibilidad: Mapping[str, Any], clave: str,
@@ -185,18 +177,21 @@ def motivo_no_disponible(disponibilidad: Mapping[str, Any], clave: str,
     if trabaja_en(regla, turno):
         return None
     turnos = list(regla.get("turnos") or [])
-    texto = (f"La unidad {nombre} descansa este día" if not turnos
-             else f"La unidad {nombre} solo trabaja a las {_lista(turnos)} este día")
+    if not turnos:
+        texto = f"La unidad {nombre} descansa este día"
+    else:
+        cuales = "el turno" if len(turnos) == 1 else "los turnos"
+        texto = f"La unidad {nombre} solo trabaja {cuales} de las {_lista(turnos)} este día"
     nota = str(regla.get("nota") or "").strip()
     return texto + (f" ({nota})." if nota else ".")
 
 
 def turnos_permitidos(disponibilidad: Mapping[str, Any], clave: str) -> Optional[List[str]]:
-    """Los turnos ('HH:MM') que puede hacer ese día, o `None` si todos (para VROOM)."""
+    """Las horas ('HH:00') que puede hacer ese día, o `None` si todas (para VROOM)."""
     regla = (disponibilidad or {}).get(clave)
     if not regla:
         return None
-    return [t for t in (canonico(t) for t in regla.get("turnos") or []) if t is not None]
+    return [t for t in (de_la_hora(t) for t in regla.get("turnos") or []) if t is not None]
 
 
 def destinos(cambios: Iterable[Any]) -> List[Dict[str, Any]]:

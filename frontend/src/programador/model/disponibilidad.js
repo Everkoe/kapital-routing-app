@@ -1,4 +1,3 @@
-import { mismoTurno } from './motorInsercion.js';
 import { fleetKey } from './serviceModel.js';
 
 /**
@@ -10,7 +9,27 @@ import { fleetKey } from './serviceModel.js';
  * concretas, que mandan sobre la semana—, y la base los resuelve para cada día
  * del plan (`disponibilidad_del_dia`, supabase/018). La misma lógica, para el
  * servidor, está en `api/disponibilidad.py`: las dos tienen que coincidir.
+ *
+ * **Los turnos van por horas** (supabase/019): `'03:00'` es «el de las 3» y vale
+ * para cualquier servicio de 03:00 a 03:59 —22:00 y 22:01, 00:30 y 00:40—, que
+ * es como lo piensa el usuario («de 12, 1, 2, 3, 4, 5»).
  */
+
+/** La hora de un turno 'HH:MM' (0 a 23), o `null`. */
+export const horaDe = (turno) => {
+  const coincide = /^(\d{1,2}):(\d{2})$/.exec(String(turno ?? '').trim());
+  if (!coincide) return null;
+  const h = Number(coincide[1]);
+  return h <= 23 && Number(coincide[2]) <= 59 ? h : null;
+};
+
+export const mismaHora = (a, b) => {
+  const ha = horaDe(a);
+  return ha !== null && ha === horaDe(b);
+};
+
+/** Las 24 horas, para marcar una que la operación todavía no usa. */
+export const TODAS_LAS_HORAS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
 
 export const DIAS_SEMANA = [
   { iso: 1, corto: 'Lun', largo: 'Lunes' },
@@ -25,13 +44,9 @@ export const DIAS_SEMANA = [
 // La jornada empieza de noche (las salidas de las 22:00) y acaba por la
 // mañana: ordenar desde el mediodía deja los turnos como se trabajan, 22:00,
 // 23:00, 00:00 … 07:00. Igual que `INICIO_DE_LA_JORNADA` en el backend.
-const INICIO_DE_LA_JORNADA = 12 * 60;
-const MINUTOS_DIA = 24 * 60;
+const INICIO_DE_LA_JORNADA = 12;
 
-const enLaJornada = (turno) => {
-  const [h, m] = String(turno).split(':').map(Number);
-  return (((h * 60 + m) - INICIO_DE_LA_JORNADA) % MINUTOS_DIA + MINUTOS_DIA) % MINUTOS_DIA;
-};
+const enLaJornada = (turno) => ((horaDe(turno) ?? 0) - INICIO_DE_LA_JORNADA + 24) % 24;
 
 export const ordenarTurnos = (turnos) => [...(turnos || [])]
   .sort((a, b) => enLaJornada(a) - enLaJornada(b));
@@ -59,7 +74,7 @@ export const textoDeRegla = (turnos) => {
 export const reglaDe = (disponibilidad, codigo) => disponibilidad?.[fleetKey(codigo)] ?? null;
 
 export const trabajaEn = (regla, turno) => (
-  !regla || (regla.turnos || []).some((t) => mismoTurno(turno, t))
+  !regla || (regla.turnos || []).some((t) => mismaHora(turno, t))
 );
 
 /**
@@ -70,9 +85,10 @@ export const motivoNoDisponible = (disponibilidad, codigo, turno) => {
   const regla = reglaDe(disponibilidad, codigo);
   if (trabajaEn(regla, turno)) return null;
   const turnos = regla.turnos || [];
+  const cuales = turnos.length === 1 ? 'el turno' : 'los turnos';
   const texto = turnos.length === 0
     ? `La unidad ${codigo} descansa este día`
-    : `La unidad ${codigo} solo trabaja a las ${listaDeTurnos(turnos)} este día`;
+    : `La unidad ${codigo} solo trabaja ${cuales} de las ${listaDeTurnos(turnos)} este día`;
   const nota = String(regla.nota || '').trim();
   return `${texto}${nota ? ` (${nota}).` : '.'}`;
 };

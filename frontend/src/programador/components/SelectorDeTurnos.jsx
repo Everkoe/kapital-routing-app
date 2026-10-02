@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { estadoDe, ordenarTurnos } from '../model/disponibilidad.js';
+import { TODAS_LAS_HORAS, estadoDe, ordenarTurnos } from '../model/disponibilidad.js';
 
 /**
  * Trabaja, descansa o solo algunos turnos —y cuáles—, para un día.
  *
  * `valor`: `null` trabaja todo, `[]` descansa, `['03:00', …]` solo esos, y
  * `undefined` «como su semana» (solo en un día concreto, con `conSemana`).
- * Los turnos se marcan como botones: así sirve igual para «de 12 a 5» que para
- * «solo el de las 6».
+ * Cada turno es una hora y se marca como botón: así sirve igual para «de 12 a
+ * 5» que para «solo el de las 6». Se enseñan las horas que la operación usa;
+ * «Ver todas las horas» deja marcar una nueva.
  */
 const SelectorDeTurnos = ({
   valor, turnos, onCambiar, etiqueta, conSemana = false, textoSemana = '', deshabilitado = false,
@@ -15,6 +16,7 @@ const SelectorDeTurnos = ({
   // «Solo algunos turnos» recién elegido y sin ninguno marcado todavía: se
   // guarda como descanso, pero se siguen enseñando los turnos para marcarlos.
   const [eligiendo, setEligiendo] = useState(false);
+  const [todas, setTodas] = useState(false);
   const marcados = Array.isArray(valor) ? valor : [];
   const modo = valor === undefined
     ? 'semana'
@@ -35,9 +37,11 @@ const SelectorDeTurnos = ({
     else onCambiar(estadoDe(valor) === 'solo' ? valor : []);
   };
 
-  // Los de la operación y, por si acaso, los que ya tenga guardados aunque hoy
-  // no salgan en el histórico.
-  const lista = ordenarTurnos([...new Set([...(turnos || []), ...marcados])]);
+  // Las horas de la operación y las que ya tenga guardadas aunque hoy no salgan
+  // en el histórico; o las 24, si se piden.
+  const lista = ordenarTurnos([...new Set([
+    ...(todas ? TODAS_LAS_HORAS : turnos || []), ...marcados,
+  ])]);
   const alternar = (turno) => {
     const nuevos = marcados.includes(turno)
       ? marcados.filter((t) => t !== turno)
@@ -65,6 +69,12 @@ const SelectorDeTurnos = ({
               {turno}
             </button>
           ))}
+          {!todas && lista.length < TODAS_LAS_HORAS.length && (
+            <button type="button" className="pw-disp-mas" onClick={() => setTodas(true)}
+              disabled={deshabilitado}>
+              Ver todas las horas
+            </button>
+          )}
           {marcados.length === 0 && (
             <small className="pw-disp-ayuda">Marca los turnos que trabaja; sin ninguno, descansa.</small>
           )}

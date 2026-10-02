@@ -1924,3 +1924,16 @@
   .pw-seg-opcion { border: 1px solid var(--kapital-border); border-radius: 8px; }
   .pw-seg-opcion:last-child { border-right: 1px solid var(--kapital-border); }
 }
+
+/* «Ver todas las horas»: un enlace, no otro turno más. */
+.pw-disp-mas {
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pw-disp-mas:hover:not(:disabled) { text-decoration: underline; }

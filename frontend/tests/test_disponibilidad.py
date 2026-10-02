@@ -18,35 +18,37 @@ HASTA = date(2026, 12, 31)
 
 
 class TurnosTestCase(unittest.TestCase):
-    def test_a_turno_is_written_with_two_digits_and_must_be_an_hour(self):
-        self.assertEqual(d.canonico("3:00"), "03:00")
-        self.assertEqual(d.canonico(" 22:01 "), "22:01")
+    """Los turnos van por horas: «el de las 3» es de 03:00 a 03:59."""
+
+    def test_a_turno_belongs_to_its_hour(self):
+        self.assertEqual(d.de_la_hora("3:40"), "03:00")
+        self.assertEqual(d.de_la_hora(" 22:01 "), "22:00")
         for malo in ("24:00", "7:60", "7", "", None, "07h00"):
-            self.assertIsNone(d.canonico(malo), malo)
+            self.assertIsNone(d.de_la_hora(malo), malo)
 
-    def test_22_00_and_22_01_are_the_same_turno_also_across_midnight(self):
-        self.assertTrue(d.mismo_turno("22:00", "22:01"))
-        self.assertTrue(d.mismo_turno("23:59", "00:00"))
-        self.assertFalse(d.mismo_turno("22:00", "22:02"))
-        self.assertFalse(d.mismo_turno("22:00", "basura"))
+    def test_two_turnos_are_the_same_if_they_are_in_the_same_hour(self):
+        self.assertTrue(d.misma_hora("22:00", "22:01"))
+        self.assertTrue(d.misma_hora("00:00", "00:40"))
+        self.assertFalse(d.misma_hora("23:59", "00:00"))
+        self.assertFalse(d.misma_hora("22:00", "basura"))
 
-    def test_the_turnos_to_choose_from_merge_22_01_into_22_00_and_go_in_working_order(self):
-        filas = [{"turno": "22:01", "veces": 457}, {"turno": "22:00", "veces": 26},
-                 {"turno": "03:00", "veces": 300}, {"turno": "23:00", "veces": 80},
-                 {"turno": "07:00", "veces": 40}, {"turno": "00:00", "veces": 90},
-                 {"turno": "08:30", "veces": 5}, {"turno": "x", "veces": 9}]
-        # La jornada empieza de noche: 22:00, 23:00, 00:00 … 07:00, y luego lo de la mañana.
-        self.assertEqual(d.turnos_de_la_operacion(filas),
-                         ["22:00", "23:00", "00:00", "03:00", "07:00", "08:30"])
-
-    def test_without_a_round_turno_the_most_frequent_one_names_the_group(self):
-        filas = [{"turno": "05:31", "veces": 3}, {"turno": "05:30", "veces": 10}]
-        self.assertEqual(d.turnos_de_la_operacion(filas), ["05:30"])
+    def test_the_hours_to_choose_from_are_the_used_ones_in_working_order(self):
+        # Así llegan de la base: 22:00 y 22:01, 00:30 y 00:40, y horas que casi no se usan.
+        filas = [{"turno": "22:01", "veces": 716}, {"turno": "22:00", "veces": 140},
+                 {"turno": "00:40", "veces": 428}, {"turno": "00:30", "veces": 224},
+                 {"turno": "03:00", "veces": 805}, {"turno": "07:00", "veces": 48},
+                 {"turno": "17:00", "veces": 324}, {"turno": "12:50", "veces": 1},
+                 {"turno": "21:35", "veces": 9}, {"turno": "x", "veces": 99}]
+        # Con al menos un pasajero al día en 45 días: fuera 12:00 y 21:00.
+        self.assertEqual(d.turnos_de_la_operacion(filas, minimo=45),
+                         ["17:00", "22:00", "00:00", "03:00", "07:00"])
+        self.assertEqual(len(d.turnos_de_la_operacion(filas)), 7)
 
 
 class ValidacionTestCase(unittest.TestCase):
     def test_the_week_goes_by_day_with_a_list_or_null(self):
-        semana = d.validar_semana({"6": [], "7": None, "1": ["3:00", "22:00", "03:00"]})
+        # Cada turno cuenta por su hora: 03:30 es el de las 3.
+        semana = d.validar_semana({"6": [], "7": None, "1": ["3:00", "22:00", "03:30"]})
         self.assertEqual(semana, {"6": [], "7": None, "1": ["22:00", "03:00"]})
         self.assertIsNone(d.validar_semana(None))
         for mala in ({"0": []}, {"8": []}, {"lunes": []}, {"1": "03:00"}, {"1": ["25:00"]}, ["1"]):
@@ -97,12 +99,15 @@ class MotivoTestCase(unittest.TestCase):
         self.assertEqual(d.motivo_no_disponible(self.REGLAS, "K027", "K-027", "06:00"),
                          "La unidad K-027 descansa este día (Vacaciones).")
 
-    def test_a_unit_with_some_turnos_says_which_and_counts_22_01_as_22_00(self):
+    def test_a_unit_with_some_turnos_says_which_and_counts_the_whole_hour(self):
         self.assertIsNone(d.motivo_no_disponible(self.REGLAS, "K030", "K030", "22:01"))
-        self.assertIsNone(d.motivo_no_disponible(self.REGLAS, "K030", "K030", "03:00"))
+        self.assertIsNone(d.motivo_no_disponible(self.REGLAS, "K030", "K030", "03:40"))
         # En el orden de la jornada, no en el alfabético con que los da la base.
         self.assertEqual(d.motivo_no_disponible(self.REGLAS, "K030", "K030", "06:00"),
-                         "La unidad K030 solo trabaja a las 22:00 y 03:00 este día.")
+                         "La unidad K030 solo trabaja los turnos de las 22:00 y 03:00 este día.")
+        solo_uno = {"K031": {"turnos": ["03:00"], "origen": "semana", "nota": None}}
+        self.assertEqual(d.motivo_no_disponible(solo_uno, "K031", "K031", "04:00"),
+                         "La unidad K031 solo trabaja el turno de las 03:00 este día.")
 
     def test_only_agregar_and_mover_take_someone_to_a_unit(self):
         cambios = [
@@ -138,12 +143,18 @@ class IaRespetaLaDisponibilidadTestCase(unittest.TestCase):
              "micro_zona": "A", "agentes": [agente(4, -12.05)]},
         ]}
 
-    def test_a_unit_knows_which_turnos_it_works(self):
-        seis = propuesta_ia.minuto_del_turno("06:00")
-        unidad = ruteo_vroom.Unidad("K002", 4, 0, 2000, turnos=[propuesta_ia.minuto_del_turno("07:00")])
-        self.assertFalse(unidad.trabaja(seis))
-        self.assertTrue(unidad.trabaja(propuesta_ia.minuto_del_turno("07:01")))
-        self.assertTrue(ruteo_vroom.Unidad("K001", 4, 0, 2000).trabaja(seis))
+    def test_a_unit_knows_which_hours_it_works(self):
+        minuto = propuesta_ia.minuto_del_turno
+        unidad = ruteo_vroom.Unidad("K002", 4, 0, 2000, turnos=[minuto("07:00"), minuto("00:00")])
+        self.assertFalse(unidad.trabaja(minuto("06:00")))
+        self.assertFalse(unidad.trabaja(minuto("06:59")))
+        self.assertTrue(unidad.trabaja(minuto("07:01")))
+        self.assertTrue(unidad.trabaja(minuto("07:59")))
+        self.assertFalse(unidad.trabaja(minuto("08:00")))
+        # A través de la medianoche: 00:40 es del turno de las 12.
+        self.assertTrue(unidad.trabaja(minuto("00:40")))
+        self.assertFalse(unidad.trabaja(minuto("23:59")))
+        self.assertTrue(ruteo_vroom.Unidad("K001", 4, 0, 2000).trabaja(minuto("06:00")))
 
     def test_a_resting_unit_is_left_out_and_the_others_get_only_their_turnos(self):
         solo_siete = {"K002": ["07:00"]}

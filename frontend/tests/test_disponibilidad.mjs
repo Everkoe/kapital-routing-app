@@ -11,7 +11,9 @@ import {
   estadoDe,
   etiquetaDeFecha,
   indexarDisponibilidad,
+  horaDe,
   marcarNoDisponibles,
+  mismaHora,
   motivoNoDisponible,
   ordenarTurnos,
   reglaEfectiva,
@@ -46,13 +48,25 @@ test('los turnos van en el orden en que se trabajan: de las 22:00 a las 07:00', 
     ['22:00', '23:00', '00:00', '03:00', '07:00']);
 });
 
+test('un turno cuenta por su hora: el de las 3 es de 03:00 a 03:59', () => {
+  assert.equal(horaDe('3:40'), 3);
+  assert.equal(horaDe('24:00'), null);
+  assert.equal(horaDe('basura'), null);
+  assert.equal(mismaHora('22:00', '22:01'), true);
+  assert.equal(mismaHora('00:00', '00:40'), true);
+  assert.equal(mismaHora('23:59', '00:00'), false);
+});
+
 test('el motivo dice lo mismo que el servidor', () => {
   assert.equal(motivoNoDisponible(REGLAS, 'K-027', '06:00'),
     'La unidad K-027 descansa este día (Vacaciones).');
   assert.equal(motivoNoDisponible(REGLAS, 'K030', '06:00'),
-    'La unidad K030 solo trabaja a las 22:00 y 03:00 este día.');
-  // 22:00 y 22:01 son el mismo turno; y quien no tiene regla trabaja todo.
+    'La unidad K030 solo trabaja los turnos de las 22:00 y 03:00 este día.');
+  assert.equal(motivoNoDisponible({ K031: { turnos: ['03:00'] } }, 'K031', '04:00'),
+    'La unidad K031 solo trabaja el turno de las 03:00 este día.');
+  // Toda la hora vale; y quien no tiene regla trabaja todo.
   assert.equal(motivoNoDisponible(REGLAS, 'K030', '22:01'), null);
+  assert.equal(motivoNoDisponible(REGLAS, 'K030', '03:40'), null);
   assert.equal(motivoNoDisponible(REGLAS, 'K028', '06:00'), null);
   assert.equal(motivoNoDisponible({}, 'K027', '06:00'), null);
 });

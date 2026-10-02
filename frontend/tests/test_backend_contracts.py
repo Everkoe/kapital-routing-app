@@ -4680,7 +4680,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         datos = {"semanal": [{"unidad": "K027", "dia": 7, "turnos": []}], "fechas": [],
                  "dias_con_plan": ["2026-10-03"],
                  "turnos": [{"turno": "22:01", "veces": 400}, {"turno": "22:00", "veces": 20},
-                            {"turno": "03:00", "veces": 90}]}
+                            {"turno": "03:00", "veces": 90}, {"turno": "12:50", "veces": 1}]}
         with (
             patch.object(backend, "_hoy_en_lima", return_value=backend.date(2026, 10, 2)),
             patch.object(backend, "_rpc_programador", new=AsyncMock(side_effect=lambda *a, **k: dict(datos))) as base,
@@ -4756,7 +4756,7 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
             aceptado = await self._llamar("POST", "/api/programador/plan/editar", token,
                                           json={"fecha": "2026-10-04", "cambios": [agregar_bien]})
         self.assertEqual(rechazado.status_code, 409)
-        self.assertIn("K027 solo trabaja a las 03:00", rechazado.json()["detail"])
+        self.assertIn("K027 solo trabaja el turno de las 03:00", rechazado.json()["detail"])
         self.assertEqual(aceptado.status_code, 200)
         self.assertEqual(llamadas.count("editar_programacion"), 1)
 

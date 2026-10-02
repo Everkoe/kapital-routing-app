@@ -9,11 +9,13 @@ que deshace la transacción entera: no deja rastro. Si el día elegido ya tiene
 plan, no hace nada.
 
     python scripts/probar_disponibilidad.py
-    python scripts/probar_disponibilidad.py --con-migracion   # antes de aplicar la 018
+    python scripts/probar_disponibilidad.py --con-migracion   # antes de aplicar la 019
 
-Con `--con-migracion` manda la 018 en la misma llamada: se prueba sin haberla
-aplicado y se deshace con todo lo demás. Desde la raíz del repositorio, con el
-entorno de `frontend/`. Necesita `SUPABASE_ACCESS_TOKEN`, como `aplicar_sql.py`.
+Con `--con-migracion` manda la migración más reciente de la disponibilidad (la
+019; la 018 tiene que estar aplicada) en la misma llamada: se prueba sin
+haberla aplicado y se deshace con todo lo demás. Desde la raíz del
+repositorio, con el entorno de `frontend/`. Necesita `SUPABASE_ACCESS_TOKEN`,
+como `aplicar_sql.py`.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ import aplicar_sql  # noqa: E402
 
 SENAL = "PRUEBA_TERMINADA"
 SUPABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase")
-MIGRACION = "018_disponibilidad_unidades.sql"
+MIGRACION = "019_disponibilidad_por_horas.sql"
 
 BLOQUE = r"""
 do $prueba$
@@ -71,7 +73,8 @@ begin
      and _clave_normalizada(p.codigo_vehiculo) <> clave_v
    group by 1 order by 2 desc, 1 limit 1;
   clave_w := _clave_normalizada(w.codigo_vehiculo);
-  turno_a := w.primero;
+  -- Las reglas van por horas (019): 	urno_a es la hora de su primer turno.
+  turno_a := lpad(split_part(w.primero, ':', 1), 2, '0') || ':00';
 
   res := res || jsonb_build_object('sin_regla',
     (not (disponibilidad_del_dia(dia) ? clave_v))::int);
@@ -110,12 +113,15 @@ begin
     select count(*) from programacion p
      where p.fecha = dia and p.estado = 'programado'
        and _clave_normalizada(p.codigo_vehiculo) = clave_w
-       and _mismo_turno(p.turno, turno_a)));
+       and _misma_hora(p.turno, turno_a)));
   res := res || jsonb_build_object('los_otros_turnos_salen', (not exists (
     select 1 from programacion p
      where p.fecha = dia and p.estado = 'programado'
        and _clave_normalizada(p.codigo_vehiculo) = clave_w
-       and not _mismo_turno(p.turno, turno_a)))::int);
+       and not _misma_hora(p.turno, turno_a)))::int);
+  res := res || jsonb_build_object('misma_hora', (
+    _misma_hora('22:01', '22:00') and _misma_hora('00:40', '00:00')
+    and not _misma_hora('23:59', '00:00') and not _misma_hora('basura', '00:00'))::int);
   res := res || jsonb_build_object('regla_semanal', (
     disponibilidad_del_dia(dia) -> clave_w ->> 'origen' = 'semana')::int);
 
@@ -207,7 +213,7 @@ MINIMOS = {
     "sembrar": 1, "sin_regla": 1, "descanso_retira": 1, "no_queda_nadie": 1,
     "a_pendientes": 1, "retirados_sin_baja": 1, "regla_del_dia": 1, "otra_vez_nada": 1,
     "solo_su_turno_sigue": 1, "los_otros_turnos_salen": 1, "regla_semanal": 1,
-    "fecha_anula_semana": 1, "vuelve_a_su_semana": 1, "semana_quitada": 1, "recolocado": 1,
+    "misma_hora": 1, "fecha_anula_semana": 1, "vuelve_a_su_semana": 1, "semana_quitada": 1, "recolocado": 1,
     "pasado_no": 1, "turno_malo_no": 1, "dia_malo_no": 1, "clave_sin_normalizar_no": 1,
     "sin_plan_nada": 1, "leer": 1, "cerradas_a_anon": 1,
 }

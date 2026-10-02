@@ -7086,7 +7086,9 @@ async def leer_disponibilidad(session_token: SessionCookie = None):
     })
     if not isinstance(datos, dict):
         datos = {}
-    datos["turnos"] = disponibilidad.turnos_de_la_operacion(datos.get("turnos") or [])
+    # Las horas con al menos un pasajero al día de media: las demás casi no se usan.
+    datos["turnos"] = disponibilidad.turnos_de_la_operacion(datos.get("turnos") or [],
+                                                            minimo=DIAS_DE_TURNOS)
     datos["hoy"] = hoy.isoformat()
     datos["hasta"] = hasta.isoformat()
     datos["puede_editar"] = actor is None or actor.get("rol") in _ROLES_DISPONIBILIDAD
