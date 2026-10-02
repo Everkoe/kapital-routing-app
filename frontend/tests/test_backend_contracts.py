@@ -4225,6 +4225,38 @@ class BackendStateTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chofer["perfil_conductor"]["camoReverso"], camo)
         self.assertEqual(backend.notifications_db, [], "no hay nada que revisar")
 
+    async def test_administration_uploads_documents_for_a_driver_who_never_did_the_signup(self):
+        """«El conductor no tiene perfil configurado»: los importados de las bases no lo tienen.
+
+        Administración da de alta a quien no se maneja con la aplicación (la ficha
+        lo dice: «lo que llenes aquí queda como su alta»), así que su primer
+        documento le crea el perfil, igual que un dato personal. El conductor sin
+        perfil, en cambio, sigue pasando por su alta.
+        """
+        backend.AUTH_ENFORCED = True
+        importado, token_chofer = await self._sesion("chofer@k.com", rol="Conductor", unidad_id="KV-098")
+        _, token_admin = await self._sesion("admin@k.com", rol="Administración")
+        ficha = {"name": "ficha.pdf", "path": "KV-098/recordConductor-1.pdf"}
+        with (
+            patch.object(backend, "reload_db", new=AsyncMock()),
+            patch.object(backend, "reload_notifications", new=AsyncMock()),
+            patch.object(backend, "_load_compat_users", new=AsyncMock()),
+            patch.object(backend, "persist_users_only", new=AsyncMock()) as guardar,
+        ):
+            del_conductor = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token_chofer,
+                json={"email": "chofer@k.com", "docs": {"recordConductor": ficha}})
+            self.assertEqual(del_conductor.status_code, 400)
+            self.assertNotIn("perfil_conductor", importado)
+            guardar.assert_not_awaited()
+
+            de_admin = await self._llamar(
+                "POST", "/api/conductor/resubmit-docs", token_admin,
+                json={"email": "chofer@k.com", "docs": {"recordConductor": ficha}, "uploaded_by": "admin"})
+        self.assertEqual(de_admin.status_code, 200, de_admin.text)
+        self.assertEqual(importado["perfil_conductor"]["recordConductor"], ficha)
+        guardar.assert_awaited()
+
     async def test_a_driver_only_requests_the_fields_the_profile_offers(self):
         """El campo lo elegía el conductor: podía pedir sus revisiones, el CAMO o su estado."""
         backend.AUTH_ENFORCED = True
